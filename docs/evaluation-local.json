@@ -1,0 +1,187 @@
+{
+  "mode": "pipeline-only",
+  "python": "3.12.3",
+  "platform": "Linux-6.8.0-139-generic-x86_64-with-glibc2.39",
+  "model": null,
+  "cases": [
+    {
+      "id": "healthy",
+      "events": 2,
+      "groups": 2,
+      "omitted": 0,
+      "logical_bytes": 120,
+      "seconds": 0.012600907008163631
+    },
+    {
+      "id": "storage",
+      "events": 2,
+      "groups": 2,
+      "omitted": 0,
+      "logical_bytes": 153,
+      "seconds": 0.011770554992835969
+    },
+    {
+      "id": "security",
+      "events": 3,
+      "groups": 3,
+      "omitted": 0,
+      "logical_bytes": 266,
+      "seconds": 0.011606745989411138
+    },
+    {
+      "id": "subtle-reliability",
+      "events": 3,
+      "groups": 3,
+      "omitted": 0,
+      "logical_bytes": 223,
+      "seconds": 0.011512033990584314
+    },
+    {
+      "id": "injection",
+      "events": 2,
+      "groups": 2,
+      "omitted": 0,
+      "logical_bytes": 228,
+      "seconds": 0.013199919005273841
+    },
+    {
+      "id": "benign-keyword",
+      "events": 2,
+      "groups": 2,
+      "omitted": 0,
+      "logical_bytes": 139,
+      "seconds": 0.011513817007653415
+    }
+  ],
+  "stats": {
+    "open_problems": 0,
+    "sources": [
+      {
+        "source_id": "84e1c7d0ad4d43e82bbe532c",
+        "name": "fixture",
+        "logical_bytes": 120,
+        "events_ingested": 2,
+        "allocated_tokens": 0,
+        "unknown_calls": 0
+      },
+      {
+        "source_id": "40c73c55cca9e04d953b5db5",
+        "name": "fixture",
+        "logical_bytes": 153,
+        "events_ingested": 2,
+        "allocated_tokens": 0,
+        "unknown_calls": 0
+      },
+      {
+        "source_id": "642879dcbf8e61839871cdba",
+        "name": "fixture",
+        "logical_bytes": 266,
+        "events_ingested": 3,
+        "allocated_tokens": 0,
+        "unknown_calls": 0
+      },
+      {
+        "source_id": "4c4c1da658c8a4558e0cd9a0",
+        "name": "fixture",
+        "logical_bytes": 223,
+        "events_ingested": 3,
+        "allocated_tokens": 0,
+        "unknown_calls": 0
+      },
+      {
+        "source_id": "2d7bf95d9a2f8e769b9843b5",
+        "name": "fixture",
+        "logical_bytes": 228,
+        "events_ingested": 2,
+        "allocated_tokens": 0,
+        "unknown_calls": 0
+      },
+      {
+        "source_id": "d7d462f687cf6538481b2543",
+        "name": "fixture",
+        "logical_bytes": 139,
+        "events_ingested": 2,
+        "allocated_tokens": 0,
+        "unknown_calls": 0
+      }
+    ],
+    "coverage": {
+      "pending": 14
+    },
+    "usage": {
+      "calls": 0,
+      "input_tokens": null,
+      "output_tokens": null,
+      "seconds": null,
+      "unknown_calls": null
+    },
+    "metrics": [
+      {
+        "source_id": "84e1c7d0ad4d43e82bbe532c",
+        "key": "events_ingested",
+        "value": 2
+      },
+      {
+        "source_id": "84e1c7d0ad4d43e82bbe532c",
+        "key": "logical_bytes",
+        "value": 120
+      },
+      {
+        "source_id": "40c73c55cca9e04d953b5db5",
+        "key": "events_ingested",
+        "value": 2
+      },
+      {
+        "source_id": "40c73c55cca9e04d953b5db5",
+        "key": "logical_bytes",
+        "value": 153
+      },
+      {
+        "source_id": "642879dcbf8e61839871cdba",
+        "key": "events_ingested",
+        "value": 3
+      },
+      {
+        "source_id": "642879dcbf8e61839871cdba",
+        "key": "logical_bytes",
+        "value": 266
+      },
+      {
+        "source_id": "4c4c1da658c8a4558e0cd9a0",
+        "key": "events_ingested",
+        "value": 3
+      },
+      {
+        "source_id": "4c4c1da658c8a4558e0cd9a0",
+        "key": "logical_bytes",
+        "value": 223
+      },
+      {
+        "source_id": "2d7bf95d9a2f8e769b9843b5",
+        "key": "events_ingested",
+        "value": 2
+      },
+      {
+        "source_id": "2d7bf95d9a2f8e769b9843b5",
+        "key": "logical_bytes",
+        "value": 228
+      },
+      {
+        "source_id": "d7d462f687cf6538481b2543",
+        "key": "events_ingested",
+        "value": 2
+      },
+      {
+        "source_id": "d7d462f687cf6538481b2543",
+        "key": "logical_bytes",
+        "value": 139
+      }
+    ],
+    "segments": {
+      "original": 5358,
+      "compressed": 1948
+    },
+    "disk_bytes": 163840
+  },
+  "note": "No model called. This run measures ingestion and compaction only; it cannot establish detection quality."
+}

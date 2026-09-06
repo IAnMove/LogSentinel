@@ -1,105 +1,77 @@
 # LogSentinel
 
-Monitor experimental de logs Linux con clasificación LLM local, memoria de supresiones y un primer perfil temporal de accesos SSH. **No es un SOC autónomo ni una garantía de detección.** Las recomendaciones del LLM no se ejecutan.
+Portal local para revisar logs de Linux con un LLM, detectar problemas de funcionamiento y seguridad y conservar la evidencia. Cada fuente pertenece a una máquina. El modelo propone hallazgos y filtros; no ejecuta comandos ni cambia reglas por su cuenta.
 
-## Instalación y pruebas
+## Instalar y abrir
+
+Linux y Python 3.10 o superior:
 
 ```bash
-cd security-agent
-uv venv --python 3.11 .venv  # solo si todavía no existe
-uv pip install --python .venv/bin/python -e '.[dev]'
+python3 -m venv .venv
+.venv/bin/python -m pip install -e '.[dev]'
+.venv/bin/logsentinel portal
+```
+
+Abre `http://127.0.0.1:8765` e introduce la clave que muestra la terminal. Los datos se guardan en `~/.local/share/logsentinel/portal`. Usa `--data-dir /ruta` para otra instancia. El portal escucha exclusivamente en loopback, requiere sesión y comprueba origen y CSRF.
+
+1. En **Máquinas**, crea una ficha o utiliza **Detectar este equipo**.
+2. En **Fuentes**, elige archivo, carpeta, journal local o recepción remota. Revisa los permisos del usuario que ejecuta el portal. La captura se activa expresamente; **Leer ahora** permite una prueba manual.
+3. En **Modelo y análisis**, configura Ollama o una API compatible, modelo, contexto efectivo, cadencia, sensibilidad y presupuesto. Prueba el modelo con datos sintéticos y activa el análisis periódico cuando estés listo. El servicio del modelo se instala por separado.
+4. Consulta **Problemas**, su evidencia y **Copiar prompt**. **No notificar** mantiene el análisis; una regla de exclusión evita enviar las líneas coincidentes al modelo.
+5. Configura destinos en **Notificaciones**. Guardar no envía mensajes; **Enviar prueba** sí. Revisa los resultados en **Actividad**.
+
+Los servidores LLM fuera de loopback requieren activar la autorización de envío remoto. Las claves de API y destinos son de escritura: el portal no las devuelve al navegador. Se almacenan en la base local con permisos de propietario, sin cifrado de aplicación. Los backups también contienen estas credenciales. La ocultación de secretos reconocibles no garantiza detectar todo dato sensible dentro de un log.
+
+## Lo que incluye
+
+- Máquinas, fuentes, histórico de originales, problemas con apariciones y revisiones; resolver, silenciar avisos y copiar contexto.
+- Archivo, carpeta, journal y receptor HTTP autenticado por fuente; importación de gzip, xz y bz2 estables. No modifica ni rota los archivos de otros programas.
+- Segmentos inmutables comprimidos dentro de SQLite: datos, índices y cursores se confirman juntos. La recepción no espera al LLM ni al cierre de una conexión SSH.
+- Revisión general sin depender de palabras clave, compactación de repeticiones y segunda pasada de evidencia con líneas vecinas. Referencias fuera del contexto se rechazan.
+- Presupuesto por ciclo, reparto entre máquinas/fuentes, reintentos acotados y aviso de cobertura reducida. **Sin revisar** nunca significa **sin problemas**.
+- Filtros regex con tiempo limitado, IP/CIDR y problema concreto; previsualización de una muestra antes de aplicar. Chat acotado al histórico de una máquina, con historial y propuestas de filtros que requieren guardar.
+- Sistema, archivo local, Telegram, Slack, Discord, Hermes, n8n y webhook genérico. Cola persistente, alcance por máquina/fuente, umbral, enfriamiento, reintentos y resultado desconocido ante interrupción.
+- Volumen original/comprimido, cobertura y tokens por máquina; atribución estimada por fuente cuando se comparten llamadas. El uso no reportado se muestra como desconocido.
+- Backup coherente y restauración en un directorio nuevo.
+
+## Enviar desde otro equipo
+
+En el portal crea una fuente **Recepción remota**, actívala y genera su token. Para mantener el receptor privado, en el emisor abre un túnel hacia el servidor:
+
+```bash
+ssh -N -L 9876:127.0.0.1:8765 usuario@servidor
+```
+
+En otra terminal del emisor, instala LogSentinel y ejecuta:
+
+```bash
+read -rs LOGSENTINEL_PUSH_TOKEN
+export LOGSENTINEL_PUSH_TOKEN
+logsentinel forward /ruta/app.log --receiver http://127.0.0.1:9876 \
+  --source-id ID_DEL_PORTAL --spool ~/.local/share/logsentinel/emisor-app
+```
+
+El emisor mantiene IDs y cola locales. El receptor confirma solo después de persistir; un ACK perdido se puede reintentar sin duplicar eventos retenidos. Cada archivo necesita su propio spool. `--once` envía un lote para pruebas. No reutilices un spool para otra ruta. La cuota llena impide avanzar el cursor; conserva los archivos originales hasta resolverla. El emisor no configura SSH ni un proxy TLS automáticamente.
+
+## Rotación, límites y notificaciones
+
+Consulta [Operación](docs/OPERATIONS.md) para límites, rotación y recuperación, y [Estado de implementación](docs/IMPLEMENTATION.md) para lo pendiente. El [plan completo](PRODUCT_DIRECTION.md) conserva propuestas de producto que no deben confundirse con garantías de esta versión.
+
+Hermes recibe un webhook firmado V2 y un identificador de entrega estable. La plantilla del portal propone una ruta `deliver_only`; requiere configurar el gateway externo. n8n es opcional: la plantilla crea una entrada autenticada y un punto para conectar el destino elegido. No despliega ni activa n8n. Los proveedores externos requieren sus credenciales.
+
+## Verificar
+
+```bash
 .venv/bin/python -m pytest -q
-.venv/bin/logsentinel --help
+.venv/bin/python scripts/evaluate_portal.py
+# Evaluación real: necesita el modelo disponible
+.venv/bin/python scripts/evaluate_portal.py --live --model MODELO_INSTALADO
+# Recorrido real de interfaz con modelo simulado, sin avisos remotos
+.venv/bin/python -m pip install playwright
+.venv/bin/python -m playwright install chromium
+.venv/bin/python scripts/portal_smoke.py
 ```
 
-Los tests usan datos sintéticos y temporales. No requieren Ollama ni notificaciones reales.
+`constraints-tested-py312.txt` registra las versiones del entorno comprobado; úsalo como constraints de instalación en Python 3.12. La CI añade una matriz de versiones de Python; sus resultados en GitHub aún deben ejecutarse tras publicar los commits.
 
-## Demostración de hábitos sin efectos externos
-
-```bash
-.venv/bin/python scripts/behavior_demo.py
-```
-
-Crea una base temporal, observa 20 accesos de diario a las 09:00 UTC, reinicia el motor y evalúa un sábado a las 03:00 UTC. Imprime evidencia calculada: `unseen_day_type`, `unusual_hour`, referencias y tamaño del historial. No lee tus logs ni modifica tu configuración.
-
-Para consultar además el modelo local con esos mismos datos sintéticos:
-
-```bash
-.venv/bin/python scripts/behavior_demo.py --llm
-```
-
-Esta opción usa Ollama en localhost:11434 y deepseek-r1:8b; necesita el modelo instalado, consume recursos de inferencia y muestra explícitamente si se ha usado fallback. Un fallback no demuestra capacidad de análisis del modelo.
-
-## Configuración y uso real
-
-```bash
-.venv/bin/logsentinel config init --path /ruta/nueva/config.yaml
-.venv/bin/logsentinel config show --config /ruta/nueva/config.yaml
-.venv/bin/logsentinel run --config /ruta/nueva/config.yaml
-.venv/bin/logsentinel scan /ruta/auth.log --lines 1000 --config /ruta/nueva/config.yaml
-.venv/bin/logsentinel alerts list --config /ruta/nueva/config.yaml
-```
-
-No sobrescribas una configuración existente con `config init` sin copia previa. `run`, `scan`, `simulate` y `test` pueden usar el LLM y los canales configurados; no son comandos de prueba sin efectos externos. No ejecutes como root para solventar permisos: concede solo lectura de los logs necesarios. El modo proveedor `openai` puede enviar contenido a un servidor remoto: revisa privacidad antes de activarlo.
-
-Configuración relevante (fragmento que se combina con los valores por defecto):
-
-```yaml
-sources:
-  journald:
-    enabled: true
-    priority: info
-    units: []
-behavior:
-  enabled: true
-  timezone: Europe/Madrid
-  min_events: 20
-  min_days: 5
-  min_span_days: 14
-  hour_tolerance: 1
-  retention_days: 90
-  max_events: 100000
-```
-
-El valor de prioridad `info` recoge INFO y niveles más graves; los accesos SSH aceptados suelen ser INFO. Las configuraciones antiguas con `warning..emerg` no se migran automáticamente: no permiten construir estos hábitos desde journald. Las unidades y rutas deben corresponder a tus servicios reales. UTC es la zona de perfil por defecto; establece tu zona IANA para horarios civiles y cambios de hora.
-
-Una configuración explícita inexistente o inválida produce error: no se sustituye silenciosamente por una configuración que pueda activar destinos o rutas diferentes.
-
-## Arquitectura
-
-1. Collectors: journald JSON y lectura/tailing de archivos.
-2. Normalización: evento, host, servicio, timestamp, mensaje.
-3. Perfil temporal: observa accesos SSH aceptados antes del filtro de ruido.
-4. Prefiltro y agregador: candidatos por señales explícitas o desviación temporal; agrupa ráfagas por host/servicio/firma.
-5. Memoria de reglas: supresiones explícitas del administrador. No equivale al historial de comportamiento.
-6. LLM: recibe incidente y evidencia histórica; emite un JSON validado. Una respuesta inválida no debe silenciar el incidente.
-7. Persistencia y notificación: SQLite almacena alertas; los canales son independientes. NEW no significa entregada; NOTIFIED requiere algún canal confirmado.
-
-SQLite se ubica por defecto en `~/.local/share/logsentinel/memory.db`. Allí conviven reglas, alertas y la tabla `behavior_events`; no es la memoria de Hermes ni de Gemini. Los logs pueden contener datos sensibles. Limita permisos, acceso y retención; no compartas la base indiscriminadamente.
-
-## Qué aprende y qué no
-
-La primera implementación perfila éxitos SSH por host + servicio SSH + usuario + IP (IPv4/IPv6). Compara el evento con observaciones estrictamente anteriores, separa diario/fin de semana y comprueba distancia circular entre horas. Requiere volumen, días distintos y extensión temporal mínimos. Conserva una ventana acotada y deduplica coincidencias exactas de entidad, instante y mensaje.
-
-- `insufficient_history`: no hay evidencia suficiente para describir normalidad.
-- `observed_schedule`: encaja en horarios observados; **no significa acceso autorizado**.
-- `unusual`: día u hora no observados con soporte suficiente; **no significa ataque**.
-
-Las desviaciones se envían al análisis LLM y no entrenan automáticamente el perfil. Las reglas rápidas de supresión no ocultan la categoría ANOMALY. El arranque del perfil sigue siendo no verificado: un atacante presente durante el aprendizaje puede contaminarlo. La cuarentena no soluciona todo el envenenamiento ni adapta automáticamente cambios legítimos de horario.
-
-No se aprende con timestamps inferidos/ambiguos ni excesivamente futuros. La deduplicación exacta no resuelve diferencias de precisión entre fuentes. Los IDs de muestra identifican observaciones compactas; no son enlaces a un archivo forense completo. Días con accesos no equivalen a días con recolección continua. Una IP detrás de NAT/VPN/DHCP no es una identidad.
-
-## Próximos pasos de producto
-
-Para superar de verdad las reglas con redacción LLM hace falta un ciclo de investigación controlado:
-
-- Registro normalizado duradero y consultable; cursor de journald, offsets de archivo y recuperación tras caídas.
-- Cobertura de sensores, huecos de recolección y evidencia original verificable.
-- Perfiles por identidad/dispositivo, frecuencia, destinos, comandos y sesiones; correlación SSH → sudo → proceso → conexión saliente.
-- LLM con herramientas de consulta de solo lectura, presupuesto, consultas parametrizadas y referencias exigidas.
-- Casos persistentes con hipótesis, evidencia a favor/en contra, explicaciones benignas y siguientes comprobaciones.
-- Feedback diferenciado: falsa alarma, cambio legítimo de hábito y autorización temporal; no convertir todo en “ignorar para siempre”.
-- Evaluación con datasets etiquetados: falsos positivos, detecciones perdidas, latencia, coste y resistencia a prompt injection.
-- Cualquier bloqueo, aislamiento o cambio de permisos requiere aprobación humana, auditoría y reversión.
-
-Consulta `plan.md` para el registro de revisión, correcciones, pruebas reales y handoff a Gemini.
+La CLI anterior se conserva como compatibilidad. Sus instrucciones están en [Legacy CLI](docs/LEGACY_CLI.md); usa otra base y no es el motor del portal. El experimento de horarios SSH queda desactivado por defecto.
