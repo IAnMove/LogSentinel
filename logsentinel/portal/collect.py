@@ -1,6 +1,8 @@
 """Bounded file imports and journal polling with durable source checkpoints."""
 from __future__ import annotations
 import gzip
+import bz2
+import lzma
 import hashlib
 import json
 import os
@@ -62,7 +64,9 @@ class Collector:
                     candidate=json.loads(row[0])
                     if candidate.get('identity')==sig:
                         old=candidate;break
-        compressed=path.suffix=='.gz'
+        if path.suffix in ('.zst','.zip','.tar'):
+            raise ValueError('Unsupported archive; supply plain text, gzip, xz or bz2')
+        compressed=path.suffix in ('.gz','.xz','.bz2')
         if compressed:
             stamp=[stat.st_size,stat.st_mtime_ns]
             if old.get('stamp')!=stamp:
@@ -74,7 +78,7 @@ class Collector:
             digest=hashlib.sha256(path.read_bytes()).hexdigest()
             generation='gz:'+digest
             offset=old.get('offset',0)
-            opener=gzip.open
+            opener={'.gz':gzip.open,'.xz':lzma.open,'.bz2':bz2.open}[path.suffix]
         else:
             generation=old.get('generation',f'{stat.st_dev}:{stat.st_ino}:{stat.st_ctime_ns}')
             opener=open

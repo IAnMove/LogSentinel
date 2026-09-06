@@ -1,0 +1,59 @@
+import asyncio
+import pytest
+from logsentinel.portal.store import Store
+from logsentinel.portal.models import Machine
+from logsentinel.portal.analysis import Analyzer,compact
+from logsentinel.portal.rules import redact
+
+@pytest.fixture
+def data(tmp_path):
+    s=Store(tmp_path);m=s.put('machine',Machine(name='server').model_dump())
+    source={'id':'s','machine_id':m}
+    s.ingest(source,[{'origin':'1','message':'connection pool exhausted','service':'app'}, {'origin':'2','message':'a different problem','service':'disk'}])
+    return s,m
+
+@pytest.mark.asyncio
+async def test_multiple_findings_persist_and_references_are_checked(data):
+    s,m=data;a=Analyzer(s)
+    calls=0
+    async def fake(payload,**kwargs):
+        nonlocal calls;calls+=1
+        entries=payload.get('groups',payload.get('events',[]))
+        return {'findings':[{'title':e.get('message','x'),'summary':'check evidence','severity':'HIGH','category':'reliability','evidence_ids':[e['id']]} for e in entries]}
+    a.client.call=fake
+    await a.cycle()
+    assert len(s.rows('problems'))==2
+    assert all(s.problem(p['id'])['evidence'] for p in s.rows('problems'))
+    assert calls==2
+    assert s.rows('jobs')[0]['status']=='done'
+
+@pytest.mark.asyncio
+async def test_bad_references_do_not_turn_into_clean_analysis(data):
+    s,m=data;a=Analyzer(s)
+    async def fake(*args,**kwargs):return {'findings':[{'title':'x','summary':'x','severity':'HIGH','category':'x','evidence_ids':['invented']}]}
+    a.client.call=fake
+    await a.cycle()
+    assert s.rows('problems')==[]
+    assert s.rows('jobs')[0]['status']=='retry'
+    assert s.events()[0]['status']=='error'
+
+@pytest.mark.asyncio
+async def test_cancellation_retains_recoverable_job(data):
+    s,m=data;a=Analyzer(s)
+    async def fake(*args,**kwargs):raise asyncio.CancelledError()
+    a.client.call=fake
+    with pytest.raises(asyncio.CancelledError):await a.cycle()
+    assert s.rows('jobs')[0]['status']=='retry'
+    assert len(s.events())==2
+
+def test_compaction_preserves_count_and_ids():
+    events=[{'id':str(i),'source_id':'s','service':'x','message':'same','timestamp':str(i)} for i in range(100)]
+    groups,ids,omitted=compact(events,1000)
+    assert groups[0]['count']==100
+    assert len(groups[0]['event_ids'])==100
+    assert groups[0]['first']=='0' and groups[0]['last']=='99'
+    assert not omitted
+
+def test_redaction():
+    assert 'abc123' not in redact('Authorization: Bearer abc123')
+    assert 'hunter2' not in redact('password=hunter2')
