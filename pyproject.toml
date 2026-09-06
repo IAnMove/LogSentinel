@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "logsentinel"
+version = "1.0.0"
+description = "Intelligent Linux log monitoring and security sentinel powered by local LLMs with adaptive memory"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+authors = [
+    { name = "LogSentinel Team" }
+]
+keywords = ["security", "logs", "llm", "ollama", "journalctl", "syslog", "monitoring", "memory"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: POSIX :: Linux",
+    "Topic :: System :: Monitoring",
+    "Topic :: Security",
+]
+dependencies = [
+    "pydantic>=2.0.0",
+    "pyyaml>=6.0",
+    "httpx>=0.25.0",
+    "rich>=13.0.0",
+    "typer>=0.9.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.23.0",
+]
+
+[project.scripts]
+logsentinel = "logsentinel.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["logsentinel*"]
+exclude = ["tests*", "systemd*"]
