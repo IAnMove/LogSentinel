@@ -78,6 +78,7 @@ def create_app(directory,background=True):
         finally:
             for task in tasks:task.cancel()
             await asyncio.gather(*tasks,return_exceptions=True)
+            collector.close()
             lockfile.close()
 
     app=FastAPI(title='LogSentinel',lifespan=lifespan,docs_url=None,redoc_url=None,openapi_url=None)

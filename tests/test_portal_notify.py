@@ -43,3 +43,16 @@ async def test_cancelled_send_is_unknown_and_worker_stops(tmp_path):
     outbox.send=interrupted
     with pytest.raises(asyncio.CancelledError):await outbox.drain()
     assert s.rows('deliveries')[0]['status']=='unknown'
+
+@pytest.mark.asyncio
+async def test_file_destination_rotation_compresses_and_bounds_archives(tmp_path):
+    import gzip
+    s=Store(tmp_path);d=Destination(name='file',kind='file',rotation_mb=1,keep_archives=2).model_dump()
+    folder=tmp_path/'notifications';folder.mkdir();path=folder/'alerts.jsonl'
+    outbox=Outbox(s)
+    for i in range(3):
+        path.write_text(str(i)*1024*1024)
+        await outbox.send(d,{'delivery_id':str(i)})
+    assert gzip.decompress((folder/'alerts.jsonl.1.gz').read_bytes()).startswith(b'2')
+    assert gzip.decompress((folder/'alerts.jsonl.2.gz').read_bytes()).startswith(b'1')
+    assert not (folder/'alerts.jsonl.3.gz').exists()

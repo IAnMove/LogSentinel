@@ -9,6 +9,8 @@ import os
 import shutil
 import subprocess
 import time
+import threading
+from contextlib import nullcontext
 from pathlib import Path
 from logsentinel.collectors.file_tailer import FileTailerCollector
 from logsentinel.collectors.journald import JournaldCollector
@@ -33,10 +35,24 @@ def normalize(line,path,origin):
     return dict(entry.model_dump(mode='json'),origin=origin)
 
 class Collector:
-    def __init__(self,store):self.store=store
+    def __init__(self,store):
+        self.store=store;self.handles={};self.retired=[];self.lock=threading.RLock()
+
+    def close(self):
+        with self.lock:
+            for handle in self.handles.values():handle.close()
+            for item in self.retired:item['handle'].close()
+            self.handles.clear();self.retired.clear()
 
     def poll(self,source):
-        if not source['enabled']:return 0
+        with self.lock:return self._poll(source)
+
+    def _poll(self,source):
+        if not source['enabled']:
+            for key in [k for k in self.handles if k[0]==source['id']]:self.handles.pop(key).close()
+            for item in list(self.retired):
+                if item['source']==source['id']:item['handle'].close();self.retired.remove(item)
+            return 0
         total=0
         try:
             if source['kind']=='journald':total=self.journal(source)
@@ -48,14 +64,42 @@ class Collector:
                 for path in paths:
                     if source['kind']=='folder' and (path.is_symlink() or not path.resolve().is_relative_to(root)):
                         continue
-                    if path.is_file():total+=self.file(source,path)
+                    if path.suffix in ('.gz','.xz','.bz2','.zst','.zip','.tar'):
+                        if path.is_file():total+=self.file(source,path)
+                    elif path.is_file() or (source['id'],str(path)) in self.handles:total+=self.plain(source,path)
+                for item in list(self.retired):
+                    if item['source']!=source['id']:continue
+                    total+=self.file(source,item['path'],handle=item['handle'],cursor_key=item['key'])
+                    size=os.fstat(item['handle'].fileno()).st_size
+                    if size!=item['size']:item.update(size=size,quiet=time.monotonic())
+                    if time.monotonic()-item['quiet']>300:
+                        item['handle'].close();self.retired.remove(item)
+                        self.store.metric(source['id'],'rotation_watch_closed',1)
             self.store.set_meta('health:'+source['id'],dumps({'status':'ok','checked':time.time(),'new_events':total}))
         except Exception as exc:
             self.store.set_meta('health:'+source['id'],dumps({'status':'error','checked':time.time(),'error':str(exc)[:300]}))
         return total
 
-    def file(self,source,path):
-        stat=path.stat();key=str(path)
+    def plain(self,source,path):
+        key=(source['id'],str(path));handle=self.handles.get(key)
+        try:current=path.stat()
+        except FileNotFoundError:current=None
+        if handle and current:
+            previous=os.fstat(handle.fileno())
+            if (previous.st_dev,previous.st_ino)!=(current.st_dev,current.st_ino):
+                retired_key=str(path)+'#rotated:'+str(previous.st_dev)+':'+str(previous.st_ino)
+                cursor=self.store.cursor(source['id'],str(path))
+                if cursor:self.store.ingest(source,[],retired_key,cursor)
+                self.retired.append({'source':source['id'],'path':path,'key':retired_key,'handle':handle,'size':previous.st_size,'quiet':time.monotonic()})
+                del self.handles[key];handle=None
+        if handle is None:
+            if current is None:return 0
+            if len(self.handles)+len(self.retired)>=128:raise OSError('Open source/rotation handle limit reached; reduce sources or rotation frequency')
+            handle=path.open('rb');self.handles[key]=handle
+        return self.file(source,path,handle=handle)
+
+    def file(self,source,path,handle=None,cursor_key=None):
+        stat=os.fstat(handle.fileno()) if handle else path.stat();key=cursor_key or str(path)
         old=self.store.cursor(source['id'],key) or {}
         sig=[stat.st_dev,stat.st_ino];offset=0
         if not old:
@@ -81,10 +125,10 @@ class Collector:
             opener={'.gz':gzip.open,'.xz':lzma.open,'.bz2':bz2.open}[path.suffix]
         else:
             generation=old.get('generation',f'{stat.st_dev}:{stat.st_ino}:{stat.st_ctime_ns}')
-            opener=open
+            opener=(lambda *args:nullcontext(handle)) if handle else open
             if old.get('identity')==sig and stat.st_size>=old.get('offset',0):
                 offset=old.get('offset',0)
-                with path.open('rb') as f:
+                with opener(path,'rb') as f:
                     f.seek(max(0,offset-64));check=f.read(min(64,offset))
                 if hashlib.sha256(check).hexdigest()!=old.get('tail',hashlib.sha256(b'').hexdigest()):
                     offset=0;generation=f'{stat.st_dev}:{stat.st_ino}:{stat.st_ctime_ns}'

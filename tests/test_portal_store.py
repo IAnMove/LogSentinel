@@ -75,3 +75,20 @@ def test_retention_reclaims_segments_without_changing_cursor(setup):
     assert store.prune()==1
     assert store.events()==[]
     assert Collector(store).file(source,path)==0
+
+
+def test_open_rotated_descriptor_keeps_late_writes(setup):
+    store,source,path=setup;path.write_text('first\n')
+    collector=Collector(store)
+    try:
+        assert collector.poll(source)==1
+        with path.open('a') as writer:
+            rotated=path.with_suffix('.old');path.rename(rotated)
+            path.write_text('new file\n')
+            assert collector.poll(source)==1
+            writer.write('late old writer\n');writer.flush()
+            rotated.unlink()
+            assert collector.poll(source)==1
+        assert [e['message'] for e in store.events()]==['first','new file','late old writer']
+        assert collector.poll(source)==0
+    finally:collector.close()
