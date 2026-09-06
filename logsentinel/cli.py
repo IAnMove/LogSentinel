@@ -600,7 +600,7 @@ def restore_backup(backup: str, data_dir: str = typer.Option(..., "--data-dir"))
     if target.exists():
         raise typer.BadParameter("Restore target must not exist")
     source = Path(backup).expanduser().resolve()
-    with sqlite3.connect(f"file:{source}?mode=ro", uri=True) as conn:
+    with sqlite3.connect(source.as_uri()+"?mode=ro", uri=True) as conn:
         if conn.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
             raise typer.BadParameter("Backup integrity check failed")
         if conn.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()[0] != '1':
