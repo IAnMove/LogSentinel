@@ -53,3 +53,25 @@ def test_machines_do_not_merge_origins(setup):
     store.ingest(source,[e])
     store.ingest(dict(source,id='other',machine_id='B'),[e])
     assert len(store.events())==2
+
+
+def test_sender_cleanup_preserves_checkpoint_and_partial_segments(setup):
+    store,source,path=setup;path.write_text('one\ntwo\n')
+    Collector(store).file(source,path)
+    rows=store.events();store.mark([rows[0]['id']],'sent')
+    assert store.discard_sent()==0
+    store.mark([rows[1]['id']],'sent')
+    assert store.discard_sent()==1
+    assert store.events()==[]
+    assert Collector(store).file(source,path)==0
+    with path.open('a') as f:f.write('three\n')
+    assert Collector(store).file(source,path)==1
+
+
+def test_retention_reclaims_segments_without_changing_cursor(setup):
+    store,source,path=setup;path.write_text('one\n')
+    Collector(store).file(source,path)
+    with store.connect() as db:db.execute('UPDATE segments SET created=0')
+    assert store.prune()==1
+    assert store.events()==[]
+    assert Collector(store).file(source,path)==0

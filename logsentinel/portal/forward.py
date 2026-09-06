@@ -38,6 +38,7 @@ async def forward(path,receiver,source_id,token,directory,once=False):
                     ids=[e['id'] for e in payload['events']]
                     if result.get('status')!='durable' or set(result.get('acknowledged',[]))!=set(ids):raise ValueError('Receiver did not acknowledge the complete batch')
                     store.mark(ids,'sent')
+                    store.discard_sent()
                 except (httpx.HTTPError,ValueError):
                     if once:raise RuntimeError('Forwarding failed; spool retained for retry') from None
             if once:return

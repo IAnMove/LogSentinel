@@ -204,8 +204,14 @@ class Store:
             scope=' WHERE machine_id=?' if machine_id else ''; args=(machine_id,) if machine_id else ()
             coverage={r[0]:r[1] for r in db.execute('SELECT status,count(*) FROM events'+scope+' GROUP BY status',args)}
             metrics=[dict(r) for r in db.execute('SELECT * FROM metrics')]
+            if machine_id:
+                sources={o['id'] for o in self.objects('source') if o['machine_id']==machine_id}
+                metrics=[r for r in metrics if r['source_id'] in sources]
             usage=dict(db.execute('SELECT count(*) calls,sum(input_tokens) input_tokens,sum(output_tokens) output_tokens,sum(duration) seconds,sum(CASE WHEN input_tokens IS NULL THEN 1 ELSE 0 END) unknown_calls FROM usage'+scope,args).fetchone())
-            segments=dict(db.execute('SELECT coalesce(sum(raw_bytes),0) original,coalesce(sum(length(data)),0) compressed FROM segments').fetchone())
+            if machine_id:
+                segments=dict(db.execute("SELECT coalesce(sum(raw_bytes),0) original,coalesce(sum(length(data)),0) compressed FROM segments WHERE source_id IN (SELECT id FROM objects WHERE kind='source' AND json_extract(data,'$.machine_id')=?)",(machine_id,)).fetchone())
+            else:
+                segments=dict(db.execute('SELECT coalesce(sum(raw_bytes),0) original,coalesce(sum(length(data)),0) compressed FROM segments').fetchone())
             return {'coverage':coverage,'usage':usage,'metrics':metrics,'segments':segments,'disk_bytes':self.size()}
 
     def recover(self):
@@ -222,6 +228,21 @@ class Store:
                 db.execute('DELETE FROM segments WHERE id=?',(sid,))
             if ids:self._metric(db,'','segments_expired',len(ids))
             db.execute('PRAGMA wal_checkpoint(PASSIVE)') if not ids else None
+        if ids:
+            with self.connect() as db:
+                db.execute('PRAGMA wal_checkpoint(TRUNCATE)')
+                db.execute('VACUUM')
+        return len(ids)
+
+    def discard_sent(self):
+        """Reclaim fully acknowledged sender segments without touching file cursors."""
+        with self.connect() as db:
+            ids=[r[0] for r in db.execute("SELECT id FROM segments WHERE NOT EXISTS (SELECT 1 FROM events WHERE segment_id=segments.id AND status!='sent')")]
+            for sid in ids:
+                db.execute('DELETE FROM events WHERE segment_id=?',(sid,))
+                db.execute('DELETE FROM segments WHERE id=?',(sid,))
+        if ids:
+            with self.connect() as db:db.execute('VACUUM')
         return len(ids)
 
     def backup(self,target):
