@@ -176,6 +176,16 @@ class Store:
                 out.append(dict(cache[sid][row['ordinal']],**dict(row)))
             return out
 
+    def neighbors(self,ids,radius=2):
+        neighbors=[]
+        with self.connect() as db:
+            for id in ids[:30]:
+                row=db.execute('SELECT rowid,source_id FROM events WHERE id=?',(id,)).fetchone()
+                if not row:continue
+                for op,order in (('<','DESC'),('>','ASC')):
+                    neighbors.extend(r[0] for r in db.execute(f'SELECT id FROM events WHERE source_id=? AND rowid{op}? ORDER BY rowid {order} LIMIT ?',(row['source_id'],row['rowid'],radius)))
+        return self.events(ids=list(dict.fromkeys(neighbors)),limit=150)
+
     def mark(self,ids,status):
         if not ids:return
         with self.connect() as db:
@@ -212,7 +222,18 @@ class Store:
                 segments=dict(db.execute("SELECT coalesce(sum(raw_bytes),0) original,coalesce(sum(length(data)),0) compressed FROM segments WHERE source_id IN (SELECT id FROM objects WHERE kind='source' AND json_extract(data,'$.machine_id')=?)",(machine_id,)).fetchone())
             else:
                 segments=dict(db.execute('SELECT coalesce(sum(raw_bytes),0) original,coalesce(sum(length(data)),0) compressed FROM segments').fetchone())
-            return {'coverage':coverage,'usage':usage,'metrics':metrics,'segments':segments,'disk_bytes':self.size()}
+            per_source={o['id']:{'source_id':o['id'],'name':o['name'],'logical_bytes':0,'events_ingested':0,'allocated_tokens':0,'unknown_calls':0} for o in self.objects('source') if not machine_id or o['machine_id']==machine_id}
+            for row in metrics:
+                if row['source_id'] in per_source and row['key'] in ('logical_bytes','events_ingested'):per_source[row['source_id']][row['key']]=row['value']
+            for row in db.execute('SELECT source_ids,input_tokens,output_tokens,detail FROM usage'+scope,args):
+                sources=json.loads(row['source_ids']);weights=json.loads(row['detail']).get('source_bytes',{})
+                total=sum(weights.values())
+                for sid in sources:
+                    if sid not in per_source:continue
+                    if row['input_tokens'] is None or row['output_tokens'] is None:per_source[sid]['unknown_calls']+=1
+                    share=weights.get(sid,0)/total if total else 1/max(1,len(sources))
+                    per_source[sid]['allocated_tokens']+=((row['input_tokens'] or 0)+(row['output_tokens'] or 0))*share
+            return {'sources':list(per_source.values()),'coverage':coverage,'usage':usage,'metrics':metrics,'segments':segments,'disk_bytes':self.size()}
 
     def recover(self):
         with self.connect() as db:

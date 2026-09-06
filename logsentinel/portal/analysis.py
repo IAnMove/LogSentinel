@@ -25,6 +25,11 @@ class ReviewClient:
         if len((system+prompt).encode())+llm.max_tokens>cfg.context_tokens:
             raise ValueError('Input exceeds conservative context budget')
         start=time.monotonic();inp=out=None;status='error';detail={'model':llm.model,'input_bytes':len(prompt.encode()),'estimate':'utf8_upper_bound'}
+        weights={}
+        for event in payload.get('groups',payload.get('events',[])):
+            sid=event.get('source_id','')
+            if sid:weights[sid]=weights.get(sid,0)+len(dumps(event).encode())
+        detail['source_bytes']=weights
         try:
             async with httpx.AsyncClient(timeout=llm.timeout_seconds,follow_redirects=False,trust_env=False) as client:
                 headers={'Authorization':'Bearer '+llm.api_key} if llm.api_key else {}
@@ -84,7 +89,7 @@ class Analyzer:
                 with self.store.connect() as db:
                     retry=db.execute("SELECT * FROM jobs WHERE machine_id=? AND status='retry' AND attempts<3 ORDER BY created LIMIT 1",(machine['id'],)).fetchone()
                 if retry:
-                    events=self.store.events(ids=json.loads(retry['event_ids']),limit=cfg.max_events)
+                    events=self.store.events(ids=json.loads(retry['event_ids']),limit=5000)
                     job=retry['id']
                 else:
                     with self.store.connect() as db:
@@ -117,20 +122,23 @@ class Analyzer:
                 if not groups:
                     with self.store.connect() as db:db.execute("UPDATE jobs SET status='capacity' WHERE id=?",(job,))
                     continue
-                payload={'machine':{'id':machine['id'],'name':redact(machine['name'])},'sensitivity':cfg.sensitivity,'groups':[{k:v for k,v in g.items() if k!='event_ids'} for g in groups]}
+                payload={'machine':{k:redact(machine.get(k,'')) for k in ('id','name','os','timezone','notes')},'sensitivity':cfg.sensitivity,'groups':[{k:v for k,v in g.items() if k!='event_ids'} for g in groups]}
                 try:
                     calls+=1
                     result=await self.client.call(payload,job=job,machine=machine['id'],sources=sorted({e['source_id'] for e in events}))
                     verdict=Verdict.model_validate(result)
                     refs={g['id']:g['event_ids'] for g in groups}
                     self.validate_refs(verdict,set(refs))
+                    resolved=[(f,list(dict.fromkeys(i for ref in f.evidence_ids for i in refs[ref]))) for f in verdict.findings]
                     self.store.mark(selected,'compact')
                     if verdict.findings and calls<cfg.max_calls:
                         originals=self.store.events(ids=[id for f in verdict.findings for ref in f.evidence_ids for id in refs[ref]][:30])
+                        cited={e['id'] for e in originals}
+                        originals+= [e for e in self.store.neighbors(list(cited)) if e['id'] not in cited]
                         originals=[e for e in originals if not excluded(self.store,e)]
                         second=[];budget=cfg.input_budget
                         for e in originals:
-                            item={k:e.get(k) for k in ('id','timestamp','service','message','source_id')}
+                            item={k:e.get(k) for k in ('id','timestamp','service','message','source_id','metadata')}
                             if len(dumps(second+[item]).encode())>budget:break
                             second.append(item)
                         if second:
@@ -142,11 +150,9 @@ class Analyzer:
                             expanded={e['id'] for e in second}
                             retained=[f for f in verdict.findings if not set(i for ref in f.evidence_ids for i in refs[ref]).issubset(expanded)]
                             for f in retained:f.reasoning='Preliminary, partially expanded. '+f.reasoning
-                            verdict=Verdict(findings=retained+refined.findings)
+                            resolved=[(f,list(dict.fromkeys(i for ref in f.evidence_ids for i in refs[ref]))) for f in retained]+[(f,f.evidence_ids) for f in refined.findings]
                             self.store.mark(list(expanded),'reviewed')
-                            refs.update({e['id']:[e['id']] for e in second})
-                    for finding in verdict.findings:
-                        ids=list(dict.fromkeys(i for ref in finding.evidence_ids for i in refs[ref]))
+                    for finding,ids in resolved:
                         self.save_finding(machine['id'],finding.model_dump(),ids)
                     with self.store.connect() as db:db.execute("UPDATE jobs SET status='done',error=NULL,updated=? WHERE id=?",(time.time(),job))
                 except asyncio.CancelledError:

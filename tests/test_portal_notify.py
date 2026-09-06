@@ -31,3 +31,15 @@ async def test_file_destination_contained(tmp_path):
     s=Store(tmp_path)
     d=Destination(name='bad',kind='file',path='../../outside').model_dump()
     with pytest.raises(ValueError):await Outbox(s).send(d,{'delivery_id':'x'})
+
+@pytest.mark.asyncio
+async def test_cancelled_send_is_unknown_and_worker_stops(tmp_path):
+    import asyncio,time
+    from logsentinel.portal.store import dumps
+    s=Store(tmp_path);d=s.put('destination',Destination(name='local',kind='file',enabled=True).model_dump())
+    with s.connect() as db:db.execute('INSERT INTO deliveries VALUES(?,?,?,?,?,?,?,?,?,?)',('q',d,'p',dumps({'delivery_id':'q'}),'pending',0,time.time(),time.time(),0,None))
+    outbox=Outbox(s)
+    async def interrupted(*args):raise asyncio.CancelledError()
+    outbox.send=interrupted
+    with pytest.raises(asyncio.CancelledError):await outbox.drain()
+    assert s.rows('deliveries')[0]['status']=='unknown'

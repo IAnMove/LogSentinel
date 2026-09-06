@@ -564,6 +564,53 @@ WantedBy=default.target
         console.print("  sudo systemctl enable --now logsentinel")
 
 
+@app.command(name="portal")
+def portal(data_dir: str = typer.Option("~/.local/share/logsentinel/portal", "--data-dir"),
+           port: int = typer.Option(8765, "--port")) -> None:
+    """Run the local portal and its independent monitoring workers."""
+    import uvicorn
+    from logsentinel.portal.app import create_app
+    application = create_app(data_dir)
+    console.print(f"Portal: http://127.0.0.1:{port}")
+    console.print("Access key (enter in the local login form):", markup=False)
+    console.print(application.state.store.meta("admin_token"), markup=False)
+    uvicorn.run(application, host="127.0.0.1", port=port, proxy_headers=False)
+
+
+@app.command(name="forward")
+def forward_command(path: str, receiver: str = typer.Option(..., "--receiver"),
+                    source_id: str = typer.Option(..., "--source-id"),
+                    spool: str = typer.Option(..., "--spool"),
+                    token_env: str = typer.Option("LOGSENTINEL_PUSH_TOKEN", "--token-env"),
+                    once: bool = typer.Option(False, "--once")) -> None:
+    """Forward a file through HTTPS or an SSH tunnel, keeping unacknowledged events."""
+    from logsentinel.portal.forward import forward
+    token = os.environ.get(token_env)
+    if not token:
+        raise typer.BadParameter("Set the sender token in the selected environment variable")
+    asyncio.run(forward(path, receiver, source_id, token, spool, once))
+
+
+@app.command(name="restore")
+def restore_backup(backup: str, data_dir: str = typer.Option(..., "--data-dir")) -> None:
+    """Restore a portal backup into a NEW directory (never overwrite live data)."""
+    import sqlite3
+    import shutil
+    target = Path(data_dir).expanduser().resolve()
+    if target.exists():
+        raise typer.BadParameter("Restore target must not exist")
+    source = Path(backup).expanduser().resolve()
+    with sqlite3.connect(f"file:{source}?mode=ro", uri=True) as conn:
+        if conn.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
+            raise typer.BadParameter("Backup integrity check failed")
+        if conn.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()[0] != '1':
+            raise typer.BadParameter("Unsupported backup schema")
+    target.mkdir(mode=0o700, parents=True)
+    shutil.copyfile(source, target / "sentinel.db")
+    os.chmod(target / "sentinel.db", 0o600)
+    console.print(f"Restored to {target}. The backup includes secrets; rotate sender/admin tokens if needed.", markup=False)
+
+
 def main() -> None:
     """CLI entrypoint."""
     app()
