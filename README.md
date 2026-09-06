@@ -5,7 +5,7 @@ Monitor experimental de logs Linux con clasificación LLM local, memoria de supr
 ## Instalación y pruebas
 
 ```bash
-cd /home/ina/security-project
+cd security-agent
 uv venv --python 3.11 .venv  # solo si todavía no existe
 uv pip install --python .venv/bin/python -e '.[dev]'
 .venv/bin/python -m pytest -q

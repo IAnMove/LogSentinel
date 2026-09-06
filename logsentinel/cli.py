@@ -514,6 +514,9 @@ def config_init(
     """Initialize default configuration file."""
     cfg = Config()
     target_path = Path(path) if path else get_default_config_dir() / "config.yaml"
+    if target_path.expanduser().exists():
+        console.print("Configuration already exists; choose a new path.")
+        raise typer.Exit(1)
     saved = cfg.save(target_path)
     console.print(f"[green]✓ Configuration saved to:[/green] {saved}")
 

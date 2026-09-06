@@ -180,8 +180,8 @@ class MemoryConfig(BaseModel):
 
 
 class BehaviorConfig(BaseModel):
-    """Conservative temporal profiles of successful SSH authentication."""
-    enabled: bool = True
+    """Legacy opt-in experiment; not used by the portal pipeline."""
+    enabled: bool = False
     timezone: str = "UTC"
     min_events: int = Field(default=20, ge=2)
     min_days: int = Field(default=5, ge=2)
