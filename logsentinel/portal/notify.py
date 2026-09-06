@@ -2,6 +2,7 @@
 from __future__ import annotations
 import asyncio
 import hashlib
+import gzip
 import hmac
 import html
 import json
@@ -52,6 +53,14 @@ class Outbox:
             if Path(name).name!=name:raise ValueError('File destination must be a filename within notifications/')
             folder=self.store.directory/'notifications';folder.mkdir(mode=0o700,exist_ok=True)
             path=folder/name
+            if path.exists() and path.stat().st_size>=dest.get('rotation_mb',10)*1024*1024:
+                keep=dest.get('keep_archives',3)
+                for i in range(keep,1,-1):
+                    previous=folder/(name+f'.{i-1}.gz')
+                    if previous.exists():previous.replace(folder/(name+f'.{i}.gz'))
+                target=folder/(name+'.1.gz')
+                with path.open('rb') as src,gzip.open(target,'wb') as dst:shutil.copyfileobj(src,dst)
+                os.chmod(target,0o600);path.unlink()
             with path.open('a',encoding='utf-8') as f:f.write(dumps(payload)+'\n');f.flush();os.fsync(f.fileno())
             os.chmod(path,0o600)
             return 'delivered'

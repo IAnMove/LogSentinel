@@ -85,6 +85,8 @@ class Destination(Model):
     headers: dict[str,str] = Field(default_factory=dict)
     path: str = ''
     cooldown_seconds: int = Field(default=300, ge=0, le=86400)
+    rotation_mb: int = Field(default=10, ge=1, le=1024)
+    keep_archives: int = Field(default=3, ge=1, le=50)
 
     @model_validator(mode='after')
     def complete(self):
