@@ -12,7 +12,7 @@ def login(at, ip="192.0.2.10", user="alice", host="server1"):
 
 
 def engine_for(tmp_path):
-    cfg = Config(app={"data_dir": str(tmp_path)}, notifiers={"desktop": {"enabled": False}, "file": {"enabled": False}})
+    cfg = Config(behavior={'enabled': True}, app={"data_dir": str(tmp_path)}, notifiers={"desktop": {"enabled": False}, "file": {"enabled": False}})
     return SentinelEngine(cfg)
 
 

@@ -26,7 +26,7 @@ def entry(at):
 
 async def demo(use_llm):
     with tempfile.TemporaryDirectory(prefix='logsentinel-demo-') as data_dir:
-        cfg = Config(app={'data_dir': data_dir}, llm={'max_tokens': 4096}, notifiers={'desktop': {'enabled': False}, 'file': {'enabled': False}})
+        cfg = Config(behavior={'enabled': True}, app={'data_dir': data_dir}, llm={'max_tokens': 4096}, notifiers={'desktop': {'enabled': False}, 'file': {'enabled': False}})
         engine = SentinelEngine(cfg)
         captured = []
         async def capture(incident):

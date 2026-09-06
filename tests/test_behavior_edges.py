@@ -42,7 +42,7 @@ def test_out_of_order_event_never_uses_later_observations(tmp_path):
 
 
 def test_ipv6_and_configured_timezone(tmp_path):
-    cfg = Config(app={'data_dir': str(tmp_path)}, behavior={'timezone': 'Europe/Madrid'})
+    cfg = Config(app={'data_dir': str(tmp_path)}, behavior={'enabled': True, 'timezone': 'Europe/Madrid'})
     profiler = SentinelEngine(cfg).behavior
     result = profiler.observe(login(datetime(2025, 1, 6, 23, tzinfo=timezone.utc), ip='2001:0db8::1'))
     assert result['local_hour'] == 0

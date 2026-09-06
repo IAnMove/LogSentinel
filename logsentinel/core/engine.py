@@ -165,6 +165,11 @@ class SentinelEngine:
                 max_rules=self.config.memory.max_semantic_rules_in_prompt
             )
 
+        # Record the evidence before inference, including interrupted analyses.
+        pending = Alert(incident=incident, verdict=LLMVerdict(
+            title="Analysis pending", summary="Inference has not completed; review original evidence.",
+            confidence=0.0, category=incident.category_hint))
+        self.memory_store.save_alert(pending)
         # 3. Consult LLM
         verdict = await self.llm_client.analyze(incident, memory_context=semantic_context)
 
@@ -180,6 +185,7 @@ class SentinelEngine:
         # Check if LLM marked it as suppressed by user instructions or benign
         if not verdict.alert_needed:
             alert = Alert(
+                id=pending.id,
                 status=AlertStatus.AUTO_SUPPRESSED,
                 incident=incident,
                 verdict=verdict,
@@ -190,6 +196,7 @@ class SentinelEngine:
 
         # 4. Create Alert and Dispatch
         alert = Alert(
+            id=pending.id,
             status=AlertStatus.NEW,
             incident=incident,
             verdict=verdict,

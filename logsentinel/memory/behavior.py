@@ -36,7 +36,7 @@ class BehaviorProfiler:
             conn.execute("CREATE INDEX IF NOT EXISTS behavior_time ON behavior_events(timestamp)")
 
     def observe(self, entry: LogEntry) -> dict | None:
-        if not self.config.enabled or entry.metadata.get('timestamp_inferred'):
+        if not self.config.enabled or 'timestamp' not in entry.model_fields_set or entry.metadata.get('timestamp_inferred'):
             return None
         if entry.timestamp.timestamp() > datetime.now(timezone.utc).timestamp() + 300:
             return None
@@ -76,7 +76,9 @@ class BehaviorProfiler:
                 if all(min(abs(local.hour - h), 24 - abs(local.hour - h)) > self.config.hour_tolerance for h in comparison_hours):
                     anomalies.append('unusual_hour')
             duplicate = conn.execute('SELECT 1 FROM behavior_events WHERE fingerprint=?', (fingerprint,)).fetchone() is not None
-            learned = not anomalies and not duplicate
+            newer = conn.execute('SELECT 1 FROM behavior_events WHERE entity=? AND timestamp>? LIMIT 1', (entity, timestamp)).fetchone()
+            # Tolerance permits observation, not expansion of the learned hours.
+            learned = not anomalies and not duplicate and not newer and (not sufficient or local.hour in comparison_hours)
             if learned:
                 conn.execute('INSERT INTO behavior_events VALUES (?, ?, ?, ?)', (fingerprint, entity, timestamp, entry.id))
             # Watermark based retention: replaying old files cannot evict newer history.

@@ -28,11 +28,12 @@ class LLMClient:
                         data = resp.json()
                         models = [m.get("name") for m in data.get("models", [])]
                         return {
-                            "status": "healthy",
+                            "status": "healthy" if self.config.model in models or (":" not in self.config.model and self.config.model + ":latest" in models) else "unhealthy",
+                            "error": None if self.config.model in models else "Configured model is not available",
                             "provider": "ollama",
                             "base_url": self.base_url,
                             "configured_model": self.config.model,
-                            "model_available": self.config.model in models or any(self.config.model.split(":")[0] in m for m in models),
+                            "model_available": self.config.model in models or (":" not in self.config.model and self.config.model + ":latest" in models),
                             "available_models": models,
                         }
                 except Exception as e:

@@ -83,3 +83,15 @@ def test_anomaly_is_not_hidden_by_broad_service_rule(tmp_path):
     result = asyncio.run(engine.process_incident(incident(Category.ANOMALY)))
     assert result.verdict.alert_needed
     engine.llm_client.analyze.assert_awaited_once()
+
+
+def test_inference_cancellation_keeps_original_evidence(tmp_path):
+    import pytest
+    engine = make_engine(tmp_path)
+    engine.llm_client.analyze.side_effect = asyncio.CancelledError()
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(engine.process_incident(incident()))
+    saved = engine.memory_store.list_alerts()
+    assert len(saved) == 1
+    assert saved[0].verdict.title == 'Analysis pending'
+    assert saved[0].incident.entries[0].message == 'Failed password'
