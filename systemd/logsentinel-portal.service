@@ -1,0 +1,14 @@
+[Unit]
+Description=LogSentinel local log review portal
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=%h/.venv/bin/logsentinel portal
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=true
+
+[Install]
+WantedBy=default.target
