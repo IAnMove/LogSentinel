@@ -21,3 +21,5 @@ Cada etapa se confirma en Git después de sus comprobaciones. Los commits son lo
 - Durabilidad física ante corte eléctrico y distribuciones adicionales: no equivalen a pruebas unitarias o cierre limpio.
 
 Etapa 1: 206 tests aprobados. Perfil SSH opt-in; corregidos los tres fallos de sus regresiones, persistencia antes de inferencia y protección de config init. El portal usa una nueva cola duradera para reanudar trabajo, sin depender de este motor legacy.
+
+Etapa 2a: ledger comprimido en SQLite, importación archivo/gzip y cursores transaccionales. Cinco pruebas de almacenamiento verifican reinicio, duplicados, rollback por cuota y backup con evidencia. Piloto remoto integrado en la etapa de API; `forward` mantiene un spool por archivo.
