@@ -1,0 +1,7 @@
+<!doctype html>
+<html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>LogSentinel · Observatorio de logs</title><link rel="stylesheet" href="/static/style.css"></head>
+<body>
+<section id="login" class="login"><div class="brand">◈ LogSentinel</div><h1>Tu observatorio de logs.</h1><p>Accede con la clave que aparece al iniciar el portal en este equipo.</p><form id="login-form"><label>Clave de acceso<input id="access-key" type="password" autocomplete="current-password" required></label><button>Entrar al portal</button></form><p id="login-error" role="alert"></p></section>
+<div id="shell" hidden><aside><div class="brand">◈ LogSentinel</div><div class="eyebrow">OBSERVATORIO LOCAL</div><nav id="nav" aria-label="Navegación principal"></nav><div class="aside-footer"><span class="dot"></span> Evidencia antes que conclusiones<button id="logout" class="quiet">Cerrar sesión</button></div></aside><main><header><div><div class="eyebrow">MÁQUINAS · LOGS · HALLAZGOS</div><h1 id="page-title">Resumen</h1></div><label class="scope">Ámbito<select id="machine-scope"><option value="">Todas las máquinas</option></select></label></header><div id="notice" role="status" hidden></div><section id="content" aria-live="polite"></section></main></div>
+<dialog id="modal"><button id="close-modal" class="quiet close" aria-label="Cerrar">×</button><div id="modal-content"></div></dialog>
+<script src="/static/app.js" defer></script></body></html>

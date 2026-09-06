@@ -97,7 +97,18 @@ class Outbox:
             for row in rows:
                 dest=self.store.get('destination',row['destination_id'])
                 status='cancelled';error=None;cancelled=False
-                if dest and dest.get('enabled'):
+                problem=self.store.problem(row['problem_id'])
+                allowed=True
+                if dest and problem:
+                    evidence=problem['evidence']
+                    if dest.get('machine_id') and dest['machine_id']!=problem['machine_id']:allowed=False
+                    if dest.get('source_id') and dest['source_id'] not in {e['source_id'] for e in evidence}:allowed=False
+                    if RANK[problem['severity']]<RANK[dest['min_severity']]:allowed=False
+                    for rule in self.store.objects('rule'):
+                        try:
+                            if rule['action']=='mute' and evidence and all(matches(rule,e,problem['id']) for e in evidence):allowed=False;status='muted'
+                        except TimeoutError:pass
+                if dest and dest.get('enabled') and allowed:
                     with self.store.connect() as db:db.execute("UPDATE deliveries SET status='sending',attempts=attempts+1 WHERE id=?",(row['id'],))
                     try:status=await self.send(dest,json.loads(row['payload']))
                     except (asyncio.CancelledError,httpx.TimeoutException) as exc:
