@@ -1,0 +1,33 @@
+# Python Virtual Environments
+.venv/
+venv/
+ENV/
+env/
+
+# Python bytecode & cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Testing & Linting
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Build & Distribution
+build/
+dist/
+*.egg-info/
+*.egg
+
+# Environment variables & secrets
+.env
+.env.*
+*.local
+
+# Database & log files
+*.sqlite3
+*.db
+*.log
