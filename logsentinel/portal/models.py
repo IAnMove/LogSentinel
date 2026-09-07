@@ -59,6 +59,7 @@ class Source(Model):
 
 class Settings(Model):
     enabled: bool = False
+    language: Literal["en", "es"] = "en"
     llm: LLMConfig = Field(default_factory=LLMConfig)
     interval_seconds: int = Field(default=300, ge=5, le=86400)
     context_tokens: int = Field(default=8192, ge=2048, le=1_000_000)
@@ -148,6 +149,15 @@ class Finding(Model):
     evidence_ids: list[str] = Field(min_length=1, max_length=100)
     reasoning: str = Field(default="", max_length=5000)
     next_steps: str = Field(default="", max_length=4000)
+
+    @field_validator("next_steps", mode="before")
+    @classmethod
+    def normalize_steps(cls, value):
+        # Small local models commonly return a list of checks. Accept only
+        # strings, retain the length bound and never coerce arbitrary objects.
+        if isinstance(value, list) and all(isinstance(step, str) for step in value):
+            return "\n".join("- " + step for step in value)
+        return value
 
 
 class Verdict(Model):

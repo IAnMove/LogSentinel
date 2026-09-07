@@ -44,6 +44,8 @@ class Store:
             CREATE TABLE IF NOT EXISTS events(id TEXT PRIMARY KEY,source_id TEXT,machine_id TEXT,segment_id TEXT,ordinal INTEGER,received REAL,event_time TEXT,service TEXT,status TEXT,origin TEXT,UNIQUE(source_id,origin));
             CREATE INDEX IF NOT EXISTS events_status ON events(status,received);
             CREATE INDEX IF NOT EXISTS events_scope ON events(machine_id,source_id,received);
+            CREATE INDEX IF NOT EXISTS events_time ON events(source_id,julianday(event_time));
+            CREATE INDEX IF NOT EXISTS events_received ON events(source_id,received);
             CREATE TABLE IF NOT EXISTS jobs(id TEXT PRIMARY KEY,machine_id TEXT,event_ids TEXT,status TEXT,created REAL,updated REAL,attempts INTEGER DEFAULT 0,config TEXT,error TEXT);
             CREATE TABLE IF NOT EXISTS problems(id TEXT PRIMARY KEY,machine_id TEXT,fingerprint TEXT,title TEXT,severity TEXT,status TEXT,first_seen REAL,last_seen REAL,count INTEGER,data TEXT,UNIQUE(machine_id,fingerprint));
             CREATE TABLE IF NOT EXISTS appearances(problem_id TEXT,event_id TEXT,PRIMARY KEY(problem_id,event_id));
@@ -300,43 +302,48 @@ class Store:
         return self.events(ids=list(dict.fromkeys(neighbors)), limit=150)
 
     def context(self, ids, seconds=300, limit=5000):
-        """Return bounded same-source events around trigger timestamps."""
-        targets = self.events(ids=ids, limit=100)
-        if not targets:
-            return []
-        target_times = {}
-        source_ids = set()
-        for event in targets:
-            source_ids.add(event["source_id"])
-            value = event.get("timestamp")
-            try:
-                timestamp = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
-                if timestamp.tzinfo is None:
-                    timestamp = timestamp.replace(tzinfo=timezone.utc)
-            except (TypeError, ValueError):
-                timestamp = None
-            target_times.setdefault(event["source_id"], []).append(timestamp)
-        selected = {}
-        for source_id in source_ids:
-            for event in self.events(source_id=source_id, limit=limit):
-                value = event.get("timestamp")
-                try:
-                    timestamp = datetime.fromisoformat(
-                        str(value).replace("Z", "+00:00")
+        """Look up nearby retained context by index, including recent history.
+
+        Undated triggers use receipt time. They must never match the entire
+        source. Triggers are retained first; context is a bounded sample of
+        already captured events, not a promise about future arrivals.
+        """
+        limit = min(max(limit, 1), 5000)
+        selected = dict.fromkeys(ids[:limit])
+        with self.connect() as db:
+            for id in ids[:100]:
+                row = db.execute(
+                    "SELECT source_id,julianday(event_time) moment,received FROM events WHERE id=?",
+                    (id,),
+                ).fetchone()
+                if not row or seconds <= 0:
+                    continue
+                column = (
+                    "julianday(event_time)" if row["moment"] is not None else "received"
+                )
+                moment = row["moment"] if row["moment"] is not None else row["received"]
+                delta = seconds / 86400 if row["moment"] is not None else seconds
+                # Both sides get a share; oldest events cannot crowd out the
+                # closest context. Bound decompression to the final selection.
+                for op, order, bound in (
+                    ("<=", "DESC", moment - delta),
+                    (">", "ASC", moment + delta),
+                ):
+                    candidates = db.execute(
+                        f"SELECT id FROM events WHERE source_id=? AND {column} BETWEEN ? AND ? AND {column}{op}? ORDER BY {column} {order} LIMIT ?",
+                        (
+                            row["source_id"],
+                            min(moment, bound),
+                            max(moment, bound),
+                            moment,
+                            min(100, limit),
+                        ),
                     )
-                    if timestamp.tzinfo is None:
-                        timestamp = timestamp.replace(tzinfo=timezone.utc)
-                    include = any(
-                        target is None
-                        or abs((timestamp - target).total_seconds()) <= seconds
-                        for target in target_times[source_id]
-                        if target is None or target.tzinfo is not None
-                    )
-                except (TypeError, ValueError):
-                    include = event["id"] in ids
-                if include:
-                    selected[event["id"]] = event
-        return list(selected.values())
+                    for candidate in candidates:
+                        if len(selected) < limit:
+                            selected[candidate[0]] = None
+        rows = {e["id"]: e for e in self.events(ids=list(selected), limit=limit)}
+        return [rows[id] for id in selected if id in rows]
 
     def mark(self, ids, status):
         if not ids:
@@ -433,7 +440,7 @@ class Store:
                 metrics = [r for r in metrics if r["source_id"] in sources]
             usage = dict(
                 db.execute(
-                    "SELECT count(*) calls,sum(input_tokens) input_tokens,sum(output_tokens) output_tokens,sum(duration) seconds,sum(CASE WHEN input_tokens IS NULL THEN 1 ELSE 0 END) unknown_calls FROM usage"
+                    "SELECT count(*) calls,sum(input_tokens) input_tokens,sum(output_tokens) output_tokens,sum(duration) seconds,sum(CASE WHEN input_tokens IS NULL OR output_tokens IS NULL THEN 1 ELSE 0 END) unknown_calls FROM usage"
                     + scope,
                     args,
                 ).fetchone()
