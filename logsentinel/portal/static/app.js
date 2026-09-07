@@ -736,6 +736,12 @@ function settingsView(root) {
     c.input_budget,
   );
   add("max_tokens", "Máximo de salida", "number", c.llm.max_tokens);
+  add(
+    "enable_thinking",
+    "Activar razonamiento prolongado del modelo",
+    "checkbox",
+    c.llm.enable_thinking,
+  );
   add("max_calls", "Máximo de llamadas por ciclo", "number", c.max_calls);
   add(
     "interval_seconds",
@@ -823,9 +829,17 @@ function settingsView(root) {
         model: d.model,
         api_key: d.api_key,
         max_tokens: d.max_tokens,
+        enable_thinking: d.enable_thinking,
       };
       delete d.llm.api_key_set;
-      ["provider", "base_url", "model", "api_key", "max_tokens"].forEach(
+      [
+        "provider",
+        "base_url",
+        "model",
+        "api_key",
+        "max_tokens",
+        "enable_thinking",
+      ].forEach(
         (k) => delete d[k],
       );
       await api("/api/settings", d);

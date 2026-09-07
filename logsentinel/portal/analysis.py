@@ -74,16 +74,23 @@ class ReviewClient:
                 else:
                     base = llm.base_url.rstrip("/")
                     base = base if base.endswith("/v1") else base + "/v1"
+                    request = {
+                        "model": llm.model,
+                        "messages": messages,
+                        "max_tokens": llm.max_tokens,
+                        "temperature": llm.temperature,
+                        "response_format": {"type": "json_object"},
+                    }
+                    # Qwen3 and other reasoning models expose this llama.cpp
+                    # chat-template switch. Structured review needs the answer
+                    # within the output budget; users can enable reasoning when
+                    # they explicitly want it.
+                    if not llm.enable_thinking:
+                        request["chat_template_kwargs"] = {"enable_thinking": False}
                     response = await client.post(
                         base + "/chat/completions",
                         headers=headers,
-                        json={
-                            "model": llm.model,
-                            "messages": messages,
-                            "max_tokens": llm.max_tokens,
-                            "temperature": llm.temperature,
-                            "response_format": {"type": "json_object"},
-                        },
+                        json=request,
                     )
                 response.raise_for_status()
                 data = response.json()
