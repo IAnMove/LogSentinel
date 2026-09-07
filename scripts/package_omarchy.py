@@ -22,19 +22,31 @@ files = [
 ]
 buffer = io.BytesIO()
 with tarfile.open(fileobj=buffer, mode="w") as archive:
-    for name in files + ["docs/OMARCHY.md", "docs/QUICKSTART.en.md"]:
+    guides = [
+        "docs/OMARCHY.md",
+        "docs/QUICKSTART.en.md",
+        "docs/METRICS.md",
+        "docs/OPERATIONS.md",
+        "docs/PROBLEM_INVESTIGATIONS.md",
+        "docs/THEMES.md",
+    ]
+    for name in files + guides:
         path = root / name
         if path.is_symlink():
             raise ValueError("Plugin files cannot be symlinks")
         data = path.read_bytes()
-        if name == "docs/OMARCHY.md":
-            target = "README.md"
-            data = data.replace(b"](QUICKSTART.en.md)", b"](docs/QUICKSTART.en.md)")
-        else:
-            target = name
-        info = tarfile.TarInfo(prefix + "/" + target)
+        if name == "docs/QUICKSTART.en.md":
+            data = data.replace(
+                b"](REVIEW_2026-09-07.md)",
+                b"](https://github.com/IAnMove/security-agent/blob/main/docs/REVIEW_2026-09-07.md)",
+            )
+        info = tarfile.TarInfo(prefix + "/" + name)
         info.mode, info.mtime, info.size = 0o644, 0, len(data)
         archive.addfile(info, io.BytesIO(data))
+    data = b"# LogSentinel for Omarchy\n\nSee [installation, pairing, controls and removal](docs/OMARCHY.md).\n\nRequires Omarchy Quattro, curl and a separately installed LogSentinel portal.\nThe widget uses a revocable, read-only credential. No install hooks or elevated privileges.\n\nPrepared for on-desktop validation before publication; see the guide for current limitations.\n"
+    info = tarfile.TarInfo(prefix + "/README.md")
+    info.mode, info.mtime, info.size = 0o644, 0, len(data)
+    archive.addfile(info, io.BytesIO(data))
 output = Path(args.output).expanduser().resolve()
 output.parent.mkdir(parents=True, exist_ok=True)
 with output.open("xb") as stream:

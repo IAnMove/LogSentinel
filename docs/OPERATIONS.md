@@ -105,6 +105,8 @@ priority is a guarantee of security.
 failed connections with a 4–60 second backoff. They bind each spool to its receiver
 and source/machine and hold a single-writer lock. Stop older sender processes before
 upgrading. Never reuse a spool for another destination.
+Legacy senders that used a relative file path must be upgraded from their original
+working directory; the new sender then persists the absolute path and binding.
 
 Updated log senders emit an authenticated heartbeat every 30 seconds, including
 capture health and the queue size. Configure a receiver timeout of at least 120

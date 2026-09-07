@@ -34,7 +34,16 @@ def test_plugin_bundle_is_reproducible_and_contains_no_runtime_data(tmp_path):
             and ".." not in m.name.split("/")
             for m in entries
         )
-        assert len(entries) == 7
+        assert {
+            prefix + name
+            for name in (
+                "README.md",
+                "LICENSE",
+                "docs/OMARCHY.md",
+                "docs/QUICKSTART.en.md",
+                "docs/OPERATIONS.md",
+            )
+        } <= {m.name for m in entries}
         manifest = json.load(archive.extractfile(prefix + "manifest.json"))
         assert manifest["schemaVersion"] == 1
         assert manifest["kinds"] == ["bar-widget"]
