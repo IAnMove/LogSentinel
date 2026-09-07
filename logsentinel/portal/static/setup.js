@@ -46,7 +46,11 @@ function drawMonitor(m) {
   capture.textContent =
     m.capture === "active"
       ? t("Captura continua activa")
-      : t("Captura inactiva");
+      : m.capture === "starting"
+        ? t("Iniciando captura…")
+        : m.capture === "delayed"
+          ? t("Captura sin confirmación reciente; revisa las fuentes")
+          : t("Captura inactiva");
   details.append(
     el("div", t("Último evento recibido: ") + stamp(m.last_event), "subtle"),
   );

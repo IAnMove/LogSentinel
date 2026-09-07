@@ -92,7 +92,11 @@ async def test_schedule_runs_without_a_manual_request_and_pause_is_separate(tmp_
         "source", {"name": "remote", "machine_id": "m", "kind": "push", "enabled": True}
     )
     state = monitor.state()
-    assert state["capture"] == "active" and state["next_analysis"] is None
+    assert state["capture"] == "starting" and state["next_analysis"] is None
+    monitor.capture_heartbeat = time.time()
+    assert monitor.state()["capture"] == "active"
+    monitor.capture_heartbeat -= 31
+    assert monitor.state()["capture"] == "delayed"
     cfg.enabled = True
     s.set_meta("settings", cfg.model_dump_json())
     monitor.analyzer.started = None
@@ -134,6 +138,45 @@ def test_wizard_test_is_bound_to_configuration_and_help_needs_no_machine(
     assert c.post("/api/setup/complete").status_code == 200
     assert s.settings().enabled
     assert c.get("/api/state").json()["setup"]["completed"]
+
+
+def test_log_chat_uses_recent_evidence_and_rejects_other_machine_source(
+    client, monkeypatch
+):
+    c, s = client
+    machine = s.put("machine", Machine(name="current").model_dump())
+    other = s.put("machine", Machine(name="other").model_dump())
+    sid = s.put(
+        "source",
+        {"name": "test", "machine_id": machine, "kind": "push", "enabled": True},
+    )
+    s.ingest(
+        {"id": sid, "machine_id": machine},
+        [{"origin": str(i), "message": "line " + str(i)} for i in range(120)],
+    )
+    seen = []
+
+    async def fake(self, payload, **kw):
+        seen.extend(payload["events"])
+        return {"answer": "Limited sample", "evidence_ids": [], "filter": None}
+
+    monkeypatch.setattr(ReviewClient, "call", fake)
+    assert (
+        c.post(
+            "/api/chat",
+            json={"machine_id": other, "source_id": sid, "message": "Latest?"},
+        ).status_code
+        == 400
+    )
+    assert (
+        c.post(
+            "/api/chat",
+            json={"machine_id": machine, "source_id": sid, "message": "Latest?"},
+        ).status_code
+        == 200
+    )
+    assert seen[0]["message"] == "line 119"
+    assert all(e["message"] != "line 0" for e in seen)
 
 
 @pytest.mark.asyncio

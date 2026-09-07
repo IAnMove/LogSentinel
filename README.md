@@ -1,5 +1,7 @@
 # LogSentinel
 
+[English documentation](docs/QUICKSTART.en.md) · Interfaz disponible en español e inglés.
+
 Portal local para revisar logs de Linux con un LLM, detectar problemas de funcionamiento y seguridad y conservar la evidencia. Cada fuente pertenece a una máquina. El modelo propone hallazgos y filtros; no ejecuta comandos ni cambia reglas por su cuenta.
 
 ## Instalar y abrir
@@ -14,9 +16,9 @@ python3 -m venv .venv
 
 Abre `http://127.0.0.1:8765` e introduce la clave que muestra la terminal. Los datos se guardan en `~/.local/share/logsentinel/portal`. Usa `--data-dir /ruta` para otra instancia. El portal escucha exclusivamente en loopback, requiere sesión y comprueba origen y CSRF.
 
-1. En **Máquinas**, crea una ficha o utiliza **Detectar este equipo**.
-2. En **Fuentes**, elige archivo, carpeta, journal local o recepción remota. Revisa los permisos del usuario que ejecuta el portal. La captura se activa expresamente; **Leer ahora** permite una prueba manual.
-3. En **Modelo y análisis**, configura Ollama o una API compatible, modelo, contexto efectivo, cadencia, sensibilidad y presupuesto. Prueba el modelo con datos sintéticos y activa el análisis periódico cuando estés listo. El servicio del modelo se instala por separado.
+1. Abre **Configuración guiada**: primero guarda y prueba el LLM. El servicio del modelo se instala por separado.
+2. Crea o reutiliza una **Máquina** y conecta una **Fuente**: journal sin ruta, archivo/carpeta con ruta absoluta, o recepción remota con emisor. La prueba de lectura comprueba permisos; importar histórico puede incorporar todos los registros disponibles.
+3. Termina el asistente para activar el análisis automático al intervalo elegido. Las fuentes activas se leen continuamente (sondeos aproximadamente cada 2 segundos más lectura), incluso con el análisis pausado. El estado superior muestra próxima ejecución, última recepción, resultado y cobertura. El navegador puede cerrarse. **Modelo y análisis** ofrece los ajustes avanzados y el idioma de nuevos hallazgos.
 4. Consulta **Problemas**, su evidencia y **Copiar prompt**. **No notificar** mantiene el análisis; una regla de exclusión evita enviar las líneas coincidentes al modelo.
 5. Configura destinos en **Notificaciones**. Guardar no envía mensajes; **Enviar prueba** sí. Revisa los resultados en **Actividad**.
 
@@ -33,6 +35,7 @@ Los servidores LLM fuera de loopback requieren activar la autorización de enví
 - Sistema, archivo local, Telegram, Slack, Discord, Hermes, n8n y webhook genérico. Cola persistente, alcance por máquina/fuente, umbral, enfriamiento, reintentos y resultado desconocido ante interrupción.
 - Volumen original/comprimido, cobertura y tokens por máquina; atribución estimada por fuente cuando se comparten llamadas. El uso no reportado se muestra como desconocido.
 - Backup coherente y restauración en un directorio nuevo.
+- Asistente de inicio, selector español/inglés persistente y ayuda LLM disponible desde cualquier pantalla. La ayuda de configuración no recibe logs ni credenciales; el asistente de logs usa una muestra reciente de la máquina seleccionada.
 
 ## Enviar desde otro equipo
 
@@ -70,6 +73,7 @@ Hermes recibe un webhook firmado V2 y un identificador de entrega estable. La pl
 .venv/bin/python -m pip install playwright
 .venv/bin/python -m playwright install chromium
 .venv/bin/python scripts/portal_smoke.py
+.venv/bin/python scripts/setup_smoke.py
 ```
 
 `constraints-tested-py312.txt` registra las versiones del entorno comprobado; úsalo como constraints de instalación en Python 3.12. La CI añade una matriz de versiones de Python; sus resultados en GitHub aún deben ejecutarse tras publicar los commits.

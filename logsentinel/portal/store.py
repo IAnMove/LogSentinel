@@ -12,7 +12,6 @@ import os
 import secrets
 import sqlite3
 import time
-from datetime import datetime, timezone
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -244,7 +243,14 @@ class Store:
         return len(unique)
 
     def events(
-        self, machine_id="", source_id="", status="", limit=100, offset=0, ids=None
+        self,
+        machine_id="",
+        source_id="",
+        status="",
+        limit=100,
+        offset=0,
+        ids=None,
+        newest=False,
     ):
         query = "SELECT * FROM events WHERE 1=1"
         params = []
@@ -261,7 +267,11 @@ class Store:
                 return []
             query += " AND id IN (" + ",".join("?" for _ in ids) + ")"
             params.extend(ids)
-        query += " ORDER BY received,rowid LIMIT ? OFFSET ?"
+        query += (
+            " ORDER BY received DESC,rowid DESC LIMIT ? OFFSET ?"
+            if newest
+            else " ORDER BY received,rowid LIMIT ? OFFSET ?"
+        )
         params.extend([min(limit, 5000), offset])
         with self.connect() as db:
             rows = db.execute(query, params).fetchall()

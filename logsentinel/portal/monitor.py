@@ -53,10 +53,19 @@ class Monitor:
             ).fetchone()[0]
             last_event = db.execute("SELECT max(received) FROM events").fetchone()[0]
         due = max(self.next_due, (self.analyzer.started or 0) + cfg.interval_seconds)
+        capture = "inactive"
+        if self.background and sources:
+            capture = (
+                "starting"
+                if self.capture_heartbeat is None
+                else (
+                    "active" if time.time() - self.capture_heartbeat < 30 else "delayed"
+                )
+            )
         return {
             "server_time": time.time(),
             "background": self.background,
-            "capture": "active" if self.background and sources else "inactive",
+            "capture": capture,
             "capture_heartbeat": self.capture_heartbeat,
             "last_event": last_event,
             "enabled_sources": len(sources),
