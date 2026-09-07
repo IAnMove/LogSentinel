@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 import asyncio
+from collections import deque
 import hashlib
 import json
 import time
@@ -159,6 +160,23 @@ class ReviewClient:
             self.store.record_usage(
                 job, machine, list(sources), kind, start, inp, out, status, detail
             )
+
+
+def interleave_services(events, offset=0):
+    """Preserve each service's order while sharing the admitted context window."""
+    buckets = {}
+    for event in events:
+        buckets.setdefault(event.get("service", "unknown"), deque()).append(event)
+    queues = list(buckets.values())
+    if queues:
+        first = offset % len(queues)
+        queues = queues[first:] + queues[:first]
+    result = []
+    while queues:
+        for queue in queues:
+            result.append(queue.popleft())
+        queues = [queue for queue in queues if queue]
+    return result
 
 
 def compact(events, budget):
@@ -360,13 +378,16 @@ class Analyzer:
                         # Triggers have priority over surrounding info. Never
                         # substitute the oldest history for today's pending logs.
                         queues.append(
-                            triggers
-                            + [e for e in context if e["id"] not in trigger_ids]
+                            interleave_services(triggers, index)
+                            + interleave_services(
+                                [e for e in context if e["id"] not in trigger_ids],
+                                index,
+                            )
                         )
                 if deferred:
                     self.store.mark(deferred, "sampled")
                 candidates = []
-                # Interleave sources so a noisy service cannot consume the whole window.
+                # Share the window between sources and their services, keeping triggers first.
                 while any(queues) and len(candidates) < cfg.max_events:
                     for queue in queues:
                         if queue and len(candidates) < cfg.max_events:
