@@ -100,6 +100,7 @@ aside {
   padding: 28px 20px;
   display: flex;
   flex-direction: column;
+  overflow-y: auto;
 }
 .brand {
   font-size: 22px;
@@ -155,7 +156,7 @@ nav button.active {
 }
 main {
   margin-left: 230px;
-  padding: 35px 44px;
+  padding: 65px 44px 85px;
   max-width: 1600px;
 }
 header {
@@ -377,6 +378,7 @@ dialog::backdrop {
   background: white;
   margin: 15px 0;
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 a {
   color: var(--accent);
@@ -400,7 +402,7 @@ a {
   aside {
     position: static;
     width: 100%;
-    padding: 18px;
+    padding: 55px 18px 18px;
   }
   nav {
     flex-direction: row;
@@ -441,6 +443,72 @@ a {
   .metric {
     font-size: 24px;
   }
+}
+
+.language-control {
+  position: absolute;
+  top: 12px;
+  right: 22px;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  z-index: 2;
+  background: var(--surface);
+  border-radius: 6px;
+  padding: 0 6px;
+}
+.language-control select {
+  width: auto;
+  min-height: 34px;
+  padding: 4px;
+}
+.monitor-status {
+  border: 1px solid #b7d8cd;
+  border-left: 4px solid var(--accent);
+  border-radius: 8px;
+  padding: 16px 20px;
+  background: var(--soft);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 24px;
+}
+.monitor-status div {
+  overflow-wrap: anywhere;
+}
+.monitor-warning {
+  color: #9b4324;
+  font-weight: 600;
+}
+.setup-steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 20px;
+}
+.setup-steps button {
+  flex: 1;
+  min-width: 130px;
+}
+.help-toggle {
+  position: fixed;
+  right: 24px;
+  bottom: 18px;
+  box-shadow: 0 3px 15px #122b3126;
+  z-index: 3;
+}
+#help-dialog {
+  width: min(650px, 94vw);
+}
+#help-conversation {
+  max-height: 40vh;
+  overflow-y: auto;
+}
+#help-form button {
+  margin-top: 12px;
 }
 
 #nav button.quiet {
