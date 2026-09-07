@@ -16,6 +16,12 @@ Open `http://127.0.0.1:8765` and enter the key printed by the process. Data defa
 
 Use the language selector to choose English or Spanish. English is the default, regardless of the browser's language. Your explicit selection is saved in this browser and takes precedence on future visits. Original evidence, saved user content and existing findings are not translated. The language for new model findings is a separate setting.
 
+**Appearance** offers Classic (default), Paper, Tokyo Night, Gruvbox and Rosé Pine.
+The choice stays in this browser and switching preserves unsaved forms. The
+optional **Desktop** page pairs a read-only [Omarchy Quattro widget](OMARCHY.md).
+**Observer health** shows source availability, resource freshness, storage pressure,
+worker faults and per-service throughput without spending model tokens.
+
 ## Setup wizard
 
 1. **Connect the LLM:** save an Ollama or compatible API URL, model ID and optional API key. Test the saved configuration with synthetic data. A successful test proves connectivity and JSON format, not detection quality. Use the server's loaded context size, not a model family's theoretical maximum. Remote servers require explicit permission to transmit context.

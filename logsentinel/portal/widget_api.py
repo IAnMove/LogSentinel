@@ -10,7 +10,7 @@ from .rules import redact
 
 
 def register_widget(app, store, monitor, telemetry, health):
-    cache = {}
+    cache = {"value": None}
 
     @app.get("/api/widget")
     def configuration():
@@ -48,8 +48,9 @@ def register_widget(app, store, monitor, telemetry, health):
             hashlib.sha256(token.encode()).hexdigest(), expected
         ):
             raise HTTPException(401)
-        if cache and time.time() - cache["generated"] < 5:
-            return cache
+        previous = cache["value"]
+        if previous and time.time() - previous["generated"] < 5:
+            return previous
         state = monitor.state()
         with store.connect() as db:
             problems = db.execute(
@@ -74,8 +75,7 @@ def register_widget(app, store, monitor, telemetry, health):
                     ),
                 )
             )
-        cache.clear()
-        cache.update(
+        result = dict(
             schema_version=1,
             generated=time.time(),
             health=health.state()["state"],
@@ -89,4 +89,6 @@ def register_widget(app, store, monitor, telemetry, health):
             machines=machines,
             total_machines=len(profiles),
         )
-        return cache
+        # Replace the snapshot atomically; another request may still serialize the old one.
+        cache["value"] = result
+        return result

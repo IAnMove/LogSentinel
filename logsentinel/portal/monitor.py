@@ -69,7 +69,7 @@ class Monitor:
                 db.execute("SELECT status,count(*) FROM events GROUP BY status")
             )
             failed = db.execute(
-                "SELECT count(*) FROM jobs WHERE status IN ('failed','retry')"
+                "SELECT count(*) FROM jobs WHERE status IN ('failed','retry','partial')"
             ).fetchone()[0]
             last_event = db.execute("SELECT max(received) FROM events").fetchone()[0]
         retry_after = float(self.store.meta("model_retry_after") or 0)

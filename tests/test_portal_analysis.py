@@ -2,7 +2,7 @@ import asyncio
 import pytest
 from logsentinel.portal.store import Store
 from logsentinel.portal.models import Machine
-from logsentinel.portal.analysis import Analyzer, compact
+from logsentinel.portal.analysis import Analyzer, compact, interleave_services
 from logsentinel.portal.rules import redact
 
 
@@ -19,6 +19,18 @@ def data(tmp_path):
         ],
     )
     return s, m
+
+
+def test_context_is_shared_with_quiet_services_without_losing_events():
+    events = [{"id": "busy-" + str(i), "service": "python"} for i in range(100)] + [
+        {"id": "ssh", "service": "sshd"},
+        {"id": "disk", "service": "kernel"},
+    ]
+    result = interleave_services(events)
+    assert [e["service"] for e in result[:3]] == ["python", "sshd", "kernel"]
+    assert len(result) == len(events)
+    assert [e for e in result if e["service"] == "python"] == events[:100]
+    assert interleave_services(events, 1)[0]["service"] == "sshd"
 
 
 @pytest.mark.asyncio

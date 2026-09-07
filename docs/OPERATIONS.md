@@ -125,3 +125,23 @@ The command reports pending/quarantined counts and the latest capture/delivery
 status without printing credentials. Sender transitions also go to stderr, visible
 in the sender service journal. Run senders under a service manager with automatic
 restart; a stopped sender cannot report its own outage without receiver heartbeats.
+
+## Throughput and partial analysis
+
+Observer health also shows arrival and covered-event rates, recent first-pass LLM
+latency, and the busiest services with separate capacity and policy gaps. These
+figures use retained events from the last hour, exclude synthetic measurements,
+and obey the machine scope. They do not include expired originals and are not a
+model detection benchmark.
+
+Within the admitted batch, context is shared between services as well as sources;
+the first service rotates across cycles. Trigger events still precede context.
+This prevents a noisy admitted service from taking every prompt slot, but does not
+provide unlimited ingestion or guarantee that every service fits in a small model.
+
+If original-evidence verification fails after a valid first pass, its findings are
+saved as preliminary and the job is marked `partial`, with the error retained.
+Coverage remains `compact`; the app does not claim originals were reviewed. Open
+the finding to request an investigation when the model is available. Repeated
+automatic-cycle failures back off to at most one hour; a successful manual test or
+scan clears the backoff. Capture continues throughout.

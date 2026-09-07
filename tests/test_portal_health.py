@@ -7,6 +7,7 @@ from test_portal_api import client, machine_source
 from test_portal_telemetry import configured, sample
 from logsentinel.portal.models import Destination
 from logsentinel.portal.app import create_app
+from logsentinel.portal.capacity import capacity_report
 
 
 def test_quiet_sources_are_healthy_but_explicit_heartbeats_expire_and_recover(
@@ -147,6 +148,31 @@ def test_full_storage_keeps_diagnostics_visible(client, monkeypatch):
     state = health.tick()
     assert state["state"] == "degraded"
     assert "Storage full" in state["checks"][0]["persistence_error"]
+
+
+def test_capacity_diagnostics_preserve_machine_scope_and_separate_policy(client):
+    c, store = client
+    machine, source = machine_source(c)
+    other, other_source = machine_source(c)
+    store.ingest(
+        store.get("source", source),
+        [{"origin": str(i), "message": "entry", "service": "app"} for i in range(4)],
+    )
+    events = store.events(source_id=source)
+    for event, status in zip(events, ("compact", "capacity", "sampled", "measured")):
+        store.mark([event["id"]], status)
+    store.ingest(
+        store.get("source", other_source), [{"origin": "other", "message": "different"}]
+    )
+    result = capacity_report(store, machine)
+    assert (
+        result["events"],
+        result["reviewed"],
+        result["capacity"],
+        result["policy"],
+    ) == (3, 1, 1, 1)
+    assert all(s["machine_id"] == machine for s in result["services"])
+    assert c.get("/api/capacity?machine_id=unknown").status_code == 404
 
 
 @pytest.mark.asyncio

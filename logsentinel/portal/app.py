@@ -30,6 +30,7 @@ from .telemetry_api import register_telemetry
 from .notify import Outbox
 from .health import HealthMonitor
 from .widget_api import register_widget
+from .capacity import capacity_report
 from .rules import validate_rule, matches, excluded, redact, sanitize
 
 STATIC = Path(__file__).parent / "static"
@@ -188,6 +189,12 @@ def create_app(directory, background=True):
         return dict(
             health_monitor.state(), error=store.meta("health_worker_error") or ""
         )
+
+    @app.get("/api/capacity")
+    def capacity(machine_id: str = ""):
+        if machine_id and not store.get("machine", machine_id):
+            raise HTTPException(404, "Unknown machine")
+        return capacity_report(store, machine_id)
 
     @app.get("/healthz")
     def healthz():
