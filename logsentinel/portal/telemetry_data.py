@@ -29,6 +29,10 @@ class TelemetryConfig(Model):
     disk_threshold: float = Field(default=90, ge=10, le=100)
     inode_threshold: float = Field(default=90, ge=10, le=100)
     consecutive_samples: int = Field(default=3, ge=1, le=30)
+    critical_threshold: float = Field(default=98, ge=10, le=100)
+    cpu_critical_samples: int = Field(default=3, ge=1, le=30)
+    notify_recovery: bool = True
+    stale_intervals: int = Field(default=3, ge=2, le=60)
     spike_points: float = Field(default=30, ge=5, le=100)
     cooldown_seconds: int = Field(default=1800, ge=60, le=86400)
     llm_enabled: bool = False

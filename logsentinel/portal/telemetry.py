@@ -61,7 +61,10 @@ class Telemetry:
                 raise ValueError(
                     "This host is already monitored under another machine; disable that mapping first"
                 )
+        previous = self.data.config(machine)
         self.store.put("telemetry_config", cfg.model_dump(), "telemetry:" + machine)
+        if cfg.enabled and not previous.enabled:
+            self.store.set_meta("health_since:metrics:" + machine, str(time.time()))
         self.store.put(
             "source",
             Source(
@@ -89,7 +92,7 @@ class Telemetry:
                 if not latest
                 else (
                     "stale"
-                    if age > cfg.interval_seconds * 3
+                    if age > cfg.interval_seconds * cfg.stale_intervals
                     else "partial" if latest["errors"] else "active"
                 )
             )
@@ -141,7 +144,10 @@ class Telemetry:
             for row in rows:
                 pending = MetricSample.model_validate_json(gzip.decompress(row[0]))
                 # Delayed historical uploads contribute to history, never current alarms.
-                if time.time() - pending.observed <= cfg.interval_seconds * 3:
+                if (
+                    time.time() - pending.observed
+                    <= cfg.interval_seconds * cfg.stale_intervals
+                ):
                     self.evaluate(machine, pending, cfg)
                 with self.store.connect() as db:
                     db.execute(
@@ -180,12 +186,34 @@ class Telemetry:
                 count = (
                     state.get("consecutive", 0)
                     if sample.observed - state.get("observed", 0)
-                    <= cfg.interval_seconds * 3
+                    <= cfg.interval_seconds * 1.5
                     else 0
                 )
                 if kind == "capacity":
-                    count = count + 1 if value >= threshold else 0
-                    active = count >= cfg.consecutive_samples or value >= 98
+                    advances = (
+                        not state.get("counted_at")
+                        or sample.observed - state["counted_at"]
+                        >= cfg.interval_seconds * 0.8
+                    )
+                    count = count + int(advances) if value >= threshold else 0
+                    critical_count = (
+                        state.get("critical_count", 0)
+                        if sample.observed - state.get("observed", 0)
+                        <= cfg.interval_seconds * 1.5
+                        else 0
+                    )
+                    critical_count = (
+                        critical_count + int(advances)
+                        if value >= cfg.critical_threshold
+                        else 0
+                    )
+                    if advances:
+                        state["counted_at"] = sample.observed
+                    state["critical_count"] = critical_count
+                    critical = value >= cfg.critical_threshold and (
+                        key != "cpu_pct" or critical_count >= cfg.cpu_critical_samples
+                    )
+                    active = count >= cfg.consecutive_samples or critical
                     # Five percentage points of hysteresis prevents flapping.
                     if state.get("active") and value >= threshold - 5:
                         active = True
@@ -194,10 +222,12 @@ class Telemetry:
                         threshold=threshold,
                         consecutive=count,
                         required=cfg.consecutive_samples,
+                        critical_threshold=cfg.critical_threshold,
+                        critical_samples=critical_count,
                     )
                     severity = (
                         "CRITICAL"
-                        if value >= 98
+                        if critical
                         else "HIGH" if value >= max(95, threshold) else "MEDIUM"
                     )
                 else:
@@ -211,7 +241,8 @@ class Telemetry:
                     )
                     severity = "MEDIUM"
                 if active and (
-                    not state.get("notified")
+                    not state.get("active")
+                    or not state.get("notified")
                     or sample.observed - state["notified"] >= cfg.cooldown_seconds
                     or (severity == "CRITICAL" and state.get("severity") != "CRITICAL")
                 ):
@@ -220,6 +251,17 @@ class Telemetry:
                     )
                     state["notified"] = sample.observed
                     state["severity"] = severity
+                if not active and state.get("active") and state.get("problem_id"):
+                    self.alert(
+                        machine,
+                        sample,
+                        key,
+                        kind,
+                        detail,
+                        state.get("severity", severity),
+                        recovered=True,
+                        notify=cfg.notify_recovery,
+                    )
                 state.update(
                     active=active,
                     consecutive=count,
@@ -232,7 +274,18 @@ class Telemetry:
                         (machine, state_key, dumps(state)),
                     )
 
-    def alert(self, machine, sample, key, kind, detail, severity):
+    def alert(
+        self,
+        machine,
+        sample,
+        key,
+        kind,
+        detail,
+        severity,
+        *,
+        recovered=False,
+        notify=True,
+    ):
         source = self.store.get("source", "metrics:" + machine)
         origin = sample.id + ":" + key + ":" + kind
         message = "Resource " + kind + ": " + key
@@ -240,6 +293,7 @@ class Telemetry:
             metric=key,
             detector=kind,
             observed=sample.observed,
+            recovered=recovered,
             measurement=detail,
             sample=sample.model_dump(),
         )
@@ -293,7 +347,22 @@ class Telemetry:
                 else "Check processes, trends and expected workload. Open Metrics to analyze the trend. Identify the cause before terminating processes or deleting files."
             ),
         )
-        return self.analyzer.save_finding(machine, finding, [event])
+        if recovered:
+            finding["title"] = ("Recuperado: " if spanish else "Recovered: ") + finding[
+                "title"
+            ]
+            finding["summary"] = (
+                "La medición ha vuelto al rango esperado. "
+                if spanish
+                else "The measurement has returned to the expected range. "
+            ) + dumps(detail)
+        return self.analyzer.save_finding(
+            machine,
+            finding,
+            [event],
+            status="resolved" if recovered else "open",
+            notify=notify,
+        )
 
     def tick(self):
         now = time.time()

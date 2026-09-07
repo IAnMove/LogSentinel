@@ -17,7 +17,13 @@ class Monitor:
         signature = (cfg.enabled, cfg.interval_seconds)
         if signature != self.signature:
             self.next_due = time.time()
+            if self.signature is not None:
+                self.reset_backoff()
             self.signature = signature
+
+    def reset_backoff(self):
+        self.store.set_meta("model_cycle_failures", "0")
+        self.store.set_meta("model_retry_after", "0")
 
     async def tick(self):
         self.reschedule()
@@ -30,10 +36,20 @@ class Monitor:
         if (
             cfg.enabled
             and time.time() >= self.next_due
+            and time.time() >= float(self.store.meta("model_retry_after") or 0)
             and not self.analyzer.lock.locked()
         ):
             self.next_due = time.time() + cfg.interval_seconds
-            await self.analyzer.cycle()
+            result = await self.analyzer.cycle()
+            if result.get("errors"):
+                failures = min(
+                    10, int(self.store.meta("model_cycle_failures") or 0) + 1
+                )
+                self.store.set_meta("model_cycle_failures", str(failures))
+                delay = min(3600, cfg.interval_seconds * (2 ** (failures - 1)))
+                self.store.set_meta("model_retry_after", str(time.time() + delay))
+            elif result.get("calls"):
+                self.reset_backoff()
 
     def state(self):
         self.reschedule()
@@ -41,7 +57,7 @@ class Monitor:
         sources = [
             s
             for s in self.store.objects("source")
-            if s["enabled"] and s["kind"] != "metrics"
+            if s["enabled"] and s["kind"] not in ("metrics", "health")
         ]
         result = json.loads(self.store.meta("analysis_result") or "{}")
         health = {
@@ -56,7 +72,12 @@ class Monitor:
                 "SELECT count(*) FROM jobs WHERE status IN ('failed','retry')"
             ).fetchone()[0]
             last_event = db.execute("SELECT max(received) FROM events").fetchone()[0]
-        due = max(self.next_due, (self.analyzer.started or 0) + cfg.interval_seconds)
+        retry_after = float(self.store.meta("model_retry_after") or 0)
+        due = max(
+            self.next_due,
+            (self.analyzer.started or 0) + cfg.interval_seconds,
+            retry_after,
+        )
         capture = "inactive"
         if self.background and sources:
             capture = (
@@ -88,4 +109,8 @@ class Monitor:
             "capacity": counts.get("capacity", 0),
             "error_events": counts.get("error", 0),
             "failed_jobs": failed,
+            "retry_after": retry_after if retry_after > time.time() else None,
+            "consecutive_failed_cycles": int(
+                self.store.meta("model_cycle_failures") or 0
+            ),
         }

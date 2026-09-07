@@ -1,4 +1,7 @@
 import hashlib
+import asyncio
+import json
+import time
 import httpx
 import pytest
 from logsentinel.portal.app import create_app
@@ -40,6 +43,7 @@ async def test_lost_ack_retries_same_events_and_reclaims_sender_spool(
             str(path), "http://localhost", source, "synthetic", spool, once=True
         )
     assert len(store.events()) == 2
+    assert json.loads(store.meta("health:" + source))["status"] == "ok"
     assert len(Store(spool).events(status="pending")) == 2
     monkeypatch.setattr(
         httpx, "AsyncClient", lambda **kwargs: original(transport=transport, **kwargs)
@@ -49,3 +53,77 @@ async def test_lost_ack_retries_same_events_and_reclaims_sender_spool(
     assert Store(spool).events() == []
     await forward(str(path), "http://localhost", source, "synthetic", spool, once=True)
     assert len(store.events()) == 2
+    with pytest.raises(ValueError, match="another receiver"):
+        await forward(
+            str(path), "http://localhost", "other", "synthetic", spool, once=True
+        )
+
+
+@pytest.mark.asyncio
+async def test_slow_delivery_does_not_stop_capture(tmp_path):
+    from logsentinel.portal.sender import run_workers
+
+    store = Store(tmp_path)
+    captured = []
+    sending = asyncio.Event()
+
+    async def capture():
+        captured.append(time.monotonic())
+
+    async def deliver():
+        sending.set()
+        await asyncio.Event().wait()
+
+    task = asyncio.create_task(run_workers(capture, deliver, 0.05, store, False))
+    await sending.wait()
+    await asyncio.sleep(0.35)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert len(captured) >= 3
+
+
+def test_spool_rejects_concurrent_senders_and_wrong_identity(tmp_path):
+    from logsentinel.portal.sender import spool_lock
+
+    store = Store(tmp_path)
+    with spool_lock(store, ["same"]):
+        with pytest.raises(ValueError, match="Another sender"):
+            with spool_lock(store, ["same"]):
+                pass
+    with pytest.raises(ValueError, match="another receiver"):
+        with spool_lock(store, ["different"]):
+            pass
+
+
+def test_heartbeat_is_source_bound_and_does_not_invent_events(tmp_path):
+    from fastapi.testclient import TestClient
+
+    app = create_app(tmp_path, background=False)
+    store = app.state.store
+    machine = store.put("machine", Machine(name="remote").model_dump())
+    source = store.put(
+        "source",
+        Source(
+            name="stream", machine_id=machine, kind="push", enabled=True
+        ).model_dump(),
+    )
+    store.set_meta("push:" + source, hashlib.sha256(b"synthetic").hexdigest())
+    with TestClient(app, base_url="http://localhost") as c:
+        endpoint = "/heartbeat/" + source
+        body = {"ok": True, "pending": 0}
+        headers = {"Authorization": "Bearer synthetic"}
+        assert c.post(endpoint, json=body).status_code == 401
+        assert (
+            c.post(endpoint, json=dict(body, pending=-1), headers=headers).status_code
+            == 400
+        )
+        assert c.post(endpoint, json=body, headers=headers).status_code == 200
+        assert not store.events()
+        c.post(endpoint, json={"ok": False, "pending": 10}, headers=headers)
+        c.post(
+            "/ingest/" + source,
+            json={"events": [{"id": "old", "raw": "history"}]},
+            headers=headers,
+        )
+        assert json.loads(store.meta("health:" + source))["status"] == "error"

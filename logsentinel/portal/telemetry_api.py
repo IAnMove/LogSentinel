@@ -4,6 +4,7 @@ import asyncio
 import hashlib
 import hmac
 import secrets
+import time
 from typing import Literal
 
 from fastapi import Request, HTTPException
@@ -90,13 +91,23 @@ def register_telemetry(app, telemetry):
             raise HTTPException(409, "Remote metrics disabled")
         body = SampleBatch.model_validate(await request.json())
         accepted = 0
+        acknowledged, rejected = [], []
+        if any(sample.observed > time.time() + 60 for sample in body.samples):
+            raise HTTPException(
+                400, "Metric timestamp is more than 60 seconds in the future"
+            )
         try:
             for sample in body.samples:
+                if sample.observed < time.time() - cfg.retention_days * 86400:
+                    rejected.append({"id": sample.id, "reason": "expired"})
+                    continue
                 accepted += await asyncio.to_thread(telemetry.receive, id, sample)
+                acknowledged.append(sample.id)
         except OSError:
             raise HTTPException(507, "Storage full; retain and retry these samples")
         return {
             "status": "durable",
             "accepted": accepted,
-            "acknowledged": [s.id for s in body.samples],
+            "acknowledged": acknowledged,
+            "rejected": rejected,
         }

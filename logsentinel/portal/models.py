@@ -33,7 +33,7 @@ class Machine(Model):
 class Source(Model):
     machine_id: str
     name: str = Field(min_length=1, max_length=120)
-    kind: Literal["file", "folder", "journald", "push", "metrics"] = "file"
+    kind: Literal["file", "folder", "journald", "push", "metrics", "health"] = "file"
     path: str = Field(default="", max_length=4096)
     pattern: str = Field(default="*.log*", min_length=1, max_length=200)
     enabled: bool = False
@@ -47,6 +47,7 @@ class Source(Model):
         max_length=4000,
     )
     context_minutes: int = Field(default=5, ge=0, le=60)
+    heartbeat_timeout_seconds: int = Field(default=0, ge=0, le=86400)
 
     @model_validator(mode="after")
     def valid_path(self):
@@ -70,6 +71,9 @@ class Settings(Model):
     disk_limit_mb: int = Field(default=1024, ge=32, le=1_000_000)
     sensitivity: Literal["light", "balanced", "thorough"] = "balanced"
     remote_allowed: bool = False
+    health_alerts: bool = True
+    health_grace_seconds: int = Field(default=30, ge=5, le=3600)
+    storage_warning_percent: int = Field(default=80, ge=50, le=99)
 
     @model_validator(mode="after")
     def budgets(self):
