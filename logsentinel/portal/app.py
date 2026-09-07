@@ -401,6 +401,10 @@ def create_app(directory, background=True):
 
     @app.post("/api/model/test")
     async def model_test():
+        if analyzer.lock.locked():
+            raise HTTPException(409, "Analysis already running; try the model test shortly")
+        cfg = store.settings()
+        started = time.monotonic()
         result = await ReviewClient(store).call(
             {
                 "events": [],
@@ -411,9 +415,26 @@ def create_app(directory, background=True):
         from .models import Verdict
 
         Verdict.model_validate(result)
+        usage = {}
+        with store.connect() as db:
+            row = db.execute(
+                "SELECT input_tokens,output_tokens,duration FROM usage "
+                "WHERE kind='diagnostic' ORDER BY created DESC LIMIT 1"
+            ).fetchone()
+            if row:
+                usage = {
+                    "input_tokens": row[0],
+                    "output_tokens": row[1],
+                    "seconds": row[2],
+                }
         return {
             "ok": True,
-            "message": "Model returned a valid synthetic response; detection quality is not measured by this check",
+            "provider": cfg.llm.provider,
+            "model": cfg.llm.model,
+            "seconds": usage.get("seconds", time.monotonic() - started),
+            "input_tokens": usage.get("input_tokens"),
+            "output_tokens": usage.get("output_tokens"),
+            "message": "Conexión correcta: el modelo devolvió JSON válido. Esta prueba no mide la calidad de detección.",
         }
 
     @app.post("/api/scan")
