@@ -2,6 +2,7 @@
 
 import json
 import time
+from pathlib import Path
 from urllib.parse import urlsplit
 import httpx
 from .collect import Collector
@@ -19,6 +20,12 @@ async def forward(path, receiver, source_id, token, directory, once=False):
     ):
         raise ValueError("Use HTTPS or a loopback SSH tunnel")
     store = Store(directory)
+    # Bind relative CLI paths to this working directory on first use. Upgrades of
+    # legacy relative-path spools must run from their original working directory.
+    path = str(Path(path).expanduser().absolute())
+    existing = store.get("source", "sender")
+    if existing and str(Path(existing["path"]).expanduser().absolute()) != path:
+        raise ValueError("This spool belongs to another path")
     with spool_lock(store, ["logs", receiver.rstrip("/"), source_id, path]):
         collector = Collector(store)
         source = store.get("source", "sender")
@@ -33,7 +40,10 @@ async def forward(path, receiver, source_id, token, directory, once=False):
             store.put("source", model.model_dump(), "sender")
             source = store.get("source", "sender")
         elif source["path"] != path:
-            raise ValueError("This spool belongs to another path")
+            source["path"] = path
+            store.put(
+                "source", {k: v for k, v in source.items() if k != "id"}, "sender"
+            )
         heartbeat_due = 0
         headers = {"Authorization": "Bearer " + token}
         try:

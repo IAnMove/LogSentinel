@@ -51,6 +51,8 @@ async def test_lost_ack_retries_same_events_and_reclaims_sender_spool(
     await forward(str(path), "http://localhost", source, "synthetic", spool, once=True)
     assert len(store.events()) == 2
     assert Store(spool).events() == []
+    monkeypatch.chdir(tmp_path)
+    await forward(path.name, "http://localhost", source, "synthetic", spool, once=True)
     await forward(str(path), "http://localhost", source, "synthetic", spool, once=True)
     assert len(store.events()) == 2
     with pytest.raises(ValueError, match="another receiver"):
@@ -81,6 +83,31 @@ async def test_slow_delivery_does_not_stop_capture(tmp_path):
     with pytest.raises(asyncio.CancelledError):
         await task
     assert len(captured) >= 3
+
+
+@pytest.mark.asyncio
+async def test_wrong_path_does_not_bind_a_legacy_spool(tmp_path):
+    store = Store(tmp_path / "spool")
+    original = tmp_path / "original.log"
+    original.write_text("entry\n")
+    store.put(
+        "source",
+        Source(
+            name="legacy", machine_id="sender", path=str(original), enabled=True
+        ).model_dump(),
+        "sender",
+    )
+    with pytest.raises(ValueError, match="another path"):
+        await forward(
+            str(tmp_path / "wrong.log"),
+            "http://localhost",
+            "remote",
+            "synthetic",
+            store.directory,
+            once=True,
+        )
+    assert store.meta("sender_binding") is None
+    assert store.get("source", "sender")["path"] == str(original)
 
 
 def test_spool_rejects_concurrent_senders_and_wrong_identity(tmp_path):
