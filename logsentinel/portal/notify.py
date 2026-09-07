@@ -18,7 +18,7 @@ from .store import uid, dumps
 RANK = {"LOW": 1, "MEDIUM": 2, "HIGH": 3, "CRITICAL": 4}
 
 
-def enqueue(store, problem_id):
+def enqueue(store, problem_id, event_type="problem.updated"):
     problem = store.problem(problem_id)
     if not problem:
         return
@@ -36,7 +36,8 @@ def enqueue(store, problem_id):
             )
     payload = {
         "schema_version": 1,
-        "event_type": "problem.updated",
+        "event_type": event_type,
+        "status": problem["status"],
         "problem_id": problem_id,
         "machine_id": problem["machine_id"],
         "title": redact(problem["title"]),
@@ -66,6 +67,8 @@ def enqueue(store, problem_id):
             ).fetchone()
             cooldown = (
                 recent
+                and json.loads(recent[0]).get("event_type", "problem.updated")
+                == event_type
                 and RANK[json.loads(recent[0])["severity"]] >= RANK[problem["severity"]]
             )
             id = uid()

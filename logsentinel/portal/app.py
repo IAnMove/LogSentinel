@@ -28,6 +28,7 @@ from .research import Researcher, InvestigationRequest
 from .telemetry import Telemetry
 from .telemetry_api import register_telemetry
 from .notify import Outbox
+from .health import HealthMonitor
 from .rules import validate_rule, matches, excluded, redact, sanitize
 
 STATIC = Path(__file__).parent / "static"
@@ -59,6 +60,7 @@ def create_app(directory, background=True):
     researcher = Researcher(store, analyzer)
     telemetry = Telemetry(store, analyzer)
     outbox = Outbox(store)
+    health_monitor = HealthMonitor(store, analyzer, monitor, telemetry, background)
     sessions = {}
     attempts = {}
 
@@ -72,6 +74,7 @@ def create_app(directory, background=True):
                     failed = True
                     store.set_meta("collector_error", "Collector worker failed")
             monitor.capture_heartbeat = time.time()
+            health_monitor.beat("capture")
             if not failed:
                 store.set_meta("collector_error", "")
             await asyncio.sleep(2)
@@ -91,11 +94,22 @@ def create_app(directory, background=True):
                 raise
             except Exception as exc:
                 store.set_meta("worker_error", redact(str(exc))[:200])
+            health_monitor.beat("analysis")
             await asyncio.sleep(1)
 
     async def delivering():
         while True:
-            await outbox.drain()
+            try:
+                await outbox.drain()
+                store.set_meta("delivery_worker_error", "")
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                store.set_meta(
+                    "delivery_worker_error",
+                    safe_error(exc, (store.settings().llm.api_key,)),
+                )
+            health_monitor.beat("notifications")
             await asyncio.sleep(2)
 
     async def measuring():
@@ -107,7 +121,19 @@ def create_app(directory, background=True):
                 raise
             except Exception as exc:
                 store.set_meta("telemetry_worker_error", safe_error(exc))
+            health_monitor.beat("metrics")
             await asyncio.sleep(2)
+
+    async def supervising():
+        while True:
+            try:
+                await asyncio.to_thread(health_monitor.tick)
+                store.set_meta("health_worker_error", "")
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                store.set_meta("health_worker_error", safe_error(exc))
+            await asyncio.sleep(5)
 
     @asynccontextmanager
     async def lifespan(app):
@@ -125,7 +151,7 @@ def create_app(directory, background=True):
         tasks = (
             [
                 asyncio.create_task(f())
-                for f in (collecting, working, delivering, measuring)
+                for f in (collecting, working, delivering, measuring, supervising)
             ]
             if background
             else []
@@ -152,7 +178,21 @@ def create_app(directory, background=True):
     app.state.telemetry = telemetry
     app.state.monitor = monitor
     app.state.outbox = outbox
+    app.state.health = health_monitor
     register_telemetry(app, telemetry)
+
+    @app.get("/api/health")
+    async def observer_health():
+        return dict(
+            health_monitor.state(), error=store.meta("health_worker_error") or ""
+        )
+
+    @app.get("/healthz")
+    def healthz():
+        state = health_monitor.state()["state"]
+        return JSONResponse(
+            {"status": state}, status_code=200 if state == "ok" else 503
+        )
 
     @app.middleware("http")
     async def guard(request, call_next):
@@ -334,9 +374,10 @@ def create_app(directory, background=True):
                     "Disable local metrics before changing this machine to imported",
                 )
         if kind == "source" and (
-            data["kind"] == "metrics" or (old and old["kind"] == "metrics")
+            data["kind"] in ("metrics", "health")
+            or (old and old["kind"] in ("metrics", "health"))
         ):
-            raise HTTPException(400, "Manage this source in the Metrics page")
+            raise HTTPException(400, "Manage this source in Metrics or Health")
         scoped(kind, data)
         if kind == "source" and old and data["machine_id"] != old["machine_id"]:
             raise HTTPException(
@@ -350,6 +391,8 @@ def create_app(directory, background=True):
         ):
             raise HTTPException(400, "Unknown problem")
         id = store.put(kind, data, id)
+        if kind == "source" and (not old or not old["enabled"] and data["enabled"]):
+            store.set_meta("health_since:source:" + id, str(time.time()))
         return public(kind, dict(data, id=id))
 
     @app.delete("/api/objects/{kind}/{id}")
@@ -509,6 +552,7 @@ def create_app(directory, background=True):
                 }
             ),
         )
+        monitor.reset_backoff()
         return {
             "ok": True,
             "provider": cfg.llm.provider,
@@ -523,7 +567,10 @@ def create_app(directory, background=True):
     async def scan():
         if analyzer.lock.locked():
             raise HTTPException(409, "Analysis already running")
-        return await analyzer.cycle()
+        result = await analyzer.cycle()
+        if result.get("calls") and not result.get("errors"):
+            monitor.reset_backoff()
+        return result
 
     def model_fingerprint(cfg):
         return hashlib.sha256(
@@ -998,8 +1045,7 @@ def create_app(directory, background=True):
             "message": "Shown once. Previous token is now invalid.",
         }
 
-    @app.post("/ingest/{id}")
-    async def ingest(id: str, request: Request):
+    def push_source(id, request):
         token = request.headers.get("authorization", "").removeprefix("Bearer ")
         expected = store.meta("push:" + id)
         if not expected or not hmac.compare_digest(
@@ -1009,6 +1055,39 @@ def create_app(directory, background=True):
         source = store.get("source", id)
         if not source or source["kind"] != "push" or not source["enabled"]:
             raise HTTPException(409, "Source disabled")
+        return source
+
+    @app.post("/heartbeat/{id}")
+    async def heartbeat(id: str, request: Request):
+        push_source(id, request)
+        body = await request.json()
+        if (
+            not isinstance(body, dict)
+            or type(body.get("ok")) is not bool
+            or type(body.get("pending")) is not int
+            or not 0 <= body["pending"] <= 1000000000
+            or set(body) != {"ok", "pending"}
+        ):
+            raise HTTPException(
+                400, "Send ok (boolean) and pending (non-negative integer)"
+            )
+        old = json.loads(store.meta("health:" + id) or "{}")
+        old.update(
+            heartbeat=time.time(),
+            status="ok" if body["ok"] else "error",
+            sender_pending=body["pending"],
+            error=(
+                ""
+                if body["ok"]
+                else "Sender capture failed; inspect its spool and permissions"
+            ),
+        )
+        store.set_meta("health:" + id, dumps(old))
+        return {"ok": True}
+
+    @app.post("/ingest/{id}")
+    async def ingest(id: str, request: Request):
+        source = push_source(id, request)
         body = await request.json()
         items = body.get("events", [])
         if not isinstance(items, list) or not 1 <= len(items) <= 500:
@@ -1028,10 +1107,11 @@ def create_app(directory, background=True):
             count = store.ingest(source, entries)
         except OSError:
             raise HTTPException(507, "Storage full; retain and retry these events")
-        store.set_meta(
-            "health:" + id,
-            dumps({"status": "ok", "checked": time.time(), "new_events": count}),
-        )
+        old_health = json.loads(store.meta("health:" + id) or "{}")
+        old_health.update(checked=time.time(), new_events=count)
+        if "heartbeat" not in old_health:
+            old_health["status"] = "ok"
+        store.set_meta("health:" + id, dumps(old_health))
         return {
             "status": "durable",
             "accepted": count,

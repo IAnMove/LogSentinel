@@ -609,6 +609,21 @@ def metrics_forward_command(
     asyncio.run(forward_metrics(receiver, machine_id, token, spool, interval, disk, once))
 
 
+@app.command(name="spool-status")
+def spool_status(spool: str = typer.Option(..., "--spool")) -> None:
+    """Read sender queue counts and errors without opening or changing the spool."""
+    import json
+    import sqlite3
+    path = Path(spool).expanduser().resolve() / "sentinel.db"
+    if not path.is_file():
+        raise typer.BadParameter("Spool database does not exist")
+    with sqlite3.connect(path.as_uri() + "?mode=ro", uri=True) as db:
+        counts = dict(db.execute("SELECT status,count(*) FROM events GROUP BY status"))
+        oldest = db.execute("SELECT min(received) FROM events WHERE status='pending'").fetchone()[0]
+        workers = {key: json.loads(value) for key, value in db.execute("SELECT key,value FROM meta WHERE key IN ('sender_capture','sender_delivery','sender_quarantine')")}
+    print(json.dumps(dict(counts=counts, oldest_pending=oldest, workers=workers), indent=2))
+
+
 @app.command(name="restore")
 def restore_backup(backup: str, data_dir: str = typer.Option(..., "--data-dir")) -> None:
     """Restore a portal backup into a NEW directory (never overwrite live data)."""

@@ -61,3 +61,67 @@ El esquema actual es v1. Se rechazan versiones incompatibles. La base legacy se 
 ## Consulta de capacidad del modelo
 
 El formulario puede consultar los modelos disponibles y sugerir un presupuesto sin guardarlo automáticamente. En Ollama diferencia el máximo declarado de la ventana cargada; usa [los metadatos de `/api/show`](https://docs.ollama.com/api-reference/show-model-details) y [la información de modelos en ejecución](https://docs.ollama.com/api/ps). La sugerencia es una política conservadora de LogSentinel, no un benchmark de RAM o rendimiento. Una API compatible que solo publica nombres de modelos no permite deducir su contexto con fiabilidad.
+
+
+## Unattended operation
+
+The **Observer health** page checks capture, remote heartbeats (when configured),
+measurement freshness, storage, recent model failures and background workers.
+These checks run every five seconds without the LLM. A sustained failure creates
+an evidence-backed `monitor.health` finding; a recovery resolves the same finding.
+Existing notification destinations, minimum severity, machine scopes and mute
+rules apply. Configure notification destinations to receive alerts outside the UI.
+
+Health checks have a configurable grace period (30 seconds by default). Missing
+measurements mean missing data, not proof a host is powered off. A quiet local log
+remains healthy while collection checks succeed. Remote log heartbeat expiry is
+opt-in (Sources → Remote heartbeat timeout); leave it disabled for older senders.
+Disabling collection is not proof of recovery and does not close an incident.
+
+Resource warnings require consecutive samples spaced at the configured collection
+interval. Replayed or rapidly submitted samples cannot simulate sustained CPU
+pressure. Critical CPU needs three sustained samples by default; memory, disk,
+inode and swap exhaustion can still alert immediately at the critical threshold.
+Recoveries use hysteresis and are recorded against the existing resource finding;
+recovery notifications are configurable per machine.
+
+`GET /healthz` is an unauthenticated **minimal readiness check** on the loopback
+listener: HTTP 200 for healthy, 503 for starting/degraded/stale. It reveals no
+configuration or log data. `/api/health` requires the normal portal session and
+provides diagnostic details. A dead portal cannot report its own death: monitor
+the endpoint independently (for example from a systemd timer or an external
+uptime monitor through an SSH tunnel). The portal service should use `Restart=on-failure`.
+
+When the model is slower than incoming logs, capture continues. The portal reports
+unreviewed capacity explicitly; retained originals remain available until retention
+or quota expiry. Increase model throughput or use the source's structured priority,
+keyword and context selection with the filter preview. An unchecked line is never
+reported as safe. Neither the model's severity assessment nor a declared syslog
+priority is a guarantee of security.
+
+## Sender recovery
+
+`forward` and `metrics-forward` keep capture independent of HTTP delivery and retry
+failed connections with a 4–60 second backoff. They bind each spool to its receiver
+and source/machine and hold a single-writer lock. Stop older sender processes before
+upgrading. Never reuse a spool for another destination.
+
+Updated log senders emit an authenticated heartbeat every 30 seconds, including
+capture health and the queue size. Configure a receiver timeout of at least 120
+seconds to allow for connection retries. The receiver uses its own clock. Historical
+backlog arrival cannot mask a sender that reports failed capture.
+
+Expired metrics receive an explicit rejection, are retained locally with status
+`quarantined`, and stop blocking fresh samples. Only acknowledged samples are
+reclaimed. Quarantine takes space and is never automatically deleted: copy the spool
+with the sender stopped before inspecting or archiving these measurements. Future
+timestamps remain pending for retry; correct the sender clock if necessary.
+
+```sh
+logsentinel spool-status --spool ~/.local/share/logsentinel/metrics-spool
+```
+
+The command reports pending/quarantined counts and the latest capture/delivery
+status without printing credentials. Sender transitions also go to stderr, visible
+in the sender service journal. Run senders under a service manager with automatic
+restart; a stopped sender cannot report its own outage without receiver heartbeats.

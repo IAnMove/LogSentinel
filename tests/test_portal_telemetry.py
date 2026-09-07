@@ -28,7 +28,7 @@ def configured(c, s, **config):
 def sample(value=25, observed=None, **values):
     return MetricSample(
         observed=time.time() if observed is None else observed,
-        values=dict(cpu_pct=value, ram_pct=value, **values),
+        values={"cpu_pct": value, "ram_pct": value, **values},
     )
 
 
@@ -120,7 +120,9 @@ def test_critical_capacity_is_immediate_but_stale_uploads_do_not_alert(client):
     assert not s.rows("problems")
     assert monitor.status(machine)["state"] == "stale"
     monitor.receive(machine, sample(99))
-    assert len(s.rows("problems")) == 2
+    assert (
+        len(s.rows("problems")) == 1
+    )  # RAM exhaustion is immediate; brief CPU load is not.
     assert all(p["severity"] == "CRITICAL" for p in s.rows("problems"))
 
 
@@ -324,3 +326,15 @@ async def test_remote_sender_recovers_lost_ack_and_binds_spool(tmp_path, monkeyp
         await forward_metrics(
             "http://localhost", "other", "synthetic", spool, once=True
         )
+    old = sample(observed=time.time() - 31 * 86400)
+    local = Store(spool)
+    local.ingest(
+        {"id": "metric-sender", "machine_id": machine},
+        [{"origin": old.id, "message": json.dumps(old.model_dump())}],
+    )
+    await forward_metrics("http://localhost", machine, "synthetic", spool, once=True)
+    assert not local.events(status="pending")
+    quarantined = local.events(status="quarantined")
+    assert len(quarantined) == 1
+    assert json.loads(quarantined[0]["message"])["id"] == old.id
+    assert app.state.telemetry.status(machine)["retained_samples"] == 3

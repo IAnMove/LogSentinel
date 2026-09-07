@@ -53,6 +53,38 @@ async def test_multiple_findings_persist_and_references_are_checked(data):
 
 
 @pytest.mark.asyncio
+async def test_verification_failure_preserves_first_pass_and_explicit_partial_coverage(
+    data,
+):
+    s, machine = data
+    analyzer = Analyzer(s)
+
+    async def fake(payload, **kwargs):
+        if kwargs.get("kind") == "investigation":
+            raise ValueError("verification timeout")
+        return {
+            "findings": [
+                {
+                    "title": "Capacity issue",
+                    "summary": "Check the pool",
+                    "severity": "HIGH",
+                    "category": "reliability",
+                    "evidence_ids": [payload["groups"][0]["id"]],
+                }
+            ]
+        }
+
+    analyzer.client.call = fake
+    result = await analyzer.cycle()
+    assert result["errors"] == 1
+    assert s.rows("jobs")[0]["status"] == "partial"
+    assert len(s.rows("problems")) == 1
+    problem = s.problem(s.rows("problems")[0]["id"])
+    assert "Preliminary" in problem["data"]["reasoning"]
+    assert all(e["status"] == "compact" for e in s.events())
+
+
+@pytest.mark.asyncio
 async def test_bad_references_do_not_turn_into_clean_analysis(data):
     s, m = data
     a = Analyzer(s)
