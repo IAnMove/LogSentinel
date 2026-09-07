@@ -2,6 +2,8 @@
 
 ## Conservación y capacidad
 
+El portal separa captura continua y análisis periódico. Las fuentes activadas se sondean aproximadamente cada dos segundos más el tiempo de lectura; el LLM se ejecuta según `interval_seconds` si `enabled` está activado. El navegador puede cerrarse. El estado superior muestra última recepción, próxima ejecución, resultado del ciclo y cobertura; el modelo y la captura pueden fallar por separado. La ayuda LLM comparte el turno con el análisis. El asistente inicial prueba el modelo antes de permitir completar el alta automática.
+
 La unidad de almacenamiento es un segmento gzip inmutable dentro de SQLite, no un archivo que deba esperar al cierre del escritor. Ingestión, cursor y referencias se confirman en una transacción con `synchronous=FULL`. El escritor de logs externo sigue siendo responsable de su propia rotación.
 
 El análisis consume ventanas acotadas. Las repeticiones conservan cuenta, primera/última fecha e IDs originales. Los estados `compact` y `reviewed` distinguen revisión compactada de originales aportados a la segunda pasada; no certifican ausencia de fallos. `capacity`, `excluded` y `error` identifican falta de cobertura, exclusión o análisis fallido. Se conserva el original aunque no quepa en la ventana.
@@ -14,9 +16,13 @@ Sin tokenizer específico se usan bytes UTF-8 como estimación conservadora y se
 
 ### Selección de contexto para el LLM
 
-Cada fuente conserva sus originales aunque se active un filtro. `Todas las líneas` envía los eventos pendientes al compactador actual. `Prioridad + palabras` selecciona prioridades journald numéricas hasta el límite configurado y términos case-insensitive. `Solo palabras disparadoras` usa únicamente esos términos. `Adaptativa` combina ambas cosas y añade eventos de la misma fuente dentro de la ventana de contexto configurada antes y después del disparador.
+Cada fuente conserva sus originales conforme a retención aunque se active un filtro. `Todas las líneas` envía los eventos pendientes al compactador actual, sujeto al presupuesto. `Prioridad + palabras` selecciona prioridades journald numéricas hasta el límite configurado **o** términos case-insensitive. `Solo palabras disparadoras` usa únicamente esos términos. Los tres modos selectivos añaden contexto ya retenido alrededor del disparador; `Adaptativa` es actualmente un alias de prioridad + palabras, no un control automático de capacidad. Los disparadores tienen preferencia sobre sus vecinos cuando no cabe todo.
+
+La ventana no espera a que lleguen los minutos futuros ni reabre automáticamente la investigación cuando llegan. Está limitada a 100 disparadores y vecinos acotados por lado, con un máximo total de 5.000 eventos candidatos y el presupuesto final de la llamada. La consulta usa fecha del evento cuando existe y hora de recepción como alternativa. El chat de logs utiliza una muestra reciente; el chat de ayuda de configuración no recibe evidencia ni credenciales.
 
 La prioridad es el campo estructurado `PRIORITY` de journald, no una palabra buscada en `MESSAGE`: 0 es emergente y 7 debug. En archivos planos normalmente no existe ese campo y se usan los términos disparadores. Los términos reducen el volumen y nunca convierten una coincidencia en un hallazgo; el LLM sigue teniendo que justificarlo con evidencia. Los eventos seleccionados como contexto pueden haber sido marcados `sampled`, pero se conservan y se vuelven a consultar alrededor de un disparador posterior.
+
+La prioridad la declara el productor: no prueba que un registro sea benigno ni que no pueda falsificarse. El filtrado por prioridad también reduce cobertura; la UI distingue eventos sin revisar por política de eventos sin revisar por capacidad.
 
 Para un uso inicial equilibrado, configura `Adaptativa`, prioridad máxima `4` (warning), contexto `5` minutos y términos como `error`, `critical`, `failed`, `panic`, `permission denied`, `out of memory` y `no space left on device`. Si eliges solo crítico, usa modo `Prioridad + palabras`, límite `2` y conserva términos de error como red de seguridad. No uses `grep -v info` sobre el archivo original.
 

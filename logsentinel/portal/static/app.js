@@ -844,6 +844,12 @@ function settingsView(root) {
   );
   add("max_tokens", t("Máximo de salida"), "number", c.llm.max_tokens);
   add(
+    "timeout_seconds",
+    t("Tiempo de espera del LLM (segundos)"),
+    "number",
+    c.llm.timeout_seconds,
+  );
+  add(
     "enable_thinking",
     t("Activar razonamiento prolongado del modelo"),
     "select",
@@ -945,6 +951,7 @@ function settingsView(root) {
         model: d.model,
         api_key: d.api_key,
         max_tokens: d.max_tokens,
+        timeout_seconds: d.timeout_seconds,
         enable_thinking:
           d.enable_thinking === "auto" ? null : d.enable_thinking === "true",
       };
@@ -955,6 +962,7 @@ function settingsView(root) {
         "model",
         "api_key",
         "max_tokens",
+        "timeout_seconds",
         "enable_thinking",
       ].forEach((k) => delete d[k]);
       await api("/api/settings", d);

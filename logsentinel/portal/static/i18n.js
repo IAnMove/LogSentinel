@@ -2,6 +2,10 @@
 // Only interface strings go through t(). Log evidence and user content remain verbatim.
 const translations = {
   Idioma: "Language",
+  "Tiempo de espera del LLM (segundos)": "LLM timeout (seconds)",
+  "Iniciando captura…": "Starting capture…",
+  "Captura sin confirmación reciente; revisa las fuentes":
+    "Capture has no recent heartbeat; check sources",
   "Último evento recibido: ": "Last event received: ",
   Baja: "Low",
   Media: "Medium",

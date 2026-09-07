@@ -420,15 +420,32 @@ class Analyzer:
                 machine_id=machine["id"], status="capacity", limit=100
             )
             if uncovered:
+                spanish = cfg.language == "es"
                 self.save_finding(
                     machine["id"],
                     {
-                        "title": "Cobertura reducida: llegan más logs de los que se pueden revisar",
-                        "summary": "Hay eventos conservados que no han pasado por el modelo. Revisa el presupuesto, el intervalo y filtros de información repetida.",
+                        "title": (
+                            "Cobertura reducida: llegan más logs de los que se pueden revisar"
+                            if spanish
+                            else "Reduced coverage: more logs arrive than can be reviewed"
+                        ),
+                        "summary": (
+                            "Hay eventos conservados que no han pasado por el modelo. Revisa el presupuesto, el intervalo y filtros de información repetida."
+                            if spanish
+                            else "Some retained events have not reached the model. Review the budget, interval and filters for repetitive information."
+                        ),
                         "severity": "MEDIUM",
                         "category": "monitor.capacity",
-                        "reasoning": "Contador determinista de eventos sin revisar; no es una conclusión del LLM.",
-                        "next_steps": "Consultar cobertura y previsualizar filtros antes de excluir información.",
+                        "reasoning": (
+                            "Contador determinista de eventos sin revisar; no es una conclusión del LLM."
+                            if spanish
+                            else "Deterministic count of unreviewed events; this is not an LLM conclusion."
+                        ),
+                        "next_steps": (
+                            "Consultar cobertura y previsualizar filtros antes de excluir información."
+                            if spanish
+                            else "Check coverage and preview filters before excluding information."
+                        ),
                         "evidence_ids": [e["id"] for e in uncovered],
                     },
                     [e["id"] for e in uncovered],

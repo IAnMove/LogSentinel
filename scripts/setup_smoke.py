@@ -111,7 +111,10 @@ with tempfile.TemporaryDirectory(prefix="sentinel-setup-") as tmp:
             wait_until(lambda: len(app.state.store.rows("jobs")) >= 1)
             with logs.open("a") as f:
                 f.write("2026-09-07T12:00:10Z demo app: ERROR another failure\n")
-            wait_until(lambda: len(app.state.store.rows("jobs")) >= 2)
+            wait_until(
+                lambda: len(app.state.store.rows("jobs")) >= 2
+                and all(j["status"] == "done" for j in app.state.store.rows("jobs"))
+            )
             assert all(j["status"] == "done" for j in app.state.store.rows("jobs"))
             page.get_by_text("Continuous capture active", exact=True).wait_for()
             assert app.state.store.settings().enabled

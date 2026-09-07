@@ -849,7 +849,7 @@ def create_app(directory, background=True):
             raise HTTPException(409, "Monitor is analyzing; try chat shortly")
         rows = [
             e
-            for e in store.events(machine, source, limit=100)
+            for e in store.events(machine, source, limit=100, newest=True)
             if not excluded(store, e)
         ]
         history = [

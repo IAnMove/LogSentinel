@@ -1,5 +1,15 @@
 # Seguimiento de implementación
 
+## Actualización operativa · 7 de septiembre de 2026
+
+La instancia local ya tiene journald y Qwen3-8B activos, con captura continua y análisis cada 300 segundos. El [informe de revisión actual](REVIEW_2026-09-07.md) sustituye las afirmaciones de ausencia de servicio o fuentes reales del cierre histórico que sigue más abajo.
+
+Se han añadido estado verificable del monitor, asistente de configuración que empieza por el LLM, ayuda de configuración sin logs, interfaz español/inglés y elección del idioma de nuevos hallazgos. Se corrigieron fallos reales de formato del modelo, selección de contexto antiguo, contabilidad de errores y muestra antigua del chat. La prueba real de conexión y un ciclo automático pasan; la capacidad observada sigue dejando muchos registros sin revisar. El piloto de calidad y las entregas externas siguen pendientes.
+
+Validación de esta revisión: **249 tests aprobados**, dos recorridos de Chromium y prueba real del modelo. Los recorridos usan temporales y un modelo simulado; el nuevo comprueba dos ciclos automáticos, captura independiente, ES/EN y privacidad del chat de ayuda. Los dos avisos de deprecación de TestClient siguen pendientes de la evolución de sus dependencias. Commits iniciales de esta revisión: `2dfd02a` y `bdccf7b`; los ajustes finales y el informe se registran en una etapa posterior.
+
+El resto de este documento conserva el registro del cierre inicial y debe leerse como histórico.
+
 El plan completo está en PRODUCT_DIRECTION.md. Este registro distingue capacidades implementadas de propuestas y validaciones externas pendientes.
 
 ## Etapas de la primera versión y commits

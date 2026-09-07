@@ -97,7 +97,15 @@ class Outbox:
             payload,
             (dest.get("token"), dest.get("secret"), self.store.settings().llm.api_key),
         )
-        text = f"[{payload.get('severity','INFO')}] {payload.get('machine','LogSentinel')}\n{payload.get('title','Prueba de notificación')}\n{payload.get('summary','Configuración de LogSentinel comprobada.')}\nProblema: {payload.get('problem_id','test')}"
+        spanish = self.store.settings().language == "es"
+        title = "Prueba de notificación" if spanish else "Test notification"
+        summary = (
+            "Configuración de LogSentinel comprobada."
+            if spanish
+            else "LogSentinel notification configuration tested."
+        )
+        problem = "Problema" if spanish else "Problem"
+        text = f"[{payload.get('severity','INFO')}] {payload.get('machine','LogSentinel')}\n{payload.get('title',title)}\n{payload.get('summary',summary)}\n{problem}: {payload.get('problem_id','test')}"
         text = redact(text, (dest.get("token"), dest.get("secret")))
         kind = dest["kind"]
         if kind == "file":
