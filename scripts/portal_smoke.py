@@ -55,6 +55,7 @@ with tempfile.TemporaryDirectory(prefix="sentinel-browser-") as d:
             )
             page.on("pageerror", lambda e: errors.append(str(e)))
             page.goto(f"http://127.0.0.1:{port}")
+            page.get_by_label("Language / Idioma").select_option("es")
             page.get_by_label("Clave de acceso").fill(
                 app.state.store.meta("admin_token")
             )

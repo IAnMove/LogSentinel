@@ -14,7 +14,7 @@ python3 -m venv .venv
 
 Open `http://127.0.0.1:8765` and enter the key printed by the process. Data defaults to `~/.local/share/logsentinel/portal`. Use `--port` and `--data-dir` to change those defaults. Run the portal as a user with permission to read the intended logs.
 
-Use the language selector to choose English or Spanish. It remembers your browser preference; new browsers use their preferred language, falling back to English. Original evidence, saved user content and existing findings are not translated. The language for new model findings is a separate setting.
+Use the language selector to choose English or Spanish. English is the default, regardless of the browser's language. Your explicit selection is saved in this browser and takes precedence on future visits. Original evidence, saved user content and existing findings are not translated. The language for new model findings is a separate setting.
 
 ## Setup wizard
 

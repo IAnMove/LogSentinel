@@ -69,7 +69,7 @@ with tempfile.TemporaryDirectory(prefix="sentinel-setup-") as tmp:
         with sync_playwright() as pw:
             browser = pw.chromium.launch(headless=True, args=["--no-sandbox"])
             page = browser.new_page(
-                viewport={"width": 1440, "height": 1050}, locale="en-US"
+                viewport={"width": 1440, "height": 1050}, locale="es-ES"
             )
             page.on("pageerror", lambda e: errors.append(str(e)))
             page.goto(f"http://127.0.0.1:{port}")

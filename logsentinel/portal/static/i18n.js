@@ -429,9 +429,7 @@ const reverseTranslations = Object.fromEntries(
 );
 let locale = "en";
 try {
-  locale =
-    localStorage.getItem("logsentinel-language") ||
-    (navigator.language.toLowerCase().startsWith("es") ? "es" : "en");
+  locale = localStorage.getItem("logsentinel-language") || "en";
 } catch {
   /* Browser storage can be disabled. */
 }
