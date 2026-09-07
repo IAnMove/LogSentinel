@@ -2,6 +2,10 @@
 
 ## Actualización operativa · 7 de septiembre de 2026
 
+Nueva etapa: [contexto por problema e investigaciones persistentes](PROBLEM_INVESTIGATIONS.md), y [monitorización de recursos por máquina](METRICS.md), con captura independiente, agregados diarios, umbrales/picos, portal ES/EN y emisor remoto con confirmaciones duraderas. La referencia técnica describe lo implementado y sus límites; los resultados de validación de la revisión anterior se conservan más abajo.
+
+Validación de la nueva etapa: cuatro recorridos de Chromium y análisis real de tendencias con Qwen3-8B. La prueba real detectó y permitió corregir una incompatibilidad de campos adicionales del modelo. Mediciones locales activadas cada 60 segundos; el análisis de logs continúa cada 300 segundos. No hay destinos de notificación configurados ni se han enviado avisos externos. El análisis de tendencias automático se activa por máquina de forma independiente.
+
 La instancia local ya tiene journald y Qwen3-8B activos, con captura continua y análisis cada 300 segundos. El [informe de revisión actual](REVIEW_2026-09-07.md) sustituye las afirmaciones de ausencia de servicio o fuentes reales del cierre histórico que sigue más abajo.
 
 Se han añadido estado verificable del monitor, asistente de configuración que empieza por el LLM, ayuda de configuración sin logs, interfaz español/inglés y elección del idioma de nuevos hallazgos. Se corrigieron fallos reales de formato del modelo, selección de contexto antiguo, contabilidad de errores y muestra antigua del chat. La prueba real de conexión y un ciclo automático pasan; la capacidad observada sigue dejando muchos registros sin revisar. El piloto de calidad y las entregas externas siguen pendientes.

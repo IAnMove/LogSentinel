@@ -1,0 +1,58 @@
+# Machine metrics
+
+Open **Metrics → a machine → Configure collection and alerts**. Enable measurements and choose **This host** for the portal's Linux host, or **Remote sender** for another machine. Only one local profile can collect this host's measurements. Imported logs alone cannot reveal another host's RAM, CPU or disk use.
+
+Default collection is every **60 seconds**, independent of log analysis, chat, browser sessions and model availability. The page refreshes every five seconds and marks readings stale after three missed intervals. This is a visible coverage warning; disconnected-machine notifications are not yet implemented.
+
+The collector reads CPU utilization and I/O wait, RAM availability, swap occupancy, 1/5/15-minute load, uptime, free disk space and free inodes. Disk paths default to `/`; add other **local** mount paths explicitly. CPU percentage requires two counter reads, excludes I/O wait and does not double-count guest CPU time. RAM uses `MemAvailable`, not `MemFree`; unconfigured swap and unavailable readings are omitted rather than invented as zero. Disk usage includes reserved space unavailable to the portal user. Source definitions follow the [Linux kernel `/proc` documentation](https://docs.kernel.org/filesystems/proc.html). Container readings may describe the host rather than container limits; cgroup-specific monitoring is not implemented.
+
+Samples are gzip-compressed in SQLite and acknowledged only after persistence. Each sample has a stable ID bound to a machine. Exact replays do not inflate statistics, while reuse of an ID with different data is rejected. Hourly and UTC daily aggregates retain minimum, maximum, average and count. Defaults: **30 days** of samples/hourly aggregates and **365 days** of daily aggregates. Retention runs hourly; database backups include telemetry. The portal's database quota also applies to metrics. Displayed compressed bytes cover sample payloads, not indexes or daily aggregate rows.
+
+Minima/maxima are extrema of **observed samples**, not guaranteed continuous peaks. Hourly charts show maxima and means, with gaps where there are no samples. Daily history can show 7, 30, 90 or 365 days. Means weight samples equally; irregular sampling is visible through counts, not corrected by invented measurements. There is no historical backfill before collection starts.
+
+## Alerts
+
+CPU/RAM/disk/inode warning defaults are 90%; swap defaults to 80%. An alert normally requires three consecutive samples at or above its threshold. Any monitored percentage at 98% or above creates an immediate critical alert. Active threshold conditions clear five percentage points below the threshold. A spike is a rise of 30 percentage points against the mean of up to ten previous samples, requiring at least three baseline samples within fifteen configured intervals. Thresholds, consecutive sample count, spike size and cooldown are configurable; the immediate 98% critical limit is currently fixed.
+
+The default cooldown is 30 minutes per resource and detector. Escalation to critical bypasses that cooldown. Alerts retain their actual measured values, threshold/baseline and original sample as evidence, are grouped by machine/resource/detector, and use the existing **Problems**, notification channels and notification-muting rules. Threshold evidence is marked **Measured by threshold**, so it is not presented as LLM-reviewed log coverage. Recovered conditions disappear from active metric warnings; the historical problem remains open until reviewed. Delayed uploads older than three sample intervals contribute to history but do not trigger current alerts.
+
+High utilization may be expected, including while a local LLM is working. A capacity warning is a measurement, not proof of an attack or a faulty process. Occupied swap does not prove active swapping. Use expected workload and trends to tune warnings.
+
+## LLM trends
+
+**Analyze trends** queues one durable model request for the last 24 hours, 7 days or 30 days. The payload includes latest readings and bounded hourly/daily aggregates. When the context budget is small, adjacent windows are merged while preserving extrema and sample counts. If necessary, omitted metric names are reported explicitly. The saved result exposes the exact input and coverage report. Metric references in the response must exist in that input. Calls and tokens are attributed to the machine's metrics source.
+
+Automatic trend analysis is optional, defaults off and has a separate configurable interval (default one hour). It shares the model lock with log scans and investigations; collection and threshold alerts continue independently. Failed and interrupted analyses are visible. It cannot run commands, automatically change settings or create a diagnosis unsupported by supplied measurements. Its interpretation is advisory; long-term quality and forecasting require real history and calibration.
+
+## Another machine through SSH
+
+On the portal create/select that machine, enable remote metrics and generate its dedicated metrics token. Log-source tokens are separate. Keep the token out of command-line arguments and shell history. For a portal listening on port 8766, run on the remote sender:
+
+```bash
+ssh -NT -L 18766:127.0.0.1:8766 user@portal-server
+```
+
+In another terminal on the sender, with LogSentinel installed:
+
+```bash
+read -rsp 'Metrics token: ' LOGSENTINEL_METRICS_TOKEN
+export LOGSENTINEL_METRICS_TOKEN
+logsentinel metrics-forward --receiver http://127.0.0.1:18766 \
+  --machine-id MACHINE_ID --interval 60 --disk / --disk /srv
+```
+
+Use the same interval on the sender and portal; `--disk` is repeatable and identifies local paths on the sender. The sender stores compressed pending samples in `~/.local/share/logsentinel/metrics-spool`, retries with the same IDs and reclaims acknowledged segments. A spool is bound to a receiver and machine and has a single-writer lock. `--once` is useful for connection tests; it takes one new sample and attempts one batch, so it may leave older queued batches for subsequent runs. Transport requires HTTPS or loopback (for SSH), validates TLS, and does not follow redirects.
+
+Keep the sender process and tunnel running using your service manager. No SSH keys, firewall rules or remote services are installed automatically. Disk exhaustion stops sender capture rather than silently deleting queued samples. Clocks must be reasonably synchronized: samples over 60 seconds in the future or older than receiver retention are rejected. Permanent authorization/retention errors require operator intervention; the queue is retained for inspection.
+
+## Limits and possible next additions
+
+CPU temperatures, GPU utilization, SMART/NVMe health, network throughput, per-process attribution, service availability, cgroup limits, disk-pressure stall metrics and outage notifications are not included. They need specific data sources and, in some cases, additional permissions. Start with actual local history and measured false-positive rates before enabling more detectors. These readings are machine-level health signals, not a security audit or guaranteed prediction of exhaustion.
+
+## Local validation, 7 September 2026
+
+All **270 Python tests** and four Chromium journeys pass, covering problem context, deeper investigations, setup, automatic log capture, metrics settings, charts, English/Spanish and mobile layouts. Telemetry regressions cover missing swap, CPU warm-up, retained CPU history across a restart, extrema/averages, replay, machine authentication, sustained thresholds, spikes, hysteresis, retained remote queues after a lost acknowledgment, shared model locking and retention. Packaging uses an isolated build; `pip check` passes. Two dependency deprecation warnings remain in TestClient.
+
+Real measurements were enabled on the local `flipi` profile every 60 seconds, alongside the existing 300-second log analysis. Initial readings were approximately 53% RAM, 0.01% swap and 63% root disk utilization; collection continued during model requests. Automatic LLM trend calls remain opt-in. There are no notification destinations configured on this installation, so warnings remain visible in Problems until delivery is configured.
+
+The real Qwen3-8B initially returned additional `next_checks` and `incomplete_coverage` fields. They are now explicitly validated, bounded, persisted and rendered; malformed references are still rejected. The subsequent real trend call completed, with recommendations and an explicit warning that only a short history existed. That demonstrates integration, not long-term detection quality. No external notifications were sent. A coherent SQLite backup was made before the update.

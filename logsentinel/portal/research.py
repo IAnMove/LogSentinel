@@ -72,6 +72,7 @@ def related_events(store, problem, plan, minutes, max_scan=2000):
     services = {s.casefold() for s in plan.services} | {
         str(e.get("service", "")).casefold() for e in seeds
     }
+    services -= {"", "unknown"}
     seed_ids = {e["id"] for e in seeds}
     selected, matched, skipped = [], 0, 0
     # Keep memory bounded even if a retained event is close to the line limit.
@@ -86,7 +87,9 @@ def related_events(store, problem, plan, minutes, max_scan=2000):
                 continue
             if event["id"] in seed_ids:
                 continue
-            message = event.get("message", "").casefold()
+            message = (
+                event.get("message", "") + " " + dumps(event.get("metadata", {}))
+            ).casefold()
             score = sum(term in message for term in terms)
             service_match = str(event.get("service", "")).casefold() in services
             if score or service_match:

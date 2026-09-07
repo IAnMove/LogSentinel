@@ -542,3 +542,34 @@ details > div {
   color: #c5d7df;
   border-color: transparent;
 }
+.metric-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
+  gap: 14px;
+  margin-bottom: 18px;
+}
+.metric-grid .panel {
+  margin: 0;
+  min-width: 0;
+}
+.metric-value {
+  font-size: 1.7rem;
+  font-variant-numeric: tabular-nums;
+}
+.metric-chart {
+  width: 100%;
+  height: auto;
+  border-bottom: 1px solid #34465b;
+}
+.metric-chart polyline {
+  fill: none;
+  stroke-width: 2;
+}
+.metric-maximum {
+  stroke: #e5a152;
+  fill: #e5a152;
+}
+.metric-average {
+  stroke: #63b9e8;
+  fill: #63b9e8;
+}

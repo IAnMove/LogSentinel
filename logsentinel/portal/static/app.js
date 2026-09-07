@@ -14,6 +14,7 @@ let S = {},
 const names = {
   summary: t("Resumen"),
   machine: t("Máquinas"),
+  metrics: t("Métricas"),
   source: t("Fuentes"),
   problems: t("Problemas"),
   events: t("Histórico"),
@@ -280,6 +281,7 @@ async function render() {
   if (view === "settings") return settingsView(root);
   if (view === "problems") return problemList(root);
   if (view === "problem_detail") return problemPage(root);
+  if (view === "metrics") return metricsView(root);
   if (view === "events") return eventsView(root);
   if (view === "chat") return chatView(root);
   if (view === "activity") return activity(root);
@@ -495,7 +497,20 @@ function objectView(root) {
             render();
           }),
         ];
-        if (kind === "source") {
+        if (
+          kind === "machine" ||
+          (kind === "source" && obj.kind === "metrics")
+        ) {
+          if (kind === "source") b.length = 0;
+          b.push(
+            button(t("Métricas"), () => {
+              scope = kind === "machine" ? obj.id : obj.machine_id;
+              $("#machine-scope").value = scope;
+              navigate("metrics");
+            }),
+          );
+        }
+        if (kind === "source" && obj.kind !== "metrics") {
           b.push(
             button(t("Leer ahora"), async () => {
               const r = await api("/api/source/" + obj.id + "/poll", {});

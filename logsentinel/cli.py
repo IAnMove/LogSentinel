@@ -591,6 +591,24 @@ def forward_command(path: str, receiver: str = typer.Option(..., "--receiver"),
     asyncio.run(forward(path, receiver, source_id, token, spool, once))
 
 
+@app.command(name="metrics-forward")
+def metrics_forward_command(
+    receiver: str = typer.Option(..., "--receiver"),
+    machine_id: str = typer.Option(..., "--machine-id"),
+    interval: int = typer.Option(60, "--interval", min=10, max=3600),
+    disk: list[str] = typer.Option(None, "--disk"),
+    spool: str = typer.Option("~/.local/share/logsentinel/metrics-spool", "--spool"),
+    once: bool = typer.Option(False, "--once"),
+):
+    """Send this Linux host's metrics with a durable queue. Token: LOGSENTINEL_METRICS_TOKEN."""
+    import os
+    from logsentinel.portal.telemetry_forward import forward_metrics
+    token = os.environ.get("LOGSENTINEL_METRICS_TOKEN", "")
+    if not token:
+        raise typer.BadParameter("Set LOGSENTINEL_METRICS_TOKEN to the machine's metrics token")
+    asyncio.run(forward_metrics(receiver, machine_id, token, spool, interval, disk, once))
+
+
 @app.command(name="restore")
 def restore_backup(backup: str, data_dir: str = typer.Option(..., "--data-dir")) -> None:
     """Restore a portal backup into a NEW directory (never overwrite live data)."""

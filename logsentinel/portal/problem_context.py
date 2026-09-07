@@ -34,7 +34,7 @@ def clip(text, size):
 
 
 def event_view(event):
-    return {
+    result = {
         k: event.get(k)
         for k in (
             "id",
@@ -46,6 +46,16 @@ def event_view(event):
             "metadata",
         )
     }
+    if event.get("service") == "machine-metrics" and isinstance(
+        result.get("metadata"), dict
+    ):
+        # Keep the actual measured values even when the full host sample is big.
+        result["metadata"] = {
+            k: v
+            for k, v in result["metadata"].items()
+            if k in ("metric", "detector", "observed", "measurement")
+        }
+    return result
 
 
 def context_for(
@@ -136,7 +146,7 @@ def context_for(
     original_ids = {e["id"] for e in originals}
     # In a deep review, reserve space for newly retrieved evidence too.
     rows = (
-        (originals[:3] + list(additional) + originals[3:])
+        (originals[:1] + list(additional) + originals[1:])
         if additional is not None
         else originals
     )

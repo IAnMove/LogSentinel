@@ -21,6 +21,9 @@ Abre `http://127.0.0.1:8765` e introduce la clave que muestra la terminal. Los d
 3. Termina el asistente para activar el análisis automático al intervalo elegido. Las fuentes activas se leen continuamente (sondeos aproximadamente cada 2 segundos más lectura), incluso con el análisis pausado. El estado superior muestra próxima ejecución, última recepción, resultado y cobertura. El navegador puede cerrarse. **Modelo y análisis** ofrece los ajustes avanzados y el idioma de nuevos hallazgos.
 4. Consulta **Problemas**, su evidencia y **Copiar prompt**. **No notificar** mantiene el análisis; una regla de exclusión evita enviar las líneas coincidentes al modelo.
 5. Configura destinos en **Notificaciones**. Guardar no envía mensajes; **Enviar prueba** sí. Revisa los resultados en **Actividad**.
+6. En **Métricas**, abre una máquina y activa las mediciones: CPU, RAM, swap, discos, inodos, carga y tiempo encendido. Hay umbrales, picos, gráficas y mínimos/máximos diarios, además de análisis de tendencias con el LLM. [Configuración, retención y emisores remotos](docs/METRICS.md).
+
+Desde un problema, **Preguntar al asistente** muestra el hallazgo y envía su contexto y evidencias; puedes revisar el contenido exacto antes y después de consultar. **Ver más detalles** muestra originales y revisiones. **Buscar más detalles del problema** guarda una investigación ampliada sobre logs relacionados. [Alcance y límites de las investigaciones](docs/PROBLEM_INVESTIGATIONS.md).
 
 Los servidores LLM fuera de loopback requieren activar la autorización de envío remoto. Las claves de API y destinos son de escritura: el portal no las devuelve al navegador. Se almacenan en la base local con permisos de propietario, sin cifrado de aplicación. Los backups también contienen estas credenciales. La ocultación de secretos reconocibles no garantiza detectar todo dato sensible dentro de un log.
 
@@ -74,6 +77,8 @@ Hermes recibe un webhook firmado V2 y un identificador de entrega estable. La pl
 .venv/bin/python -m playwright install chromium
 .venv/bin/python scripts/portal_smoke.py
 .venv/bin/python scripts/setup_smoke.py
+.venv/bin/python scripts/problem_smoke.py
+.venv/bin/python scripts/metrics_smoke.py
 ```
 
 `constraints-tested-py312.txt` registra las versiones del entorno comprobado; úsalo como constraints de instalación en Python 3.12. La CI añade una matriz de versiones de Python; sus resultados en GitHub aún deben ejecutarse tras publicar los commits.

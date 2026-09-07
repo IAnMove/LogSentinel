@@ -29,6 +29,10 @@ The floating **Ask the LLM** window answers configuration questions using a buil
 
 ## Coverage, evidence and alerts
 
+**Ask the assistant** from a problem opens a conversation tied to that finding, with a visible summary and exact context preview. **View more details** shows original evidence and revisions; **Find more details about this problem** queues a persistent read-only investigation over related retained logs. [Investigation limits](PROBLEM_INVESTIGATIONS.md).
+
+**Metrics** adds local or remotely submitted CPU, RAM, swap, disk space, inode, load and uptime measurements. Enable collection per machine; configure threshold/spike alerts, compressed retention, daily minima/maxima and optional LLM trend analysis. Measurements continue while the model is busy. [Metrics setup and remote sender](METRICS.md).
+
 Open **Problems** for evidence, investigation prompts, resolution and notification muting. Muting a problem keeps analysis running. Exclusion rules keep retained originals but omit matching events from model input. Preview matches before saving.
 
 Coverage distinguishes pending, compact review, original review, policy selection, exclusion, capacity gaps and errors. Unreviewed data is not a clean security result. With too much incoming data, reduce repetitive application logging, preview narrowly scoped filters, tune the budget, or provide more model capacity. A small local model may not keep up with all system logs.
