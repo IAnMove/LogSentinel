@@ -572,7 +572,7 @@ class Analyzer:
             except asyncio.CancelledError:
                 with self.store.connect() as db:
                     db.execute(
-                        "UPDATE jobs SET status='retry',error='Interrupted',updated=? WHERE id=?",
+                        "UPDATE jobs SET status='retry',attempts=max(0,attempts-1),error='Interrupted',updated=? WHERE id=?",
                         (time.time(), job),
                     )
                 raise

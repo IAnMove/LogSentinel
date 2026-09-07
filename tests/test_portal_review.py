@@ -11,6 +11,25 @@ from logsentinel.portal.store import Store
 from tests.test_portal_api import client
 
 
+def test_recovery_does_not_strand_interrupted_last_attempt(tmp_path):
+    s = Store(tmp_path)
+    with s.connect() as db:
+        for id, status, error in [
+            ("crash", "running", None),
+            ("old", "retry", "Interrupted"),
+            ("failed", "failed", "ReadTimeout"),
+        ]:
+            db.execute(
+                "INSERT INTO jobs VALUES(?,?,?,?,?,?,3,?,?)",
+                (id, "machine", "[]", status, time.time(), time.time(), "{}", error),
+            )
+    s.recover()
+    jobs = {j["id"]: j for j in s.rows("jobs")}
+    assert jobs["crash"]["attempts"] == jobs["old"]["attempts"] == 2
+    assert jobs["crash"]["status"] == jobs["old"]["status"] == "retry"
+    assert jobs["failed"]["status"] == "failed" and jobs["failed"]["attempts"] == 3
+
+
 def test_model_list_steps_remain_bounded_and_errors_do_not_echo_input():
     finding = dict(
         title="x", summary="x", severity="HIGH", category="x", evidence_ids=["e"]

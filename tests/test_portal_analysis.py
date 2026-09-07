@@ -90,6 +90,7 @@ async def test_cancellation_retains_recoverable_job(data):
         await a.cycle()
     assert s.rows("jobs")[0]["status"] == "retry"
     assert len(s.events()) == 2
+    assert s.rows("jobs")[0]["attempts"] == 0
 
 
 def test_compaction_preserves_count_and_ids():
