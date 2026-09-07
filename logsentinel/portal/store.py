@@ -525,8 +525,13 @@ class Store:
     def recover(self):
         with self.connect() as db:
             db.execute(
-                "UPDATE jobs SET status='retry',error='Interrupted during analysis',updated=? WHERE status='running'",
+                "UPDATE jobs SET status='retry',attempts=max(0,attempts-1),error='Interrupted during analysis',updated=? WHERE status='running'",
                 (time.time(),),
+            )
+            # Older versions could strand an interrupted third attempt in a
+            # retry state that the scheduler would never select.
+            db.execute(
+                "UPDATE jobs SET attempts=2 WHERE status='retry' AND attempts>=3 AND error IN ('Interrupted','Interrupted during analysis')"
             )
             db.execute(
                 "UPDATE deliveries SET status='unknown',error='Interrupted during delivery' WHERE status='sending'"
