@@ -120,7 +120,7 @@ class LLMConfig(BaseModel):
     timeout_seconds: float = Field(default=120.0, gt=0, allow_inf_nan=False)
     temperature: float = 0.1
     max_tokens: int = Field(default=1024, ge=1)
-    enable_thinking: bool = False
+    enable_thinking: Optional[bool] = None
 
 
 class DesktopNotifierConfig(BaseModel):
