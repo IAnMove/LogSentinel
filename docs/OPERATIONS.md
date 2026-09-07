@@ -12,6 +12,14 @@ Sin tokenizer específico se usan bytes UTF-8 como estimación conservadora y se
 
 ## Fuentes
 
+### Selección de contexto para el LLM
+
+Cada fuente conserva sus originales aunque se active un filtro. `Todas las líneas` envía los eventos pendientes al compactador actual. `Prioridad + palabras` selecciona prioridades journald numéricas hasta el límite configurado y términos case-insensitive. `Solo palabras disparadoras` usa únicamente esos términos. `Adaptativa` combina ambas cosas y añade eventos de la misma fuente dentro de la ventana de contexto configurada antes y después del disparador.
+
+La prioridad es el campo estructurado `PRIORITY` de journald, no una palabra buscada en `MESSAGE`: 0 es emergente y 7 debug. En archivos planos normalmente no existe ese campo y se usan los términos disparadores. Los términos reducen el volumen y nunca convierten una coincidencia en un hallazgo; el LLM sigue teniendo que justificarlo con evidencia. Los eventos seleccionados como contexto pueden haber sido marcados `sampled`, pero se conservan y se vuelven a consultar alrededor de un disparador posterior.
+
+Para un uso inicial equilibrado, configura `Adaptativa`, prioridad máxima `4` (warning), contexto `5` minutos y términos como `error`, `critical`, `failed`, `panic`, `permission denied`, `out of memory` y `no space left on device`. Si eliges solo crítico, usa modo `Prioridad + palabras`, límite `2` y conserva términos de error como red de seguridad. No uses `grep -v info` sobre el archivo original.
+
 Los cursores contienen identidad del archivo, offset y comprobación de cola para detectar reemplazos/truncados. Las líneas sin salto final se esperan. Una carpeta puede incluir archivos rotados y archivos comprimidos estables; se procesan hasta 100 archivos por sondeo, 1.000 entradas por lote y 256 KB por línea. Los archivos comprimidos se limitan a 64 MiB comprimidos y 128 MiB expandidos. Archivos zip, tar y zst se rechazan. Un error de fuente aparece en su estado; no se interpreta como silencio saludable.
 
 La agrupación de continuaciones con sangría es heurística y se limita al lote. Para evidencia multilinea sin ambigüedad, usa JSON por evento. Los timestamps sin zona o año conservan la indicación `timestamp_inferred` en metadata; la zona de la máquina aporta contexto, no reescribe el timestamp original.

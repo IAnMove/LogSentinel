@@ -12,6 +12,7 @@ import os
 import secrets
 import sqlite3
 import time
+from datetime import datetime, timezone
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -297,6 +298,45 @@ class Store:
                         )
                     )
         return self.events(ids=list(dict.fromkeys(neighbors)), limit=150)
+
+    def context(self, ids, seconds=300, limit=5000):
+        """Return bounded same-source events around trigger timestamps."""
+        targets = self.events(ids=ids, limit=100)
+        if not targets:
+            return []
+        target_times = {}
+        source_ids = set()
+        for event in targets:
+            source_ids.add(event["source_id"])
+            value = event.get("timestamp")
+            try:
+                timestamp = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+                if timestamp.tzinfo is None:
+                    timestamp = timestamp.replace(tzinfo=timezone.utc)
+            except (TypeError, ValueError):
+                timestamp = None
+            target_times.setdefault(event["source_id"], []).append(timestamp)
+        selected = {}
+        for source_id in source_ids:
+            for event in self.events(source_id=source_id, limit=limit):
+                value = event.get("timestamp")
+                try:
+                    timestamp = datetime.fromisoformat(
+                        str(value).replace("Z", "+00:00")
+                    )
+                    if timestamp.tzinfo is None:
+                        timestamp = timestamp.replace(tzinfo=timezone.utc)
+                    include = any(
+                        target is None
+                        or abs((timestamp - target).total_seconds()) <= seconds
+                        for target in target_times[source_id]
+                        if target is None or target.tzinfo is not None
+                    )
+                except (TypeError, ValueError):
+                    include = event["id"] in ids
+                if include:
+                    selected[event["id"]] = event
+        return list(selected.values())
 
     def mark(self, ids, status):
         if not ids:
