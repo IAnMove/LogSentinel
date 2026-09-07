@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="es">
+<html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
@@ -7,33 +7,45 @@
     <link rel="stylesheet" href="/static/style.css" />
   </head>
   <body>
+    <label class="language-control"
+      ><span data-i18n="Idioma">Language</span
+      ><select id="language" aria-label="Language / Idioma">
+        <option value="en">English</option>
+        <option value="es">Español</option>
+      </select></label
+    >
     <section id="login" class="login">
       <div class="brand">◈ LogSentinel</div>
-      <h1>Tu observatorio de logs.</h1>
-      <p>
+      <h1 data-i18n="Tu observatorio de logs.">Your log observatory.</h1>
+      <p
+        data-i18n="Accede con la clave que aparece al iniciar el portal en este equipo."
+      >
         Accede con la clave que aparece al iniciar el portal en este equipo.
       </p>
       <form id="login-form">
         <label
-          >Clave de acceso<input
+          ><span data-i18n="Clave de acceso">Access key</span
+          ><input
             id="access-key"
             type="password"
             autocomplete="current-password"
             required /></label
-        ><button>Entrar al portal</button>
+        ><button data-i18n="Entrar al portal">Sign in</button>
       </form>
       <p id="login-error" role="alert"></p>
     </section>
     <div id="shell" hidden>
       <aside>
         <div class="brand">◈ LogSentinel</div>
-        <div class="eyebrow">OBSERVATORIO LOCAL</div>
+        <div class="eyebrow" data-i18n="OBSERVATORIO LOCAL">
+          LOCAL OBSERVATORY
+        </div>
         <nav id="nav" aria-label="Navegación principal"></nav>
         <div class="aside-footer">
-          <span class="dot"></span> Evidencia antes que conclusiones<button
-            id="logout"
-            class="quiet"
-          >
+          <span class="dot"></span>
+          <span data-i18n="Evidencia antes que conclusiones"
+            >Evidence before conclusions</span
+          ><button id="logout" data-i18n="Cerrar sesión" class="quiet">
             Cerrar sesión
           </button>
         </div>
@@ -41,18 +53,29 @@
       <main>
         <header>
           <div>
-            <div class="eyebrow">MÁQUINAS · LOGS · HALLAZGOS</div>
+            <div class="eyebrow" data-i18n="MÁQUINAS · LOGS · HALLAZGOS">
+              MACHINES · LOGS · FINDINGS
+            </div>
             <h1 id="page-title">Resumen</h1>
           </div>
           <label class="scope"
-            >Ámbito<select id="machine-scope">
+            ><span data-i18n="Ámbito">Scope</span
+            ><select id="machine-scope">
               <option value="">Todas las máquinas</option>
             </select></label
           >
         </header>
+        <div
+          id="monitor-status"
+          class="monitor-status"
+          aria-live="polite"
+        ></div>
         <div id="notice" role="status" hidden></div>
         <section id="content" aria-live="polite"></section>
       </main>
+      <button id="help-toggle" class="help-toggle" data-i18n="Ayuda con el LLM">
+        Ask the LLM
+      </button>
     </div>
     <dialog id="modal">
       <button id="close-modal" class="quiet close" aria-label="Cerrar">
@@ -60,6 +83,34 @@
       </button>
       <div id="modal-content"></div>
     </dialog>
+    <dialog id="help-dialog" aria-labelledby="help-title">
+      <button id="help-close" class="quiet close" aria-label="Close / Cerrar">
+        ×
+      </button>
+      <h2 id="help-title" data-i18n="Ayuda con el programa">
+        Help with LogSentinel
+      </h2>
+      <p
+        data-i18n="Este chat recibe tu pregunta y un resumen de configuración, sin logs ni credenciales. No cambia ajustes."
+      >
+        This chat receives your question and a configuration summary, without
+        logs or credentials. It cannot change settings.
+      </p>
+      <div id="help-conversation" role="log"></div>
+      <form id="help-form">
+        <label
+          ><span data-i18n="Tu pregunta">Your question</span
+          ><textarea
+            id="help-question"
+            required
+            maxlength="2000"
+          ></textarea></label
+        ><button id="help-send" data-i18n="Consultar">Ask</button>
+      </form>
+      <p id="help-status" role="status"></p>
+    </dialog>
+    <script src="/static/i18n.js" defer></script>
+    <script src="/static/setup.js" defer></script>
     <script src="/static/app.js" defer></script>
   </body>
 </html>

@@ -50,7 +50,9 @@ with tempfile.TemporaryDirectory(prefix="sentinel-browser-") as d:
     try:
         with sync_playwright() as pw:
             browser = pw.chromium.launch(headless=True, args=["--no-sandbox"])
-            page = browser.new_page(viewport={"width": 1440, "height": 1000})
+            page = browser.new_page(
+                viewport={"width": 1440, "height": 1000}, locale="es-ES"
+            )
             page.on("pageerror", lambda e: errors.append(str(e)))
             page.goto(f"http://127.0.0.1:{port}")
             page.get_by_label("Clave de acceso").fill(
