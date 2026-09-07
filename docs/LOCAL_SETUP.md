@@ -25,6 +25,15 @@ systemctl --user enable --now logsentinel-portal.service
 systemctl --user status logsentinel-portal.service
 ```
 
+En este equipo está instalado como servicio del sistema porque no hay un bus `systemd --user` disponible en la sesión:
+
+```bash
+sudo systemctl enable --now logsentinel-portal.service
+sudo systemctl status logsentinel-portal.service
+```
+
+La unidad ejecuta el proceso como `ina`; no necesita privilegios de root para leer las fuentes que ese usuario pueda leer.
+
 Si se ejecuta como servicio, la clave inicial se puede consultar en el journal de ese servicio. Protege el directorio de datos: contiene credenciales de destinos y del LLM.
 
 ## Acceso desde fuera mediante túnel inverso
