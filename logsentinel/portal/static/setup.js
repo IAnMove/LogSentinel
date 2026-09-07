@@ -20,6 +20,9 @@ function statusLabel(key) {
     unknown: "Resultado desconocido",
     delivered: "Entregado",
     cancelled: "Cancelado",
+    queued: "En cola",
+    completed: "Completado",
+    interrupted: "Interrumpido",
   };
   return labels[key] ? t(labels[key]) : coverageLabel(key);
 }
@@ -34,6 +37,7 @@ function coverageLabel(key) {
       compact: "Revisados en resumen",
       reviewed: "Originales revisados",
       error: "Error de análisis",
+      measured: "Medido por umbral",
     }[key] || key,
   );
 }
@@ -52,6 +56,7 @@ function drawMonitor(m) {
           ? t("Captura sin confirmación reciente; revisa las fuentes")
           : t("Captura inactiva");
   details.append(
+    el("div", "Logs", "subtle"),
     el("div", t("Último evento recibido: ") + stamp(m.last_event), "subtle"),
   );
   const failedSources = Object.values(m.source_health).filter(

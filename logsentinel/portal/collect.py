@@ -87,7 +87,7 @@ class Collector:
         try:
             if source["kind"] == "journald":
                 total = self.journal(source)
-            elif source["kind"] == "push":
+            elif source["kind"] in ("push", "metrics"):
                 return 0
             else:
                 root = Path(source["path"]).expanduser().resolve()

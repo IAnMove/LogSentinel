@@ -25,6 +25,8 @@ from .analysis import Analyzer, ReviewClient, safe_error
 from .monitor import Monitor
 from .problem_context import context_for, chat_system, validate_chat
 from .research import Researcher, InvestigationRequest
+from .telemetry import Telemetry
+from .telemetry_api import register_telemetry
 from .notify import Outbox
 from .rules import validate_rule, matches, excluded, redact, sanitize
 
@@ -55,6 +57,7 @@ def create_app(directory, background=True):
     analyzer = Analyzer(store)
     monitor = Monitor(store, analyzer, background)
     researcher = Researcher(store, analyzer)
+    telemetry = Telemetry(store, analyzer)
     outbox = Outbox(store)
     sessions = {}
     attempts = {}
@@ -79,6 +82,7 @@ def create_app(directory, background=True):
             try:
                 await monitor.tick()
                 await researcher.tick()
+                await telemetry.analyze_tick()
                 if time.time() - last_prune > 3600:
                     await asyncio.to_thread(store.prune)
                     last_prune = time.time()
@@ -94,6 +98,17 @@ def create_app(directory, background=True):
             await outbox.drain()
             await asyncio.sleep(2)
 
+    async def measuring():
+        while True:
+            try:
+                await asyncio.to_thread(telemetry.tick)
+                store.set_meta("telemetry_worker_error", "")
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                store.set_meta("telemetry_worker_error", safe_error(exc))
+            await asyncio.sleep(2)
+
     @asynccontextmanager
     async def lifespan(app):
         lockfile = (store.directory / "instance.lock").open("a")
@@ -106,8 +121,12 @@ def create_app(directory, background=True):
             raise RuntimeError("Another portal is using this data directory")
         store.recover()
         researcher.recover()
+        telemetry.recover()
         tasks = (
-            [asyncio.create_task(f()) for f in (collecting, working, delivering)]
+            [
+                asyncio.create_task(f())
+                for f in (collecting, working, delivering, measuring)
+            ]
             if background
             else []
         )
@@ -130,8 +149,10 @@ def create_app(directory, background=True):
     app.state.store = store
     app.state.analyzer = analyzer
     app.state.researcher = researcher
+    app.state.telemetry = telemetry
     app.state.monitor = monitor
     app.state.outbox = outbox
+    register_telemetry(app, telemetry)
 
     @app.middleware("http")
     async def guard(request, call_next):
@@ -305,6 +326,17 @@ def create_app(directory, background=True):
                         merged[key] = old.get(key)
             body = merged
         data = MODELS[kind](**body).model_dump()
+        if kind == "machine" and old and data["kind"] != "local":
+            metrics_cfg = telemetry.data.config(id)
+            if metrics_cfg.enabled and metrics_cfg.mode == "local":
+                raise HTTPException(
+                    400,
+                    "Disable local metrics before changing this machine to imported",
+                )
+        if kind == "source" and (
+            data["kind"] == "metrics" or (old and old["kind"] == "metrics")
+        ):
+            raise HTTPException(400, "Manage this source in the Metrics page")
         scoped(kind, data)
         if kind == "source" and old and data["machine_id"] != old["machine_id"]:
             raise HTTPException(

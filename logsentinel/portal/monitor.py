@@ -38,7 +38,11 @@ class Monitor:
     def state(self):
         self.reschedule()
         cfg = self.store.settings()
-        sources = [s for s in self.store.objects("source") if s["enabled"]]
+        sources = [
+            s
+            for s in self.store.objects("source")
+            if s["enabled"] and s["kind"] != "metrics"
+        ]
         result = json.loads(self.store.meta("analysis_result") or "{}")
         health = {
             s["id"]: json.loads(self.store.meta("health:" + s["id"]) or "{}")

@@ -488,6 +488,93 @@ const translations = {
   "Selecciona una máquina": "Select a machine",
   "El modelo citó evidencia no disponible": "Model cited unavailable evidence",
 };
+Object.assign(translations, {
+  Métricas: "Metrics",
+  comprimidos: "compressed",
+  "El modelo indica que la cobertura es incompleta.":
+    "The model reports incomplete coverage.",
+  "No hay destinos de notificación activos para estas métricas. Las alertas se guardan en Problemas; configura los avisos en Notificaciones.":
+    "No notification destinations are enabled for these metrics. Alerts are saved in Problems; configure delivery in Notifications.",
+  "Días de historial diario": "Daily history (days)",
+  "Mínimos y máximos diarios (UTC)": "Daily minima and maxima (UTC)",
+  "Espera de E/S": "I/O wait",
+  Disco: "Disk",
+  Inodos: "Inodes",
+  "Carga 1 minuto": "1-minute load",
+  "Carga 5 minutos": "5-minute load",
+  "Carga 15 minutos": "15-minute load",
+  "Tiempo encendido": "Uptime",
+  días: "days",
+  muestras: "samples",
+  Muestras: "Samples",
+  "muestras retenidas": "retained samples",
+  "Mediciones activas": "Measurements active",
+  "Mediciones desactivadas": "Measurements disabled",
+  "Esperando primera muestra": "Waiting for the first sample",
+  "Sin datos recientes": "No recent measurements",
+  "Medición parcial": "Partial measurement",
+  "Máximos y medias por hora, últimas 24 h":
+    "Hourly peaks and averages, last 24 hours",
+  "Naranja: máximo · Azul: media · Huecos: sin muestras":
+    "Orange: maximum · Blue: average · Gaps: no samples",
+  Mínimo: "Minimum",
+  Máximo: "Maximum",
+  Media: "Average",
+  Día: "Day",
+  Métrica: "Metric",
+  "Añade una máquina antes de configurar las métricas.":
+    "Add a machine before configuring metrics.",
+  "Mediciones y alertas por máquina. Abre un equipo para configurar captura, umbrales e historial.":
+    "Measurements and alerts per machine. Open a machine to configure collection, thresholds and history.",
+  "Última muestra": "Last sample",
+  "Ver métricas y configurar": "View metrics and configure",
+  "Análisis de tendencias guardados": "Saved trend analyses",
+  "Interpretar la evolución con el LLM": "Interpret trends with the LLM",
+  Periodo: "Period",
+  "Últimas 24 horas": "Last 24 hours",
+  "Últimos 7 días": "Last 7 days",
+  "Últimos 30 días": "Last 30 days",
+  "Analizar tendencias": "Analyze trends",
+  "Análisis de tendencias en cola; puedes cerrar esta vista.":
+    "Trend analysis queued; you can leave this page.",
+  "Una llamada con resúmenes de todo el periodo, ajustados al contexto. No modifica la máquina. Las alertas por umbral funcionan sin LLM.":
+    "One call with summaries spanning the period, sized to fit the context. It cannot change the machine. Threshold alerts work without an LLM.",
+  "Activar mediciones": "Enable measurements",
+  "Origen de las métricas": "Metrics source",
+  "Emisor remoto": "Remote sender",
+  "Este equipo (servidor del portal)": "This host (portal server)",
+  "Intervalo de medición (segundos)": "Measurement interval (seconds)",
+  "Rutas de discos locales (una por línea)": "Local disk paths (one per line)",
+  "Días de muestras comprimidas": "Compressed sample retention (days)",
+  "Días de resúmenes diarios": "Daily summary retention (days)",
+  "Umbral de aviso (%)": "Warning threshold (%)",
+  "Muestras consecutivas para alertar": "Consecutive samples before alerting",
+  "Subida brusca (puntos porcentuales)": "Sudden increase (percentage points)",
+  "Separación entre avisos (segundos)": "Notification cooldown (seconds)",
+  "Analizar tendencias automáticamente con el LLM":
+    "Analyze trends automatically with the LLM",
+  "Intervalo del análisis de tendencias (segundos)":
+    "Trend analysis interval (seconds)",
+  "Guardar configuración de métricas": "Save metrics configuration",
+  "Configuración de métricas": "Metrics configuration",
+  "El 98 % dispara una alerta crítica inmediata. Los demás umbrales requieren muestras consecutivas; se recuperan 5 puntos por debajo. Un pico compara con hasta 10 muestras anteriores. Las alertas usan los canales configurados y permanecen en Problemas hasta su revisión.":
+    "98% triggers an immediate critical alert. Other thresholds require consecutive samples and clear 5 points below the threshold. Spikes compare against up to 10 preceding samples. Alerts use configured notification channels and remain in Problems until reviewed.",
+  "Conectar un emisor remoto": "Connect a remote sender",
+  "Activa el modo remoto y genera una clave exclusiva para esta máquina. Usa un túnel SSH o HTTPS. Configura el mismo intervalo y los discos en el emisor.":
+    "Enable remote mode and generate a token dedicated to this machine. Use an SSH tunnel or HTTPS. Configure the same interval and the disks on the sender.",
+  "Generar clave de métricas": "Generate metrics token",
+  "Configurar captura y alertas": "Configure collection and alerts",
+  "Conectar otro equipo": "Connect another machine",
+  "Han pasado más de tres intervalos sin mediciones. Estos valores están desactualizados.":
+    "More than three measurement intervals have elapsed. These readings are stale.",
+  "RAM basada en memoria disponible. Swap sin configurar aparece como —. La primera muestra aún no tiene porcentaje de CPU. Mínimos y máximos observados, no continuos.":
+    "RAM uses available memory. Unconfigured swap is shown as —. CPU percentage needs a second sample. Minima and maxima are sampled, not continuous.",
+  "Ver alerta": "View alert",
+  "Mínimos y máximos diarios (UTC), últimos 7 días":
+    "Daily minima and maxima (UTC), last 7 days",
+  "Contexto enviado al modelo": "Context sent to the model",
+  "Medido por umbral": "Measured by threshold",
+});
 const reverseTranslations = Object.fromEntries(
   Object.entries(translations).map(([es, en]) => [en, es]),
 );

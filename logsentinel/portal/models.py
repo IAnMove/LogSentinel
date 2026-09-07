@@ -33,7 +33,7 @@ class Machine(Model):
 class Source(Model):
     machine_id: str
     name: str = Field(min_length=1, max_length=120)
-    kind: Literal["file", "folder", "journald", "push"] = "file"
+    kind: Literal["file", "folder", "journald", "push", "metrics"] = "file"
     path: str = Field(default="", max_length=4096)
     pattern: str = Field(default="*.log*", min_length=1, max_length=200)
     enabled: bool = False
