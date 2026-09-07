@@ -5,6 +5,7 @@ import asyncio
 import hashlib
 import json
 import time
+import regex
 from urllib.parse import urlsplit
 import httpx
 from .models import Verdict
@@ -168,6 +169,51 @@ class Analyzer:
         self.client = ReviewClient(store)
         self.lock = asyncio.Lock()
 
+    @staticmethod
+    def _trigger_events(events, source):
+        """Select triggers without deleting the original low-priority events."""
+        mode = source.get("analysis_mode", "all")
+        if mode == "all":
+            return events, []
+        terms = [
+            term.strip()
+            for term in source.get("trigger_terms", "").splitlines()
+            if term.strip()
+        ]
+        pattern = (
+            regex.compile(
+                "|".join(regex.escape(term) for term in terms), regex.IGNORECASE
+            )
+            if terms
+            else None
+        )
+
+        def keyword(event):
+            if pattern is None:
+                return False
+            try:
+                return (
+                    pattern.search(event.get("message", ""), timeout=0.02) is not None
+                )
+            except TimeoutError:
+                return False
+
+        def priority(event):
+            value = event.get("priority")
+            return type(value) is int and value <= source.get("priority_ceiling", 4)
+
+        triggers = []
+        for event in events:
+            hit_priority = priority(event)
+            hit_keyword = keyword(event)
+            if mode == "priority" and (hit_priority or hit_keyword):
+                triggers.append(event)
+            elif mode == "keywords" and hit_keyword:
+                triggers.append(event)
+            elif mode == "adaptive" and (hit_priority or hit_keyword):
+                triggers.append(event)
+        return triggers, [event["id"] for event in events if event not in triggers]
+
     async def cycle(self):
         async with self.lock:
             cfg = self.store.settings()
@@ -203,12 +249,33 @@ class Analyzer:
                                 (machine["id"],),
                             )
                         ]
-                    queues = [
-                        self.store.events(
-                            source_id=s, status="pending", limit=cfg.max_events
+                    source_objects = {
+                        source["id"]: source
+                        for source in self.store.objects("source")
+                        if source["machine_id"] == machine["id"]
+                    }
+                    queues = []
+                    deferred = []
+                    for source_id in sources:
+                        source_events = self.store.events(
+                            source_id=source_id, status="pending", limit=cfg.max_events
                         )
-                        for s in sources
-                    ]
+                        triggers, skipped = self._trigger_events(
+                            source_events, source_objects.get(source_id, {})
+                        )
+                        deferred.extend(skipped)
+                        if triggers:
+                            context = self.store.context(
+                                [event["id"] for event in triggers],
+                                source_objects.get(source_id, {}).get(
+                                    "context_minutes", 5
+                                )
+                                * 60,
+                                limit=5000,
+                            )
+                            queues.append(context or triggers)
+                    if deferred:
+                        self.store.mark(deferred, "sampled")
                     candidates = []
                     # Interleave sources so a noisy service cannot consume the whole window.
                     while any(queues) and len(candidates) < cfg.max_events:

@@ -311,6 +311,21 @@ async function summary(root) {
         },
         "",
       ),
+      button(
+        "Probar conexión del LLM",
+        async () => {
+          notice("Probando el LLM con una petición sintética…");
+          const result = await api("/api/model/test", {});
+          const tokens =
+            result.input_tokens == null || result.output_tokens == null
+              ? "tokens no reportados"
+              : `${result.input_tokens + result.output_tokens} tokens`;
+          notice(
+            `LLM conectado: ${result.model} · ${Number(result.seconds).toFixed(1)} s · ${tokens}.`,
+          );
+        },
+        "",
+      ),
       button("Detectar fuentes locales", discover),
     ),
   );
@@ -549,6 +564,43 @@ function objectForm(kind, o) {
       "Máximo de bytes por lote de lectura",
       "number",
       o.max_batch_bytes ?? 2000000,
+    );
+    add(
+      "analysis_mode",
+      "Selección para el análisis LLM",
+      "select",
+      o.analysis_mode || "all",
+      [
+        ["all", "Todas las líneas"],
+        ["priority", "Prioridad + palabras"],
+        ["keywords", "Solo palabras disparadoras"],
+        ["adaptive", "Adaptativa: prioridad + contexto"],
+      ],
+    );
+    add(
+      "priority_ceiling",
+      "Prioridad máxima (0 emergente · 7 debug)",
+      "number",
+      o.priority_ceiling ?? 4,
+    );
+    add(
+      "context_minutes",
+      "Contexto antes/después (minutos)",
+      "number",
+      o.context_minutes ?? 5,
+    );
+    add(
+      "trigger_terms",
+      "Palabras disparadoras, una por línea (ignora mayúsculas)",
+      "textarea",
+      o.trigger_terms,
+    );
+    f.append(
+      el(
+        "p",
+        "Los originales siempre se conservan. La política solo decide qué llega al LLM; la prioridad usa el campo estructurado de journald y las palabras solo disparan contexto, no confirman un problema.",
+        "wide subtle",
+      ),
     );
     add("enabled", "Captura activa", "checkbox", o.enabled);
   }
@@ -839,9 +891,7 @@ function settingsView(root) {
         "api_key",
         "max_tokens",
         "enable_thinking",
-      ].forEach(
-        (k) => delete d[k],
-      );
+      ].forEach((k) => delete d[k]);
       await api("/api/settings", d);
       await refresh();
       notice("Ajustes aplicados.");

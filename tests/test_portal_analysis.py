@@ -115,6 +115,60 @@ def test_redaction():
     assert "hunter2" not in redact("password=hunter2")
 
 
+def test_source_filter_uses_priority_and_case_insensitive_terms():
+    events = [
+        {"id": "critical", "message": "kernel CRITICAL failure", "priority": 6},
+        {"id": "priority", "message": "routine message", "priority": 3},
+        {"id": "quiet", "message": "routine message", "priority": 6},
+    ]
+    triggers, sampled = Analyzer._trigger_events(
+        events,
+        {
+            "analysis_mode": "adaptive",
+            "priority_ceiling": 4,
+            "trigger_terms": "critical",
+        },
+    )
+    assert {event["id"] for event in triggers} == {"critical", "priority"}
+    assert sampled == ["quiet"]
+
+
+def test_context_uses_minutes_and_keeps_original_events(data):
+    store, machine = data
+    source = {"id": "timed", "machine_id": machine}
+    store.ingest(
+        source,
+        [
+            {
+                "origin": "before",
+                "timestamp": "2026-01-01T00:00:00+00:00",
+                "message": "before",
+            },
+            {
+                "origin": "hit",
+                "timestamp": "2026-01-01T00:04:00+00:00",
+                "message": "ERROR hit",
+            },
+            {
+                "origin": "after",
+                "timestamp": "2026-01-01T00:08:00+00:00",
+                "message": "after",
+            },
+            {
+                "origin": "far",
+                "timestamp": "2026-01-01T00:20:00+00:00",
+                "message": "far",
+            },
+        ],
+    )
+    hit = [
+        event for event in store.events(source_id="timed") if event["origin"] == "hit"
+    ][0]
+    context = store.context([hit["id"]], seconds=300)
+    assert {event["origin"] for event in context} == {"before", "hit", "after"}
+    assert len(store.events(source_id="timed")) == 4
+
+
 @pytest.mark.asyncio
 async def test_capacity_is_visible_and_preserves_original(data):
     s, m = data

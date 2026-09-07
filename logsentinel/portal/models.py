@@ -40,6 +40,13 @@ class Source(Model):
     history: bool = False
     multiline: bool = False
     max_batch_bytes: int = Field(default=2_000_000, ge=1024, le=8_000_000)
+    analysis_mode: Literal["all", "priority", "keywords", "adaptive"] = "all"
+    priority_ceiling: int = Field(default=4, ge=0, le=7)
+    trigger_terms: str = Field(
+        default="error\ncritical\nwarning\nfailed\nfailure\npanic\nexception\nunauthorized\npermission denied\nout of memory\nno space left on device",
+        max_length=4000,
+    )
+    context_minutes: int = Field(default=5, ge=0, le=60)
 
     @model_validator(mode="after")
     def valid_path(self):
