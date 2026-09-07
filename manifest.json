@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "id": "io.github.ianmove.logsentinel",
+  "name": "LogSentinel",
+  "version": "1.0.0",
+  "author": "LogSentinel contributors",
+  "license": "MIT",
+  "description": "Local log and resource observatory status, with a read-only summary and quick access to the portal.",
+  "kinds": ["bar-widget"],
+  "entryPoints": { "barWidget": "integrations/omarchy/SentinelWidget.qml" },
+  "barWidget": {
+    "displayName": "LogSentinel",
+    "category": "Monitoring",
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": { "language": "en" },
+    "schema": [
+      { "key": "language", "type": "string", "label": "Language (en or es)" },
+      {
+        "key": "configPath",
+        "type": "string",
+        "label": "Private widget.json path (optional)"
+      }
+    ]
+  }
+}

@@ -23,6 +23,15 @@ function statusLabel(key) {
     queued: "En cola",
     completed: "Completado",
     interrupted: "Interrumpido",
+    partial: "Parcial",
+    ok: "Correcto",
+    active: "Activo",
+    disabled: "Desactivado",
+    degraded: "Requiere atención",
+    stale: "Sin datos recientes",
+    starting: "Iniciando",
+    checking: "Comprobando",
+    quarantined: "En cuarentena",
   };
   return labels[key] ? t(labels[key]) : coverageLabel(key);
 }
@@ -112,6 +121,16 @@ function drawMonitor(m) {
             }[m.last_outcome] || "—",
           ),
         "subtle",
+      ),
+    );
+  if (m.retry_after)
+    details.append(
+      el(
+        "div",
+        (locale === "es"
+          ? "Reintento tras errores del modelo: "
+          : "Retry after model errors: ") + stamp(m.retry_after),
+        "monitor-warning",
       ),
     );
   if (m.failed_jobs || m.capacity)

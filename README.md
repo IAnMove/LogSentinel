@@ -2,6 +2,10 @@
 
 [English documentation](docs/QUICKSTART.en.md) · Interfaz disponible en español e inglés.
 
+[Cinco temas del portal](docs/THEMES.md) · [Widget para Omarchy Quattro](docs/OMARCHY.md) · [Supervisión y recuperación](docs/OPERATIONS.md)
+
+La integración de Omarchy está preparada para validación en escritorio antes de publicarla. El portal funciona de forma independiente en Linux.
+
 Portal local para revisar logs de Linux con un LLM, detectar problemas de funcionamiento y seguridad y conservar la evidencia. Cada fuente pertenece a una máquina. El modelo propone hallazgos y filtros; no ejecuta comandos ni cambia reglas por su cuenta.
 
 ## Instalar y abrir

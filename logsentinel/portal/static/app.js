@@ -15,6 +15,9 @@ const names = {
   summary: t("Resumen"),
   machine: t("Máquinas"),
   metrics: t("Métricas"),
+  health: t("Salud del observador"),
+  appearance: t("Apariencia"),
+  desktop: t("Escritorio"),
   source: t("Fuentes"),
   problems: t("Problemas"),
   events: t("Histórico"),
@@ -282,6 +285,9 @@ async function render() {
   if (view === "problems") return problemList(root);
   if (view === "problem_detail") return problemPage(root);
   if (view === "metrics") return metricsView(root);
+  if (view === "health") return healthView(root);
+  if (view === "appearance") return appearanceView(root);
+  if (view === "desktop") return desktopView(root);
   if (view === "events") return eventsView(root);
   if (view === "chat") return chatView(root);
   if (view === "activity") return activity(root);
@@ -510,7 +516,11 @@ function objectView(root) {
             }),
           );
         }
-        if (kind === "source" && obj.kind !== "metrics") {
+        if (kind === "source" && obj.kind === "health") {
+          b.length = 0;
+          b.push(button(t("Salud del observador"), () => navigate("health")));
+        }
+        if (kind === "source" && !["metrics", "health"].includes(obj.kind)) {
           b.push(
             button(t("Leer ahora"), async () => {
               const r = await api("/api/source/" + obj.id + "/poll", {});
@@ -623,6 +633,12 @@ function objectForm(kind, o) {
       o.pattern || "*.log*",
     );
     add("history", t("Importar histórico al iniciar"), "checkbox", o.history);
+    add(
+      "heartbeat_timeout_seconds",
+      t("Plazo sin señal del emisor remoto (segundos, 0 desactiva)"),
+      "number",
+      o.heartbeat_timeout_seconds ?? 0,
+    );
     add(
       "multiline",
       t("Agrupar continuaciones con sangría"),
