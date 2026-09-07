@@ -228,6 +228,10 @@ async function refresh() {
   await render();
 }
 function navigate(v) {
+  if (v === "chat") {
+    chatProblemId = "";
+    chatDraft = "";
+  }
   if (view === "setup" && v !== "setup")
     sessionStorage.setItem("setup-dismissed", "1");
   view = v;
@@ -240,6 +244,10 @@ Object.entries(names).forEach(([key, label]) =>
   $("#nav").append(button(label, () => navigate(key))),
 );
 $("#machine-scope").onchange = () => {
+  if (view === "chat") {
+    chatProblemId = "";
+    chatDraft = "";
+  }
   scope = $("#machine-scope").value;
   offset = 0;
   render();
@@ -261,7 +269,8 @@ $("#login-form").onsubmit = async (e) => {
 async function render() {
   const root = el("div");
   $("#content").replaceChildren(root);
-  $("#page-title").textContent = t(names[view]);
+  $("#page-title").textContent =
+    view === "problem_detail" ? t("Detalles del problema") : t(names[view]);
   [...$("#nav").children].forEach((n, i) =>
     n.classList.toggle("active", Object.keys(names)[i] === view),
   );
@@ -270,6 +279,7 @@ async function render() {
   if (view === "summary") return summary(root);
   if (view === "settings") return settingsView(root);
   if (view === "problems") return problemList(root);
+  if (view === "problem_detail") return problemPage(root);
   if (view === "events") return eventsView(root);
   if (view === "chat") return chatView(root);
   if (view === "activity") return activity(root);
@@ -1016,16 +1026,17 @@ async function problemList(root, short = false) {
         t("Estado"),
         "",
       ],
-      rows
-        .slice(0, short ? 5 : 100)
-        .map((p) => [
-          badge(p.severity),
-          p.title,
-          machineName(p.machine_id),
-          p.count,
-          badge(p.status),
+      rows.slice(0, short ? 5 : 100).map((p) => [
+        badge(p.severity),
+        p.title,
+        machineName(p.machine_id),
+        p.count,
+        badge(p.status),
+        actions(
           button(t("Ver evidencia"), () => problemDetail(p.id)),
-        ]),
+          button(t("Ver más detalles"), () => openProblemPage(p.id)),
+        ),
+      ]),
     ),
   );
 }
@@ -1089,15 +1100,24 @@ async function problemDetail(id) {
         render();
       }),
       button(t("Preguntar al asistente"), () => {
-        $("#modal").close();
-        scope = p.machine_id;
-        view = "chat";
-        render();
+        openProblemChat(p);
+      }),
+      button(t("Ver más detalles"), () => openProblemPage(p.id)),
+      button(t("Buscar más detalles del problema"), async () => {
+        await startInvestigation(p);
+        await openProblemPage(p.id);
       }),
     ),
   );
   box.append(
     el("h3", t("Evidencia retenida")),
+    el(
+      "p",
+      t(
+        "La búsqueda profunda usa hasta 2 llamadas y una ventana inicial de ±30 minutos. Puedes ajustar la ventana en Ver más detalles.",
+      ),
+      "subtle",
+    ),
     el(
       "pre",
       p.evidence
@@ -1193,76 +1213,109 @@ async function eventsView(root) {
   await load();
 }
 async function chatView(root) {
-  const p = panel(t("Preguntar sobre los logs")),
+  const problemId = chatProblemId;
+  const problem = problemId ? await api("/api/problems/" + problemId) : null;
+  const machineId = problem?.machine_id || scope || S.machine[0]?.id || "";
+  if (problem) {
+    const card = problemContextCard(problem);
+    card.append(
+      button(t("Ver más detalles"), () => openProblemPage(problem.id)),
+    );
+    root.append(card);
+  }
+  const p = panel(
+      t(problem ? "Preguntar sobre este problema" : "Preguntar sobre los logs"),
+    ),
     f = el("form");
   const m = field(
     "machine_id",
     t("Máquina"),
     "select",
-    scope || S.machine[0]?.id,
+    machineId,
     S.machine.map((x) => [x.id, x.name]),
   );
+  m.querySelector("select").disabled = !!problem;
+  m.querySelector("select").onchange = () => {
+    scope = m.querySelector("select").value;
+    render();
+  };
   const q = field(
     "message",
     t("Pregunta o petición de filtro"),
     "textarea",
-    "",
+    chatDraft,
   );
-  f.append(m, q);
+  q.querySelector("textarea").required = true;
+  q.querySelector("textarea").maxLength = 4000;
+  q.querySelector("textarea").oninput = (e) => {
+    chatDraft = e.target.value;
+  };
   const send = el("button", t("Consultar"));
   send.type = "submit";
-  f.append(send);
+  const feedback = el("p");
+  feedback.setAttribute("role", "status");
+  const preview = el("div");
+  const request = () => ({
+    ...formData(f),
+    problem_id: problemId,
+    language: locale,
+  });
+  async function previewContext() {
+    try {
+      const context = await api("/api/chat/context", request());
+      if (root.isConnected) preview.replaceChildren(contextDisclosure(context));
+    } catch (error) {
+      feedback.textContent = error.message;
+    }
+  }
+  f.append(
+    m,
+    q,
+    actions(send, button(t("Ver contexto antes de enviar"), previewContext)),
+  );
   p.append(
     el(
       "p",
       t(
-        "Consulta una muestra acotada del histórico de la máquina. Las propuestas de filtros se revisan antes de aplicarlas.",
+        problem
+          ? "Esta conversación incluye el hallazgo seleccionado, la máquina y una muestra de sus evidencias. El contexto se ajusta al modelo y los recortes se muestran."
+          : "Consulta una muestra acotada del histórico de la máquina. Las propuestas de filtros se revisan antes de aplicarlas.",
       ),
     ),
     f,
+    feedback,
+    preview,
   );
   const conversation = el("div");
+  conversation.setAttribute("role", "log");
   root.append(p, conversation);
   const history = await api(
     "/api/chat/history?machine_id=" +
-      encodeURIComponent(scope || S.machine[0]?.id || ""),
+      encodeURIComponent(machineId) +
+      "&problem_id=" +
+      encodeURIComponent(problemId),
   );
-  history.forEach((c) => {
+  history.forEach((c) =>
     conversation.append(
       el("div", c.question, "message"),
-      el("div", c.response.answer, "message"),
-    );
-  });
+      chatReply(c.response),
+    ),
+  );
+  if (problem && chatDraft) await previewContext();
   f.onsubmit = async (e) => {
     e.preventDefault();
     send.disabled = true;
+    const data = request();
+    feedback.textContent = t("Consultando el LLM…");
     try {
-      const d = formData(f);
-      conversation.append(el("div", d.message, "message"));
-      const r = await api("/api/chat", { ...d, language: locale });
-      const a = el("div", r.answer, "message");
-      a.append(
-        el(
-          "p",
-          t("Evidencias: ") +
-            r.evidence_ids.join(", ") +
-            " · " +
-            r.sample_events +
-            t(" eventos aportados"),
-          "subtle",
-        ),
-      );
-      if (r.filter)
-        a.append(
-          button(t("Revisar filtro propuesto"), () => {
-            view = "rule";
-            edit = r.filter;
-            render();
-          }),
-        );
-      conversation.append(a);
-    } catch (err) {
-      notice(err.message, true);
+      const r = await api("/api/chat", data);
+      conversation.append(el("div", data.message, "message"), chatReply(r));
+      preview.replaceChildren();
+      feedback.textContent = "";
+      if (chatProblemId === problemId) chatDraft = "";
+      q.querySelector("textarea").value = "";
+    } catch (error) {
+      feedback.textContent = error.message;
     } finally {
       send.disabled = false;
     }

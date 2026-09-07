@@ -510,6 +510,33 @@ a {
 #help-form button {
   margin-top: 12px;
 }
+details {
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 12px;
+  margin: 12px 0;
+  overflow-wrap: anywhere;
+}
+summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+details > div {
+  margin-top: 12px;
+}
+.problem-context {
+  border-left: 4px solid var(--accent);
+}
+.problem-context p {
+  white-space: pre-wrap;
+}
+.research-report {
+  padding: 14px 0;
+  border-top: 1px solid var(--border);
+}
+.message details {
+  white-space: normal;
+}
 
 #nav button.quiet {
   color: #c5d7df;
