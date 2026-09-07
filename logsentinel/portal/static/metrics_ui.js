@@ -255,6 +255,30 @@ async function metricsView(root) {
       cfg.spike_points,
     ),
     field(
+      "critical_threshold",
+      t("Umbral crítico (%)"),
+      "number",
+      cfg.critical_threshold,
+    ),
+    field(
+      "cpu_critical_samples",
+      t("Muestras sostenidas para CPU crítica"),
+      "number",
+      cfg.cpu_critical_samples,
+    ),
+    field(
+      "stale_intervals",
+      t("Intervalos sin mediciones antes de avisar"),
+      "number",
+      cfg.stale_intervals,
+    ),
+    field(
+      "notify_recovery",
+      t("Notificar recuperación"),
+      "checkbox",
+      cfg.notify_recovery,
+    ),
+    field(
       "cooldown_seconds",
       t("Separación entre avisos (segundos)"),
       "number",

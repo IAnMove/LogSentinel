@@ -1,6 +1,24 @@
 "use strict";
 // Only interface strings go through t(). Log evidence and user content remain verbatim.
 const translations = {
+  "Salud del observador": "Observer health",
+  "Plazo sin señal del emisor remoto (segundos, 0 desactiva)":
+    "Remote heartbeat timeout (seconds, 0 disables)",
+  "Umbral crítico (%)": "Critical threshold (%)",
+  "Muestras sostenidas para CPU crítica": "Sustained samples for critical CPU",
+  "Intervalos sin mediciones antes de avisar":
+    "Missing measurement intervals before alerting",
+  "Notificar recuperación": "Notify on recovery",
+  Apariencia: "Appearance",
+  Escritorio: "Desktop",
+  Parcial: "Partial",
+  Correcto: "Healthy",
+  Desactivado: "Disabled",
+  "Requiere atención": "Needs attention",
+  "Sin datos recientes": "No recent data",
+  Iniciando: "Starting",
+  Comprobando: "Checking",
+  "En cuarentena": "Quarantined",
   "Ayúdame a entender este problema: {title}. Contrasta la hipótesis con sus evidencias y explica qué comprobar a continuación.":
     "Help me understand this problem: {title}. Check the hypothesis against its evidence and explain what to investigate next.",
   Detalle: "Detail",

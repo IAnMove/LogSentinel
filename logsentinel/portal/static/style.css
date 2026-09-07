@@ -29,7 +29,7 @@ textarea {
 }
 button {
   background: var(--accent);
-  color: white;
+  color: var(--button-ink);
   border: 1px solid transparent;
   border-radius: 7px;
   padding: 9px 15px;
@@ -49,16 +49,16 @@ button:disabled {
   border-color: var(--border);
 }
 .danger {
-  background: #fff2f2;
+  background: var(--error-bg);
   color: var(--danger);
 }
 input,
 select,
 textarea {
-  border: 1px solid #cbd5de;
+  border: 1px solid var(--control-border);
   border-radius: 6px;
   padding: 9px 10px;
-  background: white;
+  background: var(--surface);
   color: var(--ink);
   width: 100%;
   min-height: 42px;
@@ -88,15 +88,15 @@ input:focus,
 textarea:focus,
 select:focus,
 button:focus-visible {
-  outline: 2px solid #21988c;
+  outline: 2px solid var(--focus);
   outline-offset: 2px;
 }
 aside {
   position: fixed;
   width: 230px;
   inset: 0 auto 0 0;
-  background: #122b31;
-  color: #edf5f4;
+  background: var(--rail);
+  color: var(--rail-ink);
   padding: 28px 20px;
   display: flex;
   flex-direction: column;
@@ -115,7 +115,7 @@ aside {
   margin-top: 10px;
 }
 aside .eyebrow {
-  color: #91aaa9;
+  color: var(--rail-muted);
 }
 nav {
   display: flex;
@@ -126,31 +126,31 @@ nav {
 nav button {
   background: none;
   text-align: left;
-  color: #b9cdcc;
+  color: var(--rail-ink);
   border-radius: 6px;
   padding: 10px 12px;
 }
 nav button.active {
-  background: #24434a;
-  color: #fff;
-  border-left: 3px solid #68c7ab;
+  background: var(--rail-active);
+  color: var(--rail-ink);
+  border-left: 3px solid var(--rail-accent);
 }
 .aside-footer {
   font-size: 11px;
-  color: #91aaa9;
+  color: var(--rail-muted);
   margin-top: auto;
 }
 .aside-footer button {
   display: block;
   margin-top: 14px;
-  color: #b9cdcc;
-  border-color: #375158;
+  color: var(--rail-ink);
+  border-color: var(--rail-border);
 }
 .dot {
   display: inline-block;
   width: 7px;
   height: 7px;
-  background: #68c7ab;
+  background: var(--rail-accent);
   border-radius: 50%;
   margin-right: 5px;
 }
@@ -226,7 +226,7 @@ p {
   overflow: auto;
   border: 1px solid var(--border);
   border-radius: 9px;
-  background: white;
+  background: var(--surface);
   margin-bottom: 20px;
 }
 table {
@@ -235,7 +235,7 @@ table {
   text-align: left;
 }
 th {
-  background: #f9fafb;
+  background: var(--surface-alt);
   color: var(--muted);
   font-size: 11px;
   text-transform: uppercase;
@@ -278,13 +278,13 @@ td {
 .badge.error,
 .badge.HIGH,
 .badge.CRITICAL {
-  background: #fff0e9;
-  color: #a34a22;
+  background: var(--error-bg);
+  color: var(--error-ink);
 }
 .badge.pending,
 .badge.MEDIUM {
-  background: #fff7dd;
-  color: #8c6815;
+  background: var(--warn-bg);
+  color: var(--warn-ink);
 }
 .form-grid {
   display: grid;
@@ -300,8 +300,8 @@ td {
 .empty {
   text-align: center;
   padding: 40px;
-  background: white;
-  border: 1px dashed #ccd8df;
+  background: var(--surface);
+  border: 1px dashed var(--control-border);
   border-radius: 10px;
 }
 .empty h2 {
@@ -313,7 +313,7 @@ pre {
   font:
     12px/1.65 ui-monospace,
     monospace;
-  background: #f4f7f8;
+  background: var(--surface-alt);
   border: 1px solid var(--border);
   border-radius: 7px;
   padding: 16px;
@@ -323,15 +323,17 @@ pre {
 #notice {
   padding: 12px 17px;
   background: var(--soft);
-  border: 1px solid #b7d8cd;
+  border: 1px solid var(--soft-border);
   border-radius: 7px;
   margin-bottom: 18px;
 }
 #notice.error {
-  background: #fff0ed;
-  border-color: #e8bab0;
+  background: var(--error-bg);
+  border-color: var(--error-border);
 }
 dialog {
+  background: var(--surface);
+  color: var(--ink);
   border: 1px solid var(--border);
   border-radius: 12px;
   padding: 30px;
@@ -351,7 +353,7 @@ dialog::backdrop {
   max-width: 450px;
   margin: 12vh auto;
   padding: 36px;
-  background: white;
+  background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 12px;
 }
@@ -375,7 +377,7 @@ dialog::backdrop {
 .message {
   border-left: 3px solid var(--accent);
   padding: 12px 18px;
-  background: white;
+  background: var(--surface);
   margin: 15px 0;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -464,7 +466,7 @@ a {
   padding: 4px;
 }
 .monitor-status {
-  border: 1px solid #b7d8cd;
+  border: 1px solid var(--soft-border);
   border-left: 4px solid var(--accent);
   border-radius: 8px;
   padding: 16px 20px;
@@ -480,7 +482,7 @@ a {
   overflow-wrap: anywhere;
 }
 .monitor-warning {
-  color: #9b4324;
+  color: var(--error-ink);
   font-weight: 600;
 }
 .setup-steps {
@@ -539,7 +541,7 @@ details > div {
 }
 
 #nav button.quiet {
-  color: #c5d7df;
+  color: var(--rail-ink);
   border-color: transparent;
 }
 .metric-grid {
@@ -559,17 +561,17 @@ details > div {
 .metric-chart {
   width: 100%;
   height: auto;
-  border-bottom: 1px solid #34465b;
+  border-bottom: 1px solid var(--border);
 }
 .metric-chart polyline {
   fill: none;
   stroke-width: 2;
 }
 .metric-maximum {
-  stroke: #e5a152;
-  fill: #e5a152;
+  stroke: var(--chart-max);
+  fill: var(--chart-max);
 }
 .metric-average {
-  stroke: #63b9e8;
-  fill: #63b9e8;
+  stroke: var(--chart-avg);
+  fill: var(--chart-avg);
 }
