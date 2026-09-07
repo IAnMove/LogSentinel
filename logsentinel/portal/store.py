@@ -389,14 +389,33 @@ class Store:
                 return None
             result = dict(row)
             result["data"] = json.loads(result["data"])
-            refs = [
-                r[0]
+            counts = db.execute(
+                "SELECT count(*) total,count(events.id) retained FROM appearances LEFT JOIN events ON events.id=appearances.event_id WHERE problem_id=?",
+                (id,),
+            ).fetchone()
+            result["retained_evidence"] = counts["retained"]
+            result["expired_evidence"] = counts["total"] - counts["retained"]
+            refs = list(
+                dict.fromkeys(
+                    result["data"].get("evidence_ids", [])
+                    + [
+                        r[0]
+                        for r in db.execute(
+                            "SELECT event_id FROM appearances WHERE problem_id=? ORDER BY rowid DESC LIMIT 100",
+                            (id,),
+                        )
+                    ]
+                )
+            )[:100]
+            events = {e["id"]: e for e in self.events(ids=refs)}
+            result["evidence"] = [events[ref] for ref in refs if ref in events]
+            result["revisions"] = [
+                dict(r)
                 for r in db.execute(
-                    "SELECT event_id FROM appearances WHERE problem_id=? LIMIT 100",
+                    "SELECT id,created,data FROM revisions WHERE problem_id=? ORDER BY created DESC LIMIT 20",
                     (id,),
                 )
             ]
-            result["evidence"] = self.events(ids=refs)
             return result
 
     def record_usage(

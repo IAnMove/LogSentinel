@@ -1,6 +1,70 @@
 "use strict";
 // Only interface strings go through t(). Log evidence and user content remain verbatim.
 const translations = {
+  "Ayúdame a entender este problema: {title}. Contrasta la hipótesis con sus evidencias y explica qué comprobar a continuación.":
+    "Help me understand this problem: {title}. Check the hypothesis against its evidence and explain what to investigate next.",
+  Detalle: "Detail",
+  Valor: "Value",
+  Categoría: "Category",
+  "Primera detección": "First detected",
+  "Última detección": "Last detected",
+  "Fuentes de la evidencia": "Evidence sources",
+  "Ver todos los datos del hallazgo": "Show all finding details",
+  "{sent} eventos incluidos · {omitted} omitidos · {expired} evidencias caducadas · {bytes}/{budget} bytes de entrada.":
+    "{sent} events included · {omitted} omitted · {expired} expired evidence events · {bytes}/{budget} input bytes.",
+  "Se han aplicado exclusiones o recortes. Consulta el desglose; los originales retenidos siguen disponibles.":
+    "Exclusions or excerpts were applied. Check the breakdown; retained originals remain available.",
+  "Desglose de cobertura": "Coverage breakdown",
+  "Contexto enviado en esta consulta": "Context sent with this request",
+  "Vista previa del contexto que se enviará":
+    "Preview of the context to be sent",
+  "Evidencias citadas": "Cited evidence",
+  "Fragmento enviado al modelo": "Excerpt sent to the model",
+  "La respuesta no cita eventos concretos.":
+    "The response cites no specific events.",
+  "Ver qué recibió el asistente": "See what the assistant received",
+  "Investigación guardada. Esperará su turno si el modelo está ocupado; puedes cerrar esta vista.":
+    "Investigation saved. It will wait if the model is busy; you can close this view.",
+  "Investigar este problema": "Investigate this problem",
+  "Minutos antes y después de la evidencia":
+    "Minutes before and after the evidence",
+  "Buscar más detalles del problema": "Investigate further",
+  "El LLM propone términos; se buscan coincidencias en los logs retenidos de esta máquina y el LLM redacta un análisis más profundo. Hasta 2 llamadas, con presupuesto y una búsqueda de hasta 2.000 eventos. La captura continúa.":
+    "The LLM suggests terms, the app searches this machine's retained logs, and the LLM writes a deeper analysis. Up to 2 calls with a bounded budget and a search of up to 2,000 events. Capture continues.",
+  "Investigaciones guardadas": "Saved investigations",
+  "Todavía no has solicitado una investigación profunda.":
+    "No deep investigation has been requested yet.",
+  "En cola": "Queued",
+  "El LLM prepara la búsqueda": "The LLM is planning the search",
+  "Buscando en originales retenidos": "Searching retained originals",
+  "El LLM analiza las coincidencias": "The LLM is reviewing matches",
+  " llamadas al modelo": " model calls",
+  "{scanned} eventos examinados · {matched} coincidencias · ventana ±{minutes} minutos.":
+    "{scanned} events examined · {matched} matches · window ±{minutes} minutes.",
+  "La búsqueda alcanzó su límite; no se examinó toda la ventana.":
+    "The search reached its limit; the entire window was not examined.",
+  "Ver términos y alcance de búsqueda": "Show search terms and scope",
+  "Se muestran {shown} originales de {retained} retenidos; {expired} han caducado.":
+    "Showing {shown} of {retained} retained originals; {expired} have expired.",
+  "Copiar evento": "Copy event",
+  "Ficha de la máquina": "Machine profile",
+  "Evolución del hallazgo": "Finding history",
+  "Últimas 20 revisiones guardadas. Las investigaciones profundas se conservan aparte y no cambian el hallazgo automáticamente.":
+    "Latest 20 saved revisions. Deep investigations are stored separately and do not automatically change the finding.",
+  "Detalles del problema": "Problem details",
+  "Ver más detalles": "View more details",
+  "La búsqueda profunda usa hasta 2 llamadas y una ventana inicial de ±30 minutos. Puedes ajustar la ventana en Ver más detalles.":
+    "Deep investigation uses up to 2 calls and an initial ±30 minute window. Adjust the window in View more details.",
+  "Preguntar sobre este problema": "Ask about this problem",
+  "Ver contexto antes de enviar": "Preview context before sending",
+  "Esta conversación incluye el hallazgo seleccionado, la máquina y una muestra de sus evidencias. El contexto se ajusta al modelo y los recortes se muestran.":
+    "This conversation includes the selected finding, the machine and a sample of its evidence. Context is fitted to the model and omissions are shown.",
+  "El problema no pertenece a esta máquina":
+    "Problem does not belong to machine",
+  "La pregunta y el problema superan el presupuesto de entrada; acorta la pregunta o aumenta el presupuesto":
+    "The question and problem exceed the input budget; shorten the question or increase the budget",
+  "La evidencia original ha caducado; no se puede anclar la búsqueda":
+    "Original evidence has expired; the search cannot be anchored",
   Idioma: "Language",
   "Tiempo de espera del LLM (segundos)": "LLM timeout (seconds)",
   "Iniciando captura…": "Starting capture…",

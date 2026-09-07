@@ -29,7 +29,14 @@ class ReviewClient:
         self.store = store
 
     async def call(
-        self, payload, kind="analysis", job="", machine="", sources=(), system=SYSTEM
+        self,
+        payload,
+        kind="analysis",
+        job="",
+        machine="",
+        sources=(),
+        system=SYSTEM,
+        validate=None,
     ):
         cfg = self.store.settings()
         if kind in ("analysis", "investigation"):
@@ -143,6 +150,8 @@ class ReviewClient:
                     }
                     Analyzer.validate_refs(verdict, allowed)
                     result = verdict.model_dump()
+                if validate:
+                    result = validate(result)
                 status = "ok"
                 return result
         finally:

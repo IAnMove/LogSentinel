@@ -30,3 +30,4 @@ jobs:
       - run: python -m playwright install --with-deps chromium
       - run: python scripts/portal_smoke.py
       - run: python scripts/setup_smoke.py
+      - run: python scripts/problem_smoke.py
