@@ -224,6 +224,6 @@ def test_model_metadata_suggestion_uses_server_information(client, monkeypatch):
     result = c.post("/api/model/info").json()
     assert result["reported_maximum"] == 4096
     assert result["running_context"] == 2048
-    assert result["suggested_context"] == 4096
-    assert result["suggested_input_budget"] <= 4096 - s.settings().llm.max_tokens - 2048
+    assert result["suggested_context"] == 2048
+    assert result["suggested_input_budget"] == 0
     assert s.settings().model_dump() == before

@@ -416,17 +416,37 @@ def create_app(directory, background=True):
         store.delete(kind, id)
         return {"ok": True}
 
-    @app.post("/api/settings")
-    async def settings(request: Request):
-        body = await request.json()
+    async def requested_settings(request):
+        body = await request.json() if await request.body() else {}
+        if not isinstance(body, dict) or not isinstance(body.get("llm", {}), dict):
+            raise HTTPException(422, "Settings and llm must be objects")
         clear = body.pop("clear_api_key", False)
         old = store.settings().model_dump()
         merged = dict(old, **body)
-        merged["llm"] = dict(old["llm"], **body.get("llm", {}))
+        patch = body.get("llm", {})
+        merged["llm"] = dict(old["llm"], **patch)
         merged["llm"].pop("api_key_set", None)
-        if not merged["llm"].get("api_key") and not clear:
-            merged["llm"]["api_key"] = old["llm"]["api_key"]
-        validated = Settings(**merged)
+        same_endpoint = (
+            merged["llm"].get("base_url") == old["llm"]["base_url"]
+            and merged["llm"].get("provider") == old["llm"]["provider"]
+        )
+        # Credentials belong to their endpoint; a blank form must never copy an
+        # existing key to a different server, including during discovery/tests.
+        merged["llm"]["api_key"] = (
+            None
+            if clear
+            else (
+                patch.get("api_key")
+                or (old["llm"]["api_key"] if same_endpoint else None)
+            )
+        )
+        if not same_endpoint and "enable_thinking" not in patch:
+            merged["llm"]["enable_thinking"] = None
+        return Settings(**merged)
+
+    @app.post("/api/settings")
+    async def settings(request: Request):
+        validated = await requested_settings(request)
         if analyzer.lock.locked() and (
             validated.llm != store.settings().llm
             or validated.context_tokens != store.settings().context_tokens
@@ -444,9 +464,16 @@ def create_app(directory, background=True):
         return discovery()
 
     @app.post("/api/model/info")
-    async def model_info():
-        cfg = store.settings()
+    async def model_info(request: Request):
+        cfg = await requested_settings(request)
         llm = cfg.llm
+        if (
+            urlsplit(llm.base_url).hostname not in ("localhost", "127.0.0.1", "::1")
+            and not cfg.remote_allowed
+        ):
+            raise HTTPException(
+                400, "Remote model transmission is disabled in settings"
+            )
         base = llm.base_url.rstrip("/")
         maximum = None
         running = None
@@ -469,10 +496,15 @@ def create_app(directory, background=True):
                     response = await client.post(
                         base + "/api/show", headers=headers, json={"model": llm.model}
                     )
-                    response.raise_for_status()
+                    if response.status_code != 404:
+                        response.raise_for_status()
                     lengths = [
                         v
-                        for k, v in response.json().get("model_info", {}).items()
+                        for k, v in (
+                            response.json().get("model_info", {})
+                            if response.is_success
+                            else {}
+                        ).items()
                         if k.endswith(".context_length") and type(v) is int and v > 0
                     ]
                     maximum = min(lengths) if lengths else None
@@ -490,15 +522,20 @@ def create_app(directory, background=True):
                         for m in response.json().get("data", [])
                         if isinstance(m, dict)
                     ]
-        except (httpx.HTTPError, ValueError, TypeError):
+        except (httpx.HTTPError, ValueError, TypeError, AttributeError):
             raise HTTPException(
                 502,
                 "No se pudieron consultar los metadatos del modelo configurado; revisa servicio, nombre y credenciales",
             )
-        effective = min(cfg.context_tokens, maximum) if maximum else cfg.context_tokens
+        effective = min(
+            [cfg.context_tokens]
+            + [n for n in (maximum, running) if type(n) is int and n > 0]
+        )
         return {
             "models": models,
             "model": llm.model,
+            "provider": llm.provider,
+            "base_url": llm.base_url,
             "reported_maximum": maximum,
             "running_context": running,
             "suggested_context": effective,
@@ -509,12 +546,13 @@ def create_app(directory, background=True):
         }
 
     @app.post("/api/model/test")
-    async def model_test():
+    async def model_test(request: Request):
         if analyzer.lock.locked():
             raise HTTPException(
                 409, "Analysis already running; try the model test shortly"
             )
-        cfg = store.settings()
+        cfg = await requested_settings(request)
+        saved_config = model_fingerprint(cfg) == model_fingerprint(store.settings())
         started = time.monotonic()
         diagnostic_id = uid()
         async with analyzer.lock:
@@ -526,15 +564,24 @@ def create_app(directory, background=True):
                     },
                     kind="diagnostic",
                     job=diagnostic_id,
+                    **({"config": cfg} if not saved_config else {}),
                 )
                 from .models import Verdict
 
                 verdict = Verdict.model_validate(result)
                 analyzer.validate_refs(verdict, set())
-            except (httpx.HTTPError, ValueError, KeyError, TypeError) as exc:
-                store.set_meta(
-                    "model_test", dumps({"ok": False, "checked": time.time()})
-                )
+            except (
+                httpx.HTTPError,
+                ValueError,
+                KeyError,
+                TypeError,
+                IndexError,
+                AttributeError,
+            ) as exc:
+                if saved_config:
+                    store.set_meta(
+                        "model_test", dumps({"ok": False, "checked": time.time()})
+                    )
                 raise HTTPException(
                     502, "Model test failed: " + safe_error(exc, (cfg.llm.api_key,))
                 )
@@ -551,21 +598,24 @@ def create_app(directory, background=True):
                     "output_tokens": row[1],
                     "seconds": row[2],
                 }
-        store.set_meta(
-            "model_test",
-            dumps(
-                {
-                    "ok": True,
-                    "checked": time.time(),
-                    "fingerprint": model_fingerprint(cfg),
-                }
-            ),
-        )
-        monitor.reset_backoff()
+        if saved_config:
+            store.set_meta(
+                "model_test",
+                dumps(
+                    {
+                        "ok": True,
+                        "checked": time.time(),
+                        "fingerprint": model_fingerprint(cfg),
+                    }
+                ),
+            )
+            monitor.reset_backoff()
         return {
             "ok": True,
             "provider": cfg.llm.provider,
             "model": cfg.llm.model,
+            "base_url": cfg.llm.base_url,
+            "saved_config": saved_config,
             "seconds": usage.get("seconds", time.monotonic() - started),
             "input_tokens": usage.get("input_tokens"),
             "output_tokens": usage.get("output_tokens"),

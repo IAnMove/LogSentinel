@@ -3,6 +3,7 @@
 from datetime import datetime, timezone
 import gzip
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -275,6 +276,51 @@ class TelemetryStore:
                     (machine, period, since),
                 )
             ]
+
+    def recent(self, machine, hours=1):
+        """Bounded chart buckets preserving observed peaks, missing data and scope.
+
+        At the supported 10-second cadence even 24 hours fit the read limit.
+        Faster remote senders are explicitly reported as truncated, never sampled
+        silently. Empty buckets remain empty rather than implying zero usage.
+        """
+        end = time.time()
+        start = end - hours * 3600
+        step = max(self.config(machine).interval_seconds, math.ceil(hours * 3600 / 240))
+        with self.store.connect() as db:
+            samples = db.execute(
+                "SELECT observed,data FROM telemetry_samples WHERE machine_id=? "
+                "AND observed>=? AND observed<=? ORDER BY observed DESC LIMIT 10001",
+                (machine, start, end),
+            ).fetchall()
+        buckets = {}
+        for sample in samples[:10000]:
+            at = start + int((sample["observed"] - start) // step) * step
+            for key, value in json.loads(gzip.decompress(sample["data"]))[
+                "values"
+            ].items():
+                item = buckets.setdefault(
+                    (at, key),
+                    dict(
+                        observed=at, key=key, n=0, total=0, minimum=value, maximum=value
+                    ),
+                )
+                item["n"] += 1
+                item["total"] += value
+                item["minimum"] = min(item["minimum"], value)
+                item["maximum"] = max(item["maximum"], value)
+        rows = []
+        for _, item in sorted(buckets.items()):
+            item["average"] = item.pop("total") / item["n"]
+            rows.append(item)
+        return dict(
+            start=start,
+            end=end,
+            step_seconds=step,
+            rows=rows,
+            samples=min(len(samples), 10000),
+            truncated=len(samples) > 10000,
+        )
 
     def baseline(self, machine, observed):
         with self.store.connect() as db:

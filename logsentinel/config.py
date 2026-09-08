@@ -114,6 +114,9 @@ class AggregatorConfig(BaseModel):
 class LLMConfig(BaseModel):
     """LLM provider and inference configuration."""
     provider: Literal["ollama", "openai"] = "ollama"  # "ollama" or "openai"
+    server_type: Literal[
+        "custom", "ollama", "llama_cpp", "lm_studio", "vllm", "litellm", "balancer"
+    ] = "custom"
     base_url: str = "http://localhost:11434"
     model: str = "deepseek-r1:8b"
     api_key: Optional[str] = None
