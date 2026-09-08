@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+# Linux launcher: create .venv, install this checkout, start the portal.
+# Usage: ./portal [--port 8766] [--data-dir /path]
+set -euo pipefail
+
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$root"
+
+need_python() {
+  echo "Need Python 3.10 or newer with the venv module." >&2
+  echo "  Arch / Omarchy:  sudo pacman -S python" >&2
+  echo "  Debian / Ubuntu: sudo apt install python3 python3-venv python3-pip" >&2
+  echo "  Fedora:          sudo dnf install python3 python3-pip" >&2
+  exit 1
+}
+
+if ! command -v python3 >/dev/null 2>&1; then
+  need_python
+fi
+
+python3 - <<'PY' || need_python
+import sys
+if sys.version_info < (3, 10):
+    raise SystemExit(1)
+PY
+
+venv="$root/.venv"
+if [[ ! -x "$venv/bin/python" ]]; then
+  python3 -m venv "$venv" || need_python
+fi
+
+"$venv/bin/python" -m pip install -q -U pip
+"$venv/bin/python" -m pip install -e "$root"
+exec "$venv/bin/logsentinel" portal "$@"

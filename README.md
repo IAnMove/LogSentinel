@@ -8,13 +8,16 @@ Portal local para revisar logs de Linux con un LLM, detectar problemas de funcio
 
 ## Instalar y abrir
 
-Linux y Python 3.10 o superior:
+Linux y Python 3.10 o superior. El wrapper crea el entorno, instala el paquete y arranca el portal:
 
 ```bash
-python3 -m venv .venv
-.venv/bin/python -m pip install -e '.[dev]'
-.venv/bin/logsentinel portal
+git clone https://github.com/IAnMove/LogSentinel.git
+cd LogSentinel
+chmod +x portal
+./portal
 ```
+
+Equivale a `python3 -m venv .venv`, `pip install -e .` y `logsentinel portal`. Pasa opciones del portal, por ejemplo `./portal --port 8766`. Si falta el módulo `venv`: en Debian/Ubuntu `sudo apt install python3 python3-venv python3-pip`; en Arch/Omarchy `python` ya suele estar.
 
 Abre `http://127.0.0.1:8765` e introduce la clave que muestra la terminal. Los datos se guardan en `~/.local/share/logsentinel/portal`. Usa `--data-dir /ruta` para otra instancia. El portal escucha exclusivamente en loopback, requiere sesión y comprueba origen y CSRF.
 
