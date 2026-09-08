@@ -39,8 +39,9 @@ class ReviewClient:
         sources=(),
         system=SYSTEM,
         validate=None,
+        config=None,
     ):
-        cfg = self.store.settings()
+        cfg = config if config is not None else self.store.settings()
         if kind in ("analysis", "investigation"):
             system += " Write findings in " + (
                 "Spanish." if cfg.language == "es" else "English."
@@ -58,6 +59,8 @@ class ReviewClient:
         status = "error"
         detail = {
             "model": llm.model,
+            "provider": llm.provider,
+            "server_type": llm.server_type,
             "input_bytes": len(prompt.encode()),
             "estimate": "utf8_upper_bound",
         }
@@ -79,20 +82,23 @@ class ReviewClient:
                     {"role": "user", "content": prompt},
                 ]
                 if llm.provider == "ollama":
+                    request = {
+                        "model": llm.model,
+                        "messages": messages,
+                        "stream": False,
+                        "format": "json",
+                        "options": {
+                            "num_predict": llm.max_tokens,
+                            "num_ctx": cfg.context_tokens,
+                            "temperature": llm.temperature,
+                        },
+                    }
+                    if llm.enable_thinking is not None:
+                        request["think"] = llm.enable_thinking
                     response = await client.post(
                         llm.base_url.rstrip("/") + "/api/chat",
                         headers=headers,
-                        json={
-                            "model": llm.model,
-                            "messages": messages,
-                            "stream": False,
-                            "format": "json",
-                            "options": {
-                                "num_predict": llm.max_tokens,
-                                "num_ctx": cfg.context_tokens,
-                                "temperature": llm.temperature,
-                            },
-                        },
+                        json=request,
                     )
                 else:
                     base = llm.base_url.rstrip("/")

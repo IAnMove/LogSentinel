@@ -32,6 +32,44 @@ def sample(value=25, observed=None, **values):
     )
 
 
+def test_recent_metrics_preserve_peaks_gaps_and_machine_scope(client, monkeypatch):
+    c, s = client
+    machine, monitor = configured(c, s)
+    now = time.time()
+    monkeypatch.setattr("logsentinel.portal.telemetry_data.time.time", lambda: now)
+    # Both samples share a bucket; an average alone would conceal the peak.
+    monitor.data.save(machine, sample(10, now - 179))
+    monitor.data.save(machine, sample(98, now - 170))
+    monitor.data.save(machine, sample(20, now - 30))
+    monitor.data.save(machine, sample(99, now - 3601))
+    monitor.data.save(machine, sample(100, now + 30))
+    monitor.data.save("another-machine", sample(100, now - 30))
+    response = c.get(f"/api/telemetry/{machine}?hours=1").json()["recent"]
+    rows = [r for r in response["rows"] if r["key"] == "cpu_pct"]
+    assert response["samples"] == 3 and not response["truncated"]
+    assert len(rows) == 2
+    assert rows[0]["minimum"] == 10 and rows[0]["maximum"] == 98
+    assert rows[0]["average"] == 54 and rows[0]["n"] == 2
+    assert rows[1]["observed"] - rows[0]["observed"] == 120
+    assert c.get(f"/api/telemetry/{machine}?hours=48").status_code == 400
+
+
+def test_recent_metrics_report_over_limit_instead_of_silently_sampling(client):
+    c, s = client
+    machine, monitor = configured(c, s)
+    now = time.time()
+    data = gzip.compress(json.dumps({"values": {"cpu_pct": 50}}).encode())
+    with s.connect() as db:
+        db.executemany(
+            "INSERT INTO telemetry_samples VALUES(?,?,?,?,?,1)",
+            [(machine, str(i), now - i / 10, now, data) for i in range(10001)],
+        )
+    recent = monitor.data.recent(machine)
+    assert recent["truncated"] and recent["samples"] == 10000
+    assert sum(r["n"] for r in recent["rows"]) == 10000
+    assert len(recent["rows"]) <= 240
+
+
 def test_linux_sampler_uses_available_memory_cpu_deltas_and_missing_swap(
     tmp_path, monkeypatch
 ):

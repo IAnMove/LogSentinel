@@ -37,14 +37,17 @@ def register_telemetry(app, telemetry):
         }
 
     @app.get("/api/telemetry/{id}")
-    def history(id: str, days: int = 7):
+    def history(id: str, days: int = 7, hours: int = 1):
         machine_exists(id)
         if not 1 <= days <= 365:
             raise HTTPException(400, "Choose 1–365 days")
+        if hours not in (1, 6, 24):
+            raise HTTPException(400, "Choose 1, 6 or 24 hours")
         return dict(
             telemetry.status(id),
             hourly=telemetry.data.rollups(id),
             daily=telemetry.data.rollups(id, "day", days),
+            recent=telemetry.data.recent(id, hours),
             timezone="UTC",
             analyses=[
                 j for j in store.objects("metric_analysis") if j["machine_id"] == id
