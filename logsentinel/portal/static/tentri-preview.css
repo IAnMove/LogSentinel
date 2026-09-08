@@ -1,0 +1,98 @@
+:root {
+  color-scheme: light;
+  font-family: system-ui, sans-serif;
+  color: #12383e;
+  background: #f3efe4;
+}
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+}
+main {
+  max-width: 1300px;
+  margin: auto;
+  padding: 32px 24px;
+}
+header {
+  max-width: 900px;
+  padding-block: 12px 32px;
+}
+h1 {
+  font-size: clamp(3rem, 8vw, 5rem);
+  line-height: 1;
+  margin: 16px 0 24px;
+  letter-spacing: -0.04em;
+}
+h2 {
+  font-size: 1rem;
+  margin: 0;
+  flex: 1 1 280px;
+}
+p {
+  line-height: 1.65;
+}
+.intro {
+  font-size: 1.2rem;
+}
+.eyebrow {
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  margin-top: 36px;
+}
+a {
+  color: #155e59;
+  text-underline-offset: 0.2em;
+}
+a:hover {
+  color: #081f25;
+}
+a:focus-visible {
+  outline: 3px solid #aa6010;
+  outline-offset: 4px;
+}
+nav,
+.caption {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px 24px;
+}
+nav {
+  margin-top: 24px;
+}
+section {
+  margin-bottom: 32px;
+  border: 1px solid #bdc8c0;
+  border-radius: 12px;
+  overflow: hidden;
+  background: #fffdfa;
+  scroll-margin-top: 16px;
+}
+.caption {
+  padding: 20px;
+  border-bottom: 1px solid #bdc8c0;
+}
+.caption a {
+  font-size: 0.9rem;
+  padding-block: 6px;
+}
+img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+footer {
+  font-size: 0.85rem;
+  padding-block: 12px;
+}
+@media (max-width: 600px) {
+  main {
+    padding: 20px 12px;
+  }
+  .caption {
+    padding: 16px;
+  }
+}
