@@ -107,7 +107,7 @@ function appearanceView(root) {
     const sample = el("span", undefined, "theme-preview");
     sample.setAttribute("aria-hidden", "true");
     sample.innerHTML =
-      '<span class="preview-rail"><b>◈</b><i></i><i></i><i></i></span><span class="preview-body"><span class="preview-heading">TENTRI <b>●</b></span><span class="preview-metrics"><i>24<span>HOSTS</span></i><i>03<span>FINDINGS</span></i></span><span class="preview-chart"></span><span class="preview-lines"><i></i><i></i><i></i></span></span>';
+      '<span class="preview-rail"><b>◈</b><i></i><i></i><i></i></span><span class="preview-body"><span class="preview-heading">LOGSENTINEL <b>●</b></span><span class="preview-metrics"><i>24<span>HOSTS</span></i><i>03<span>FINDINGS</span></i></span><span class="preview-chart"></span><span class="preview-lines"><i></i><i></i><i></i></span></span>';
     card.append(
       sample,
       el("span", theme.name, "theme-name"),
@@ -127,8 +127,8 @@ function appearanceView(root) {
     el(
       "p",
       bilingual(
-        "Classic es el tema por defecto. Las otras paletas son adaptaciones para Tentri; no requieren Omarchy y todos los recursos se sirven desde este portal. El widget de Omarchy hereda por separado el tema del escritorio.",
-        "Classic is the default. The other palettes are Tentri adaptations; they need no Omarchy installation and all assets are served by this portal. The Omarchy widget separately inherits your desktop theme.",
+        "Classic es el tema por defecto. Las otras paletas son adaptaciones para LogSentinel; no requieren Omarchy y todos los recursos se sirven desde este portal. El widget de Omarchy hereda por separado el tema del escritorio.",
+        "Classic is the default. The other palettes are LogSentinel adaptations; they need no Omarchy installation and all assets are served by this portal. The Omarchy widget separately inherits your desktop theme.",
       ),
       "subtle",
     ),

@@ -118,7 +118,7 @@ const translations = {
   "MÁQUINAS · LOGS · HALLAZGOS": "MACHINES · LOGS · FINDINGS",
   Ámbito: "Scope",
   "Ayuda con el LLM": "Ask the LLM",
-  "Ayuda con el programa": "Help with Tentri",
+  "Ayuda con el programa": "Help with LogSentinel",
   "Tu pregunta": "Your question",
   "Este chat recibe tu pregunta y un resumen de configuración, sin logs ni credenciales. No cambia ajustes.":
     "This chat receives your question and a configuration summary, without logs or credentials. It cannot change settings.",
@@ -616,7 +616,7 @@ function t(key, params = {}) {
 }
 function staticLanguage() {
   document.documentElement.lang = locale;
-  document.title = "Tentri · " + t("Resumen");
+  document.title = "LogSentinel · " + t("Resumen");
   document.querySelectorAll("[data-i18n]").forEach((n) => {
     n.textContent = t(n.dataset.i18n);
   });

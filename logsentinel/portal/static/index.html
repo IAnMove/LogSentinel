@@ -3,9 +3,9 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>Tentri · Log observatory</title>
-    <link rel="icon" type="image/png" href="/static/tentri-icon-v1.png" />
-    <link rel="apple-touch-icon" href="/static/tentri-icon-v1.png" />
+    <title>LogSentinel · Log observatory</title>
+    <link rel="icon" type="image/png" href="/static/tentri-icon-mono-v1.png" />
+    <link rel="apple-touch-icon" href="/static/tentri-icon-mono-v1.png" />
     <script src="/static/themes.js"></script>
     <link rel="stylesheet" href="/static/style.css" />
     <link rel="stylesheet" href="/static/themes.css" />
@@ -27,13 +27,8 @@
     </div>
     <section id="login" class="login">
       <div class="brand">
-        <img
-          class="tentri-icon"
-          src="/static/tentri-icon-v1.png"
-          alt=""
-          width="64"
-          height="64"
-        /><span>Tentri</span>
+        <span class="tentri-icon" aria-hidden="true"></span
+        ><span>LogSentinel</span>
       </div>
       <h1 data-i18n="Tu observatorio de logs.">Your log observatory.</h1>
       <p
@@ -56,13 +51,8 @@
     <div id="shell" hidden>
       <aside>
         <div class="brand">
-          <img
-            class="tentri-icon"
-            src="/static/tentri-icon-v1.png"
-            alt=""
-            width="44"
-            height="44"
-          /><span>Tentri</span>
+          <span class="tentri-icon" aria-hidden="true"></span
+          ><span>LogSentinel</span>
         </div>
         <div class="eyebrow" data-i18n="OBSERVATORIO LOCAL">
           LOCAL OBSERVATORY
@@ -79,11 +69,14 @@
       </aside>
       <main>
         <header>
-          <div>
-            <div class="eyebrow" data-i18n="MÁQUINAS · LOGS · HALLAZGOS">
-              MACHINES · LOGS · FINDINGS
+          <div class="page-heading">
+            <div id="section-mascot" hidden></div>
+            <div>
+              <div class="eyebrow" data-i18n="MÁQUINAS · LOGS · HALLAZGOS">
+                MACHINES · LOGS · FINDINGS
+              </div>
+              <h1 id="page-title">Resumen</h1>
             </div>
-            <h1 id="page-title">Resumen</h1>
           </div>
           <label class="scope"
             ><span data-i18n="Ámbito">Scope</span
