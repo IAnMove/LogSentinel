@@ -1,0 +1,58 @@
+#!/usr/bin/env bash
+# Install the LogSentinel bar widget on this Omarchy desktop only.
+# Does not publish to the plugin marketplace.
+set -euo pipefail
+
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+id="io.github.ianmove.logsentinel"
+config="${XDG_CONFIG_HOME:-$HOME/.config}/omarchy"
+dest="$config/plugins/$id"
+
+not_omarchy() {
+  echo "This command only runs on Omarchy Quattro with the plugin API." >&2
+  echo "The portal still works with ./portal in a normal browser." >&2
+  echo "Nothing was published to the Omarchy plugin marketplace." >&2
+  exit 1
+}
+
+command -v omarchy >/dev/null 2>&1 || not_omarchy
+if [[ ! -d "$config" && ! -d /usr/share/omarchy && -z "${OMARCHY_PATH:-}" ]]; then
+  not_omarchy
+fi
+if ! omarchy plugin list >/dev/null 2>&1; then
+  echo "omarchy is installed, but this desktop has no plugin command." >&2
+  not_omarchy
+fi
+if [[ ! -f "$root/manifest.json" || ! -f "$root/integrations/omarchy/SentinelWidget.qml" ]]; then
+  echo "This checkout is missing the Omarchy widget files." >&2
+  exit 1
+fi
+
+echo "Installing the LogSentinel widget on this machine only."
+echo "This does not upload or list anything on the Omarchy marketplace."
+
+if [[ -d "$dest/.git" ]]; then
+  omarchy plugin update "$id"
+  omarchy plugin enable "$id"
+else
+  mkdir -p "$dest/integrations/omarchy"
+  # Copy only widget files. A full checkout contains a venv with symlinks,
+  # which Omarchy rejects inside a plugin directory.
+  install -m 644 "$root/manifest.json" "$dest/manifest.json"
+  if [[ -f "$root/LICENSE" ]]; then
+    install -m 644 "$root/LICENSE" "$dest/LICENSE"
+  fi
+  for file in SentinelWidget.qml SentinelPanel.qml Status.js; do
+    install -m 644 "$root/integrations/omarchy/$file" "$dest/integrations/omarchy/$file"
+  done
+  omarchy plugin validate "$dest"
+  omarchy plugin enable "$id"
+fi
+
+if command -v omarchy-shell >/dev/null 2>&1; then
+  omarchy-shell shell rescanPlugins >/dev/null 2>&1 || true
+fi
+
+echo "Widget id: $id"
+echo "Keep the portal running (./portal), then pair it in the UI: Desktop → Create widget key."
+echo "Saved JSON goes in ~/.config/logsentinel/widget.json (mode 600)."

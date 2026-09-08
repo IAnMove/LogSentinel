@@ -2,7 +2,7 @@
 
 Interfaz disponible en español e inglés.
 
-La integración de Omarchy Quattro está disponible como prueba: instala el widget con `omarchy plugin add https://github.com/IAnMove/LogSentinel.git --enable` y vincúlalo desde **Escritorio** en el portal. Falta completar la validación en un escritorio Omarchy real; todavía no está en el marketplace. El widget necesita un portal en ejecución y no instala un LLM ni empieza a enviar logs por sí solo.
+La integración de Omarchy Quattro está disponible como prueba en este equipo. `omarchy plugin add` y `./plugin` solo instalan el widget en tu escritorio; no lo publican en el marketplace. Falta completar la validación en un escritorio Omarchy real. El widget necesita un portal en ejecución y no instala un LLM ni empieza a enviar logs por sí solo.
 
 Portal local para revisar logs de Linux con un LLM, detectar problemas de funcionamiento y seguridad y conservar la evidencia. Cada fuente pertenece a una máquina. El modelo propone hallazgos y filtros; no ejecuta comandos ni cambia reglas por su cuenta.
 
@@ -18,6 +18,14 @@ chmod +x portal
 ```
 
 Equivale a `python3 -m venv .venv`, `pip install -e .` y `logsentinel portal`. Pasa opciones del portal, por ejemplo `./portal --port 8766`. Si falta el módulo `venv`: en Debian/Ubuntu `sudo apt install python3 python3-venv python3-pip`; en Arch/Omarchy `python` ya suele estar.
+
+En Omarchy, el widget de la barra es otro comando y se queda en esta máquina:
+
+```bash
+./plugin
+```
+
+Si no detecta Omarchy Quattro con `omarchy plugin`, sale sin instalar nada. No envía el proyecto a [plugins.omarchy.org](https://plugins.omarchy.org). Después hay que emparejar la clave en **Escritorio** del portal.
 
 Abre `http://127.0.0.1:8765` e introduce la clave que muestra la terminal. Los datos se guardan en `~/.local/share/logsentinel/portal`. Usa `--data-dir /ruta` para otra instancia. El portal escucha exclusivamente en loopback, requiere sesión y comprueba origen y CSRF.
 
