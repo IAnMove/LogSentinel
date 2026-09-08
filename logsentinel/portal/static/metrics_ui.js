@@ -415,7 +415,7 @@ async function metricsView(root) {
     const primary = keys.filter(
       (k) =>
         ["cpu_pct", "ram_pct", "swap_pct"].includes(k) ||
-        k.startsWith("disk_pct:"),
+        (k.startsWith("disk_pct:") && k in values),
     );
     for (const key of primary) {
       tiles.append(resourceCard(key, data));

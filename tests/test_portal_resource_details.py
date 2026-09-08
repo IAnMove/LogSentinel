@@ -12,6 +12,9 @@ def test_memory_threads_and_mounts(tmp_path, monkeypatch):
         "1 0 8:1 / / rw - ext4 /dev/sda1 rw\n"
         "2 0 8:2 / /data rw - ext4 /dev/sdb1 rw\n"
         "3 0 0:1 / /proc rw - proc proc rw\n"
+        "4 0 7:1 / /snap/app ro - squashfs /dev/loop1 ro\n"
+        "5 0 8:3 / /media/cdrom ro - iso9660 /dev/sr0 ro\n"
+        "6 0 7:2 / /mnt/image rw - ext4 /dev/loop2 rw\n"
     )
     (tmp_path / "stat").write_text(
         "cpu 10 0 0 90 0 0 0 0\ncpu0 10 0 0 90 0 0 0 0\ncpu1 0 0 0 100 0 0 0 0\n"
