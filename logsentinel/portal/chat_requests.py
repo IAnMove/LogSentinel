@@ -158,8 +158,10 @@ class ChatRequests:
                     timeout_seconds=cfg.llm.timeout_seconds,
                     estimate=estimate_model_time(self.store),
                 )
-                async with asyncio.timeout(cfg.llm.timeout_seconds + 5):
-                    result = await self.execute(job["request"], request_id=id)
+                result = await asyncio.wait_for(
+                    self.execute(job["request"], request_id=id),
+                    timeout=cfg.llm.timeout_seconds + 5,
+                )
                 self.save(job, status="completed", finished=time.time(), result=result)
         except asyncio.CancelledError:
             current = self.store.get("chat_request", id)
@@ -173,7 +175,9 @@ class ChatRequests:
                 )
             raise
         except Exception as exc:
-            timeout = isinstance(exc, (TimeoutError, httpx.TimeoutException))
+            timeout = isinstance(
+                exc, (TimeoutError, asyncio.TimeoutError, httpx.TimeoutException)
+            )
             self.save(
                 job,
                 status="failed",

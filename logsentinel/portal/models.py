@@ -14,6 +14,8 @@ class Model(BaseModel):
 
 class Machine(Model):
     name: str = Field(min_length=1, max_length=120)
+    monitoring_paused: bool = False
+    deletion_pending: bool = False
     kind: Literal["local", "imported"] = "imported"
     hostname: str = Field(default="", max_length=255)
     os: str = Field(default="", max_length=200)

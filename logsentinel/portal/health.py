@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 import json
 import shutil
 import time
+import threading
 
 from .models import Source
 from .rules import sanitize
@@ -16,6 +17,7 @@ class HealthMonitor:
         self.monitor, self.telemetry = monitor, telemetry
         self.background = background
         self.started = time.time()
+        self.lock = threading.RLock()
         self.beats = {}
         self.last_tick = None
         self.snapshot = {"checked": None, "checks": [], "state": "starting"}
@@ -26,7 +28,11 @@ class HealthMonitor:
     def conditions(self):
         now = time.time()
         cfg = self.store.settings()
-        machines = self.store.objects("machine")
+        machines = [
+            m
+            for m in self.store.objects("machine")
+            if self.store.monitoring_active(m["id"])
+        ]
         local = next((m["id"] for m in machines if m["kind"] == "local"), "")
         checks = []
 
@@ -68,7 +74,9 @@ class HealthMonitor:
             else:
                 self.store.set_meta("health_since:metrics:" + id, str(now))
         for source in self.store.objects("source"):
-            if not source["enabled"]:
+            if not source["enabled"] or not self.store.monitoring_active(
+                source["machine_id"]
+            ):
                 self.store.set_meta("health_since:source:" + source["id"], str(now))
                 continue
             if source["kind"] in ("metrics", "health"):
@@ -231,6 +239,10 @@ class HealthMonitor:
         )
 
     def tick(self):
+        with self.lock:
+            return self._tick()
+
+    def _tick(self):
         now = time.time()
         cfg = self.store.settings()
         checks = self.conditions()

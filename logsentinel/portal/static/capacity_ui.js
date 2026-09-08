@@ -143,6 +143,23 @@ async function capacityView(root) {
     );
   root.append(live, actionsPanel);
   const machine = scope;
+  if (machine)
+    actionsPanel.append(
+      button(bilingual("Optimizar esta máquina", "Optimize this machine"), () =>
+        openOptimizer(machine),
+      ),
+    );
+  else
+    actionsPanel.append(
+      el(
+        "p",
+        bilingual(
+          "Selecciona una máquina para preparar una optimización con sus logs.",
+          "Select a machine to prepare an optimization from its logs.",
+        ),
+        "subtle",
+      ),
+    );
   let report;
   actionsPanel.append(el("ol"));
   const steps = [

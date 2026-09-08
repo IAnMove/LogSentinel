@@ -120,6 +120,10 @@ class Researcher:
 
     def enqueue(self, problem_id, options):
         problem = self.store.problem(problem_id)
+        if problem and not self.store.monitoring_active(problem["machine_id"]):
+            raise ValueError(
+                "Resume machine monitoring before starting an investigation"
+            )
         if not problem:
             raise ValueError("Unknown problem")
         if not problem["evidence"]:
@@ -165,7 +169,9 @@ class Researcher:
         if self.analyzer.lock.locked():
             return
         jobs = [
-            j for j in self.store.objects("investigation") if j["status"] == "queued"
+            j
+            for j in self.store.objects("investigation")
+            if j["status"] == "queued" and self.store.monitoring_active(j["machine_id"])
         ]
         if not jobs:
             return

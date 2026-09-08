@@ -18,6 +18,7 @@ from .store import dumps, uid
 class TelemetryConfig(Model):
     enabled: bool = False
     mode: Literal["local", "remote"] = "remote"
+    discover_disks: bool = True
     interval_seconds: int = Field(default=60, ge=10, le=3600)
     disk_paths: list[str] = Field(
         default_factory=lambda: ["/"], min_length=1, max_length=16
@@ -64,6 +65,12 @@ KEYS = {
     "ram_pct",
     "ram_total_bytes",
     "ram_available_bytes",
+    "ram_used_bytes",
+    "ram_free_bytes",
+    "ram_shared_bytes",
+    "ram_buffers_bytes",
+    "ram_cached_bytes",
+    "ram_buff_cache_bytes",
     "swap_pct",
     "swap_total_bytes",
     "swap_used_bytes",
@@ -75,10 +82,17 @@ KEYS = {
 }
 
 
+class DiskInfo(Model):
+    mount: str = Field(min_length=1, max_length=1024)
+    device: str = Field(default="", max_length=300)
+    filesystem: str = Field(default="", max_length=100)
+
+
 class MetricSample(Model):
     id: str = Field(default_factory=uid, min_length=1, max_length=100)
     observed: float = Field(default_factory=time.time, ge=0)
-    values: dict[str, float] = Field(min_length=1, max_length=100)
+    values: dict[str, float] = Field(min_length=1, max_length=512)
+    disks: list[DiskInfo] = Field(default_factory=list, max_length=16)
     errors: list[str] = Field(default_factory=list, max_length=20)
 
     @field_validator("values")
@@ -86,7 +100,7 @@ class MetricSample(Model):
     def valid_values(cls, values):
         for key, value in values.items():
             if key not in KEYS and not re.fullmatch(
-                r"(?:disk_pct|inode_pct|disk_total_bytes|disk_available_bytes):/[^\x00\n]{0,1023}",
+                r"(?:disk_pct|inode_pct|disk_total_bytes|disk_available_bytes|disk_free_bytes|disk_used_bytes):/[^\x00\n]{0,1023}|cpu_thread_pct:\d{1,5}",
                 key,
             ):
                 raise ValueError("Unknown metric: " + key[:100])
@@ -114,9 +128,39 @@ class LinuxSampler:
     def __init__(self, proc="/proc"):
         self.proc = Path(proc)
         self.previous_cpu = None
+        self.previous_threads = {}
+        self.discover_disks = True
+
+    def mounts(self):
+        result = []
+        try:
+            for line in (self.proc / "self/mountinfo").read_text().splitlines():
+                left, right = line.split(" - ", 1)
+                fields, fs = left.split(), right.split()
+                mount = re.sub(r"\\([0-7]{3})", lambda m: chr(int(m[1], 8)), fields[4])
+                # Discover local mounted storage, excluding pseudo/network filesystems.
+                if fs[1].startswith("/dev/") or mount == "/":
+                    result.append(DiskInfo(mount=mount, device=fs[1], filesystem=fs[0]))
+        except (OSError, ValueError, IndexError):
+            pass
+        return result
 
     def sample(self, paths):
         values, errors = {}, []
+        mounts = self.mounts()
+        selected_paths = list(dict.fromkeys(paths))
+        if self.discover_disks:
+            known_devices = {m.device for m in mounts if m.mount in selected_paths}
+            for mount in mounts:
+                if (
+                    mount.mount not in selected_paths
+                    and mount.device not in known_devices
+                ):
+                    selected_paths.append(mount.mount)
+                    known_devices.add(mount.device)
+        if len(selected_paths) > 16:
+            errors.append("Disk discovery limited to 16 mount points")
+        selected_paths = selected_paths[:16]
         try:
             stat = (self.proc / "stat").read_text().splitlines()
             parts = [int(v) for v in stat[0].split()[1:9]]
@@ -138,6 +182,27 @@ class LinuxSampler:
                         0, min(100, 100 * (wait - old_wait) / elapsed)
                     )
             self.previous_cpu = (total, idle, wait)
+            threads = {}
+            for line in stat:
+                if not re.match(r"cpu\d+ ", line):
+                    continue
+                if len(threads) >= 256:
+                    break
+                name, *parts = line.split()
+                if len(parts) < 4:
+                    continue
+                counters = [int(v) for v in parts[:8]]
+                counters += [0] * (8 - len(counters))
+                total_thread, idle_thread = sum(counters), counters[3] + counters[4]
+                threads[name] = (total_thread, idle_thread)
+                if name in self.previous_threads:
+                    old_total, old_idle = self.previous_threads[name]
+                    elapsed, resting = total_thread - old_total, idle_thread - old_idle
+                    if elapsed > 0 and 0 <= resting <= elapsed:
+                        values["cpu_thread_pct:" + name[3:]] = (
+                            100 * (elapsed - resting) / elapsed
+                        )
+            self.previous_threads = threads
             values["cpu_count"] = (
                 sum(bool(re.match(r"cpu\d+ ", line)) for line in stat)
                 or os.cpu_count()
@@ -155,7 +220,20 @@ class LinuxSampler:
                 ram_total_bytes=total,
                 ram_available_bytes=available,
                 ram_pct=100 * max(0, total - available) / total,
+                ram_used_bytes=max(0, total - available),
             )
+            for field, source in (
+                ("ram_free_bytes", "MemFree"),
+                ("ram_shared_bytes", "Shmem"),
+                ("ram_buffers_bytes", "Buffers"),
+            ):
+                if source in mem:
+                    values[field] = mem[source]
+            if "Cached" in mem:
+                values["ram_cached_bytes"] = mem["Cached"] + mem.get("SReclaimable", 0)
+                values["ram_buff_cache_bytes"] = values["ram_cached_bytes"] + mem.get(
+                    "Buffers", 0
+                )
             total, free = mem["SwapTotal"], mem["SwapFree"]
             values.update(swap_total_bytes=total, swap_used_bytes=max(0, total - free))
             if total:
@@ -170,13 +248,16 @@ class LinuxSampler:
             )
         except (OSError, ValueError, IndexError):
             errors.append("Load or uptime unavailable")
-        for path in paths:
+        for path in selected_paths:
             try:
                 stat = os.statvfs(path)
                 total = stat.f_blocks * stat.f_frsize
                 available = max(0, stat.f_bavail) * stat.f_frsize
                 values["disk_total_bytes:" + path] = total
                 values["disk_available_bytes:" + path] = available
+                free = max(0, getattr(stat, "f_bfree", stat.f_bavail)) * stat.f_frsize
+                values["disk_free_bytes:" + path] = free
+                values["disk_used_bytes:" + path] = max(0, total - free)
                 if total:
                     # Includes reserved space unavailable to the service user.
                     values["disk_pct:" + path] = 100 * max(0, total - available) / total
@@ -186,7 +267,22 @@ class LinuxSampler:
                     )
             except OSError:
                 errors.append(("Disk unavailable: " + path)[:200])
-        return MetricSample(values=values, errors=errors)
+        disks = []
+        for path in selected_paths:
+            candidates = [
+                m
+                for m in mounts
+                if path == m.mount or path.startswith(m.mount.rstrip("/") + "/")
+            ]
+            match = max(candidates, key=lambda m: len(m.mount), default=None)
+            disks.append(
+                DiskInfo(
+                    mount=path,
+                    device=match.device if match else "",
+                    filesystem=match.filesystem if match else "",
+                )
+            )
+        return MetricSample(values=values, errors=errors, disks=disks)
 
 
 class TelemetryStore:

@@ -39,6 +39,8 @@ def enqueue(store, problem_id, event_type="problem.updated"):
     problem = store.problem(problem_id)
     if not problem:
         return
+    if not store.monitoring_active(problem["machine_id"]):
+        return
     evidence = problem["evidence"]
     muted = False
     for rule in store.objects("rule"):
@@ -263,6 +265,8 @@ class Outbox:
                 error = None
                 cancelled = False
                 problem = self.store.problem(row["problem_id"])
+                if problem and not self.store.monitoring_active(problem["machine_id"]):
+                    continue
                 allowed = True
                 if dest and problem:
                     evidence = problem["evidence"]

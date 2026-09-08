@@ -78,6 +78,7 @@ class Telemetry:
         self.next_sample.pop(machine, None)
         if cfg.mode == "local":
             self.sampler.previous_cpu = None
+            self.sampler.previous_threads = {}
         self.store.audit("telemetry_config", machine)
 
     def status(self, machine):
@@ -97,6 +98,8 @@ class Telemetry:
                 )
             )
         )
+        if not self.store.monitoring_active(machine):
+            state = "paused"
         with self.store.connect() as db:
             count = db.execute(
                 "SELECT count(*) FROM telemetry_samples WHERE machine_id=?", (machine,)
@@ -124,7 +127,7 @@ class Telemetry:
             error=self.store.meta("telemetry_error:" + machine) or "",
             next_sample=(
                 self.next_sample.get(machine)
-                if cfg.enabled and cfg.mode == "local"
+                if cfg.enabled and cfg.mode == "local" and state != "paused"
                 else None
             ),
         )
@@ -132,6 +135,8 @@ class Telemetry:
     def receive(self, machine, sample):
         with self.lock:
             cfg = self.data.config(machine)
+            if not self.store.monitoring_active(machine):
+                raise ValueError("Machine monitoring is paused or deleted")
             if not cfg.enabled:
                 raise ValueError("Machine metrics are disabled")
             accepted = self.data.save(machine, sample)
@@ -365,15 +370,22 @@ class Telemetry:
         )
 
     def tick(self):
+        with self.lock:
+            return self._tick()
+
+    def _tick(self):
         now = time.time()
         for machine in self.store.objects("machine"):
             id = machine["id"]
+            if not self.store.monitoring_active(id):
+                continue
             cfg = self.data.config(id)
             if not cfg.enabled:
                 continue
             if cfg.mode == "local" and now >= self.next_sample.get(id, 0):
                 self.next_sample[id] = now + cfg.interval_seconds
                 try:
+                    self.sampler.discover_disks = cfg.discover_disks
                     self.receive(id, self.sampler.sample(cfg.disk_paths))
                 except Exception as exc:
                     self.store.set_meta(
@@ -390,6 +402,10 @@ class Telemetry:
             self.last_prune = now
 
     def enqueue(self, machine, language="en", days=1):
+        if not self.store.monitoring_active(machine):
+            raise ValueError(
+                "Resume machine monitoring before starting a trend analysis"
+            )
         if not self.store.get("machine", machine) or not self.data.latest(machine):
             raise ValueError(
                 "Collect machine measurements before requesting a trend analysis"
@@ -491,7 +507,12 @@ class Telemetry:
                 merged.append(result)
             payload["windows"] = merged
         # Preserve at least one aggregate covering the whole retained range.
-        for key in reversed(list(payload["latest"]["values"])):
+        # Discard per-thread detail before aggregate CPU/RAM/disk measurements.
+        drop_order = sorted(
+            reversed(list(payload["latest"]["values"])),
+            key=lambda key: not key.startswith("cpu_thread_pct:"),
+        )
+        for key in drop_order:
             if len(dumps(payload).encode()) <= budget:
                 break
             payload["latest"]["values"].pop(key)
@@ -516,7 +537,9 @@ class Telemetry:
         if self.analyzer.lock.locked():
             return
         jobs = [
-            j for j in self.store.objects("metric_analysis") if j["status"] == "queued"
+            j
+            for j in self.store.objects("metric_analysis")
+            if j["status"] == "queued" and self.store.monitoring_active(j["machine_id"])
         ]
         if not jobs:
             return

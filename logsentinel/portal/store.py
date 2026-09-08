@@ -98,6 +98,14 @@ class Store:
     def settings(self):
         return Settings.model_validate_json(self.meta("settings"))
 
+    def monitoring_active(self, machine_id):
+        machine = self.get("machine", machine_id)
+        return bool(
+            machine
+            and not machine.get("monitoring_paused")
+            and not machine.get("deletion_pending")
+        )
+
     def audit(self, action, object_id="", detail=""):
         with self.connect() as db:
             db.execute(
@@ -124,6 +132,16 @@ class Store:
     def put(self, kind, data, id=None):
         id = id or uid()
         with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            if (
+                kind != "machine_deletion"
+                and data.get("machine_id")
+                and db.execute(
+                    "SELECT 1 FROM meta WHERE key=?",
+                    ("deleted_machine:" + data["machine_id"],),
+                ).fetchone()
+            ):
+                raise ValueError("Machine has been deleted")
             changed_destination = False
             if kind == "destination":
                 previous = db.execute(
@@ -186,6 +204,23 @@ class Store:
         """Origin IDs are stable source positions or sender event IDs, never message hashes."""
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
+            machine = db.execute(
+                "SELECT data FROM objects WHERE kind='machine' AND id=?",
+                (source["machine_id"],),
+            ).fetchone()
+            if (
+                machine
+                and any(
+                    json.loads(machine[0]).get(k)
+                    for k in ("monitoring_paused", "deletion_pending")
+                )
+            ) or db.execute(
+                "SELECT 1 FROM meta WHERE key=?",
+                ("deleted_machine:" + source["machine_id"],),
+            ).fetchone():
+                raise ValueError(
+                    "Machine monitoring is paused or deleted; retain and retry these events"
+                )
             unique = []
             seen = set()
             for item in entries:

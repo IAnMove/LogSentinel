@@ -57,7 +57,9 @@ class Monitor:
         sources = [
             s
             for s in self.store.objects("source")
-            if s["enabled"] and s["kind"] not in ("metrics", "health")
+            if s["enabled"]
+            and s["kind"] not in ("metrics", "health")
+            and self.store.monitoring_active(s["machine_id"])
         ]
         result = json.loads(self.store.meta("analysis_result") or "{}")
         health = {
