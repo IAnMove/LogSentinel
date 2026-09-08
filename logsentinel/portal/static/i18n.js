@@ -648,7 +648,7 @@ function initLanguage() {
     staticLanguage();
     $("#nav").replaceChildren(
       ...Object.entries(names).map(([key, label]) =>
-        button(t(label), () => navigate(key)),
+        tentriNavButton(key, label),
       ),
     );
     if (!$("#shell").hidden) {

@@ -37,70 +37,59 @@ main > header {
 main > header .scope {
   flex-shrink: 0;
 }
-/* Display the mascot half of the existing wide illustrations. The original
-   raster files remain intact, including the full wordmark and model cartridge. */
+/* Body and cartridge are separate RGBA assets. Placement is relative to
+   their shared canvas, so the socket alignment survives responsive resizing. */
 .tentri-companion {
-  --companion-height: 80px;
+  --companion-height: 88px;
   position: relative;
-  flex: 0 0 calc(var(--companion-height) * 1.4);
-  width: calc(var(--companion-height) * 1.4);
+  flex: 0 0 calc(var(--companion-height) * 1.605);
+  width: calc(var(--companion-height) * 1.605);
   height: var(--companion-height);
-  overflow: hidden;
-  border-radius: 6px;
-  background: var(--mascot-bg, #f3efe4);
+  background: transparent;
 }
 :root[data-theme="paper"] {
-  --mascot-bg: #f0efeb;
+  --cartridge-signal: #f0efeb;
 }
 :root[data-theme="tokyo"] {
-  --mascot-bg: #11131f;
+  --cartridge-signal: #bb9af7;
 }
 :root[data-theme="gruvbox"] {
-  --mascot-bg: #282828;
+  --cartridge-signal: #b8bb26;
 }
 :root[data-theme="rose"] {
-  --mascot-bg: #191724;
+  --cartridge-signal: #9ccfd8;
 }
-.tentri-companion > img {
-  position: absolute;
-  right: 0;
-  top: 0;
-  width: auto;
-  max-width: none;
+.tentri-body {
+  display: block;
+  width: 100%;
   height: 100%;
-  /* Reserve the top socket for a small, section-specific UI cartridge. */
-  clip-path: inset(26% 0 0 0);
+  object-fit: contain;
+}
+.tentri-companion > .tentri-cartridge {
+  position: absolute;
+  top: -8%;
+  left: 41%;
+  transform: translateX(-50%) rotate(12deg);
+  width: 22%;
 }
 .tentri-cartridge {
-  position: absolute;
-  top: 1px;
-  left: 39%;
-  transform: translateX(-50%);
-  width: 29px;
-  height: 25px;
-  display: grid;
-  place-items: center;
-  color: var(--accent);
-  background: var(--surface);
-  border: 2px solid currentColor;
-  border-radius: 3px;
-  box-shadow: 2px 2px 0 var(--mascot-bg, #f3efe4);
+  position: relative;
+  display: inline-block;
+  aspect-ratio: 1;
+  color: var(--cartridge-signal, #86f5d5);
 }
-.tentri-cartridge::after {
-  content: "";
-  position: absolute;
-  width: 15px;
-  height: 3px;
-  bottom: -5px;
-  background: repeating-linear-gradient(
-    to right,
-    currentColor 0 2px,
-    transparent 2px 4px
-  );
+.tentri-cartridge img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
 }
 .tentri-cartridge svg {
-  width: 18px;
-  height: 18px;
+  position: absolute;
+  top: 25%;
+  left: 25%;
+  width: 43%;
+  height: 43%;
 }
 .tentri-hero {
   margin: 20px 0 0;
@@ -110,12 +99,23 @@ main > header .scope {
   background: var(--surface);
   max-width: 1050px;
 }
-.tentri-hero img {
-  display: block;
-  width: 100%;
-  height: auto;
-  aspect-ratio: 3 / 1;
-  object-fit: contain;
+.tentri-artwork-preview {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 28px 20px 12px;
+  gap: 24px;
+}
+.tentri-wordmark {
+  font-family: var(--ui-font, inherit);
+  font-size: clamp(24px, 4vw, 64px);
+  font-weight: 800;
+  letter-spacing: -0.05em;
+  color: var(--ink);
+}
+.tentri-companion.tentri-companion-preview {
+  --companion-height: clamp(100px, 18vw, 230px);
+  max-width: 65%;
 }
 .tentri-hero figcaption {
   display: flex;
@@ -154,15 +154,7 @@ main > header .scope {
 }
 @media (max-width: 1000px) {
   .tentri-companion {
-    --companion-height: 64px;
-  }
-  .tentri-cartridge {
-    width: 25px;
-    height: 21px;
-  }
-  .tentri-cartridge svg {
-    width: 15px;
-    height: 15px;
+    --companion-height: 72px;
   }
   .page-heading {
     gap: 12px;
@@ -181,5 +173,30 @@ main > header .scope {
   }
   .tentri-hero figcaption {
     padding: 8px 12px;
+  }
+}
+
+#nav button {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px;
+}
+#nav .tentri-cartridge {
+  width: 30px;
+  height: 30px;
+  flex: 0 0 30px;
+}
+#nav button > span:last-child {
+  min-width: 0;
+}
+
+@media (max-width: 600px) {
+  .tentri-artwork-preview {
+    flex-direction: column;
+    gap: 12px;
+  }
+  .tentri-companion.tentri-companion-preview {
+    max-width: 100%;
   }
 }

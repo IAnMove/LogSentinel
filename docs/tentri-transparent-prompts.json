@@ -1,0 +1,57 @@
+{
+  "tool": "built-in imagegen; local alpha extraction authorized by user",
+  "assets": [
+    {
+      "key": "body-classic",
+      "referenced_image_paths": [
+        "/home/ina/security-agent/logsentinel/portal/static/tentri-banner-classic-v1.png"
+      ],
+      "prompt": "Use case: background-extraction / precise-object-edit. Edit target: attached classic Tentri banner. Prepare the original robot-octopus as a standalone transparent PNG asset for the same application. Keep the exact cream and deep teal body, bright mint visor eyes, eight articulated arms, cuffs and mint/amber tips, clean illustrated outlines and original shading. Remove ALL the paper background, all lettering and wordmark dashes, and remove ONLY the floating square brain cartridge above its head. Preserve the open top socket on the head; it will receive a separately rendered cartridge. Keep the complete body and tentacles visible, including thin data ribbons if they fit. Center the mascot with its socket at x50% of the canvas, y25%; bottom of tentacles at y94%, all body parts comfortably inside horizontal edges. The top quarter above the socket stays completely empty and transparent. Square composition. Deliver true RGBA transparency with alpha=0 outside the mascot and between the arms. There must be no solid background, paper tone, checkerboard pixels, shadow on a floor, rectangular plate or invented UI. Do not change its pose, materials, facial design or palette. This is an isolated cutout of the existing illustration, not a new mascot design.",
+      "status": "rejected: generated checkerboard; original theme banners used for local extraction instead"
+    },
+    {
+      "key": "cartridge-classic",
+      "referenced_image_paths": [
+        "/home/ina/security-agent/logsentinel/portal/static/tentri-v2.png"
+      ],
+      "prompt": "Use case: precise-object-edit / background-extraction. Input image is the original Tentri branding contact sheet. Isolate ONE of the standalone square brain cartridges shown near the center-right: the deep teal case with cream side wall, screws at its four corners, inset glass display and gold contact pins on its bottom edge. This is a separate physical illustrated cartridge asset for the robot mascot. Preserve the distinctive chunky bevelled industrial toy-like case, cream thickness, dark teal outlines and mint highlights. Change ONLY the central display to a blank uniform deep dark teal #07343e, without any neural emblem, symbol or lettering, so the app can place different section symbols on it. One cartridge, large and centered in a square canvas with about 8% transparent padding. The main display face must be front-facing and square with its edges parallel to canvas edges; show a narrow cream right side for thickness, as in the standalone center-right reference. No rotation; the application handles rotation. Preserve gold pins at bottom. True transparent RGBA background and transparent corners around the case, no paper, no checkerboard pixels, no shadow outside the case. No octopus, no scene, no other objects, no words. Full-color original polished illustration style, not a generic flat UI rectangle.",
+      "status": "generated cartridge; local alpha cleanup and 384px export"
+    },
+    {
+      "key": "cartridge-paper",
+      "referenced_image_paths": [
+        "/root/.codex/generated_images/01a074a7-c053-77b0-b713-10e4180446ae/exec-bb99934b-c07e-4fdf-a0a0-3ba7f1f04002.png",
+        "/home/ina/security-agent/logsentinel/portal/static/tentri-banner-paper-v1.png"
+      ],
+      "prompt": "Use case: style-transfer. Edit target Image 1 is the separate physical Tentri cartridge with a REAL transparent background. Image 2 is ONLY a palette and illustration-style reference. Change ONLY the palette and rendering treatment of Image 1 to PAPER: warm ivory/white side shell, black ink case, blank almost-black display, subtle 1-bit stipple shading inside the case, ochre/gold connector pins; crisp linocut and terminal pixel edges as in second reference. Preserve the EXACT canvas, outline, centered position, proportions, four screws, bevelled case thickness, cream/pale side wall, gold contact pin shapes and large blank inset display from Image 1. Keep the face square and axis-aligned with no tilt. The display must remain blank, without symbol, text or emblem; the application overlays the section icon. Preserve actual alpha transparency outside the case from Image 1. No background, no checkerboard, no colored rectangle, no mascot, no words, no additional objects. One standalone cartridge, same composition and geometry as Image 1.",
+      "status": "generated cartridge; local alpha cleanup and 384px export"
+    },
+    {
+      "key": "cartridge-tokyo",
+      "referenced_image_paths": [
+        "/root/.codex/generated_images/01a074a7-c053-77b0-b713-10e4180446ae/exec-bb99934b-c07e-4fdf-a0a0-3ba7f1f04002.png",
+        "/home/ina/security-agent/logsentinel/portal/static/tentri-banner-tokyo-v1.png"
+      ],
+      "prompt": "Use case: style-transfer. Edit target Image 1 is the separate physical Tentri cartridge with a REAL transparent background. Image 2 is ONLY a palette and illustration-style reference. Change ONLY the palette and rendering treatment of Image 1 to TOKYO NIGHT: lavender-white side shell, indigo case with blue #7aa2f7 and lavender #bb9af7 bevel highlights, blank deep indigo display, amber connector pins, polished 16-bit pixel art as in second reference. Preserve the EXACT canvas, outline, centered position, proportions, four screws, bevelled case thickness, cream/pale side wall, gold contact pin shapes and large blank inset display from Image 1. Keep the face square and axis-aligned with no tilt. The display must remain blank, without symbol, text or emblem; the application overlays the section icon. Preserve actual alpha transparency outside the case from Image 1. No background, no checkerboard, no colored rectangle, no mascot, no words, no additional objects. One standalone cartridge, same composition and geometry as Image 1.",
+      "status": "generated cartridge; local alpha cleanup and 384px export"
+    },
+    {
+      "key": "cartridge-gruvbox",
+      "referenced_image_paths": [
+        "/root/.codex/generated_images/01a074a7-c053-77b0-b713-10e4180446ae/exec-bb99934b-c07e-4fdf-a0a0-3ba7f1f04002.png",
+        "/home/ina/security-agent/logsentinel/portal/static/tentri-banner-gruvbox-v1.png"
+      ],
+      "prompt": "Use case: style-transfer. Edit target Image 1 is the separate physical Tentri cartridge with a REAL transparent background. Image 2 is ONLY a palette and illustration-style reference. Change ONLY the palette and rendering treatment of Image 1 to GRUVBOX: parchment #ebdbb2 side shell, charcoal case with olive #b8bb26 and sage bevel highlights, blank near-black warm display, amber/gold connector pins, purposeful retro pixel dithering as in second reference. Preserve the EXACT canvas, outline, centered position, proportions, four screws, bevelled case thickness, cream/pale side wall, gold contact pin shapes and large blank inset display from Image 1. Keep the face square and axis-aligned with no tilt. The display must remain blank, without symbol, text or emblem; the application overlays the section icon. Preserve actual alpha transparency outside the case from Image 1. No background, no checkerboard, no colored rectangle, no mascot, no words, no additional objects. One standalone cartridge, same composition and geometry as Image 1.",
+      "status": "generated cartridge; local alpha cleanup and 384px export"
+    },
+    {
+      "key": "cartridge-rose",
+      "referenced_image_paths": [
+        "/root/.codex/generated_images/01a074a7-c053-77b0-b713-10e4180446ae/exec-bb99934b-c07e-4fdf-a0a0-3ba7f1f04002.png",
+        "/home/ina/security-agent/logsentinel/portal/static/tentri-banner-rose-v1.png"
+      ],
+      "prompt": "Use case: style-transfer. Edit target Image 1 is the separate physical Tentri cartridge with a REAL transparent background. Image 2 is ONLY a palette and illustration-style reference. Change ONLY the palette and rendering treatment of Image 1 to ROSE PINE: pale lilac side shell, aubergine case with dusty rose and lilac bevel highlights, blank dark aubergine display, warm gold connector pins, restrained pixel art as in second reference. Preserve the EXACT canvas, outline, centered position, proportions, four screws, bevelled case thickness, cream/pale side wall, gold contact pin shapes and large blank inset display from Image 1. Keep the face square and axis-aligned with no tilt. The display must remain blank, without symbol, text or emblem; the application overlays the section icon. Preserve actual alpha transparency outside the case from Image 1. No background, no checkerboard, no colored rectangle, no mascot, no words, no additional objects. One standalone cartridge, same composition and geometry as Image 1.",
+      "status": "generated cartridge; local alpha cleanup and 384px export"
+    }
+  ]
+}

@@ -246,7 +246,7 @@ function navigate(v) {
   render();
 }
 Object.entries(names).forEach(([key, label]) =>
-  $("#nav").append(button(label, () => navigate(key))),
+  $("#nav").append(tentriNavButton(key, label)),
 );
 $("#machine-scope").onchange = () => {
   if (view === "chat") {
