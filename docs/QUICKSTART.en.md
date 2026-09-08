@@ -24,7 +24,7 @@ worker faults and per-service throughput without spending model tokens.
 
 ## Setup wizard
 
-1. **Connect the LLM:** save an Ollama or compatible API URL, model ID and optional API key. Test the saved configuration with synthetic data. A successful test proves connectivity and JSON format, not detection quality. Use the server's loaded context size, not a model family's theoretical maximum. Remote servers require explicit permission to transmit context.
+1. **Connect the LLM:** choose an Ollama, llama.cpp, LM Studio, vLLM, LiteLLM or compatible balancer preset, edit its URL and select an installed model. You can discover models and test the form with synthetic data before saving. A successful test proves connectivity and JSON format, not detection quality. Use the server's loaded context size, not a model family's theoretical maximum. Remote servers require explicit permission to transmit context. [Provider setup and credential handling](LLM_PROVIDERS.md).
 2. **Choose a machine:** create or reuse a profile. Keep separate identities for each machine, including imported logs.
 3. **Connect logs:** local journal needs no path; it uses `journalctl`. Files and folders need an absolute path on the portal server. Importing history can read all available records. Remote ingestion requires a configured sender and its source key. Reusing a source keeps its existing selection policy.
 4. **Enable and learn:** choose the analysis interval and language for new findings, then finish. Notifications can be configured separately; saving a destination does not send a test message.

@@ -32,5 +32,6 @@ jobs:
       - run: python scripts/setup_smoke.py
       - run: python scripts/problem_smoke.py
       - run: python scripts/metrics_smoke.py
+      - run: python scripts/providers_smoke.py
       - run: python scripts/themes_smoke.py
       - run: node scripts/omarchy_smoke.mjs

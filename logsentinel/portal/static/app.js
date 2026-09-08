@@ -328,6 +328,11 @@ async function summary(root) {
     cards.append(p);
   });
   root.append(cards);
+  if (S.machine.length) {
+    const resources = el("section", undefined, "resource-overview");
+    root.append(resources);
+    mountResourceOverview(resources, scope);
+  }
   const status = panel(t("Estado del observatorio"));
   status.append(
     el(
@@ -864,13 +869,7 @@ function settingsView(root) {
     p = panel(t("Proveedor, capacidad y política de revisión")),
     f = el("form", undefined, "form-grid");
   const add = (...a) => f.append(field(...a));
-  add("provider", t("Proveedor"), "select", c.llm.provider, [
-    ["ollama", "Ollama"],
-    ["openai", t("API compatible")],
-  ]);
-  add("base_url", t("URL del servidor"), "text", c.llm.base_url);
-  add("model", t("Modelo"), "text", c.llm.model);
-  add("api_key", t("Clave API (vacío conserva)"), "password", "");
+  llmServerFields(f, c);
   add(
     "context_tokens",
     t("Contexto efectivo configurado"),
@@ -897,7 +896,13 @@ function settingsView(root) {
     c.llm.enable_thinking == null ? "auto" : String(c.llm.enable_thinking),
     [
       ["auto", t("Predeterminado del proveedor")],
-      ["false", t("Desactivar (llama.cpp / Qwen)")],
+      [
+        "false",
+        bilingual(
+          "Desactivar (Ollama / llama.cpp / vLLM compatibles)",
+          "Disable (compatible Ollama / llama.cpp / vLLM)",
+        ),
+      ],
       ["true", t("Activar (servidor compatible)")],
     ],
   );
@@ -944,10 +949,10 @@ function settingsView(root) {
   ]);
   f.append(
     button(t("Consultar modelos y presupuesto"), async () => {
-      const r = await api("/api/model/info", {}),
+      const r = await api("/api/model/info", llmFormSettings(f, c)),
         box = el("div");
       box.append(
-        el("p", t("Modelo guardado: ") + r.model),
+        el("p", t("Modelo") + ": " + r.model + " · " + r.base_url),
         el(
           "p",
           t("Máximo declarado: ") +
@@ -973,32 +978,15 @@ function settingsView(root) {
   );
   const submit = el("button", t("Guardar ajustes"));
   submit.type = "submit";
-  f.append(
-    submit,
-    button(t("Probar modelo con datos sintéticos"), async () => {
-      notice(t("Comprobando modelo…"));
-      const r = await api("/api/model/test", {});
-      notice(t(r.message));
-    }),
-  );
+  f.append(submit);
   f.onsubmit = async (e) => {
     e.preventDefault();
     try {
       const d = formData(f);
-      d.llm = {
-        ...c.llm,
-        provider: d.provider,
-        base_url: d.base_url,
-        model: d.model,
-        api_key: d.api_key,
-        max_tokens: d.max_tokens,
-        timeout_seconds: d.timeout_seconds,
-        enable_thinking:
-          d.enable_thinking === "auto" ? null : d.enable_thinking === "true",
-      };
-      delete d.llm.api_key_set;
+      Object.assign(d, llmFormSettings(f, c));
       [
         "provider",
+        "server_type",
         "base_url",
         "model",
         "api_key",
@@ -1014,6 +1002,14 @@ function settingsView(root) {
     }
   };
   p.append(
+    el(
+      "p",
+      bilingual("Conexión activa: ", "Active connection: ") +
+        c.llm.base_url +
+        " · " +
+        c.llm.model,
+      "provider-active",
+    ),
     el(
       "p",
       t(

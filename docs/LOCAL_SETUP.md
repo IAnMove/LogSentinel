@@ -87,6 +87,8 @@ Modelo:   /opt/llm-node/models/Qwen3-8B-Q4_K_M.gguf
 Pensamiento Qwen3: desactivado
 ```
 
+Comprobado el 8 de septiembre de 2026: esta conexión va **directamente a llama.cpp**, no a un balanceador. El puerto 8080 lo ocupa BigPAPI y devuelve HTML en `/v1/models`, por lo que no es el endpoint de modelos que debe configurarse. Para usar vuestro balanceador falta identificar su URL real y alias. El nuevo preset **Balanceador compatible** permite probarlo con datos sintéticos antes de cambiar la conexión activa.
+
 Qwen3 puede consumir el límite de salida razonando antes de producir JSON. El portal envía `chat_template_kwargs.enable_thinking=false` cuando esta opción está desactivada. Se puede activar desde el formulario si se quiere razonamiento prolongado, pero habrá que aumentar el presupuesto de salida y aceptar menor rendimiento.
 
 ## Rendimiento y seguridad

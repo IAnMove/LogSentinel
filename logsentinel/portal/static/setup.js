@@ -234,13 +234,7 @@ async function setupView(root) {
         ),
       ),
     );
-    add("provider", t("Proveedor"), "select", c.llm.provider, [
-      ["ollama", "Ollama"],
-      ["openai", t("API compatible")],
-    ]);
-    add("base_url", t("URL del servidor"), "url", c.llm.base_url);
-    add("model", t("Modelo"), "text", c.llm.model);
-    add("api_key", t("Clave API (vacío conserva)"), "password");
+    llmServerFields(f, c);
     add(
       "context_tokens",
       t("Contexto efectivo configurado"),
@@ -271,21 +265,7 @@ async function setupView(root) {
       feedback.textContent = t(
         "Guardando y probando el LLM… Puede tardar hasta el tiempo de espera configurado.",
       );
-      await api("/api/settings", {
-        llm: {
-          provider: d.provider,
-          base_url: d.base_url,
-          model: d.model,
-          api_key: d.api_key,
-          max_tokens: d.max_tokens,
-        },
-        context_tokens: d.context_tokens,
-        input_budget: Math.max(
-          512,
-          Math.min(c.input_budget, d.context_tokens - d.max_tokens - 2048),
-        ),
-        remote_allowed: d.remote_allowed,
-      });
+      await api("/api/settings", llmFormSettings(f, c));
       const r = await api("/api/model/test", {});
       notice(
         t("Conexión verificada en ") + Number(r.seconds).toFixed(1) + " s.",

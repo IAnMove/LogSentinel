@@ -575,3 +575,127 @@ details > div {
   stroke: var(--chart-avg);
   fill: var(--chart-avg);
 }
+
+.resource-overview {
+  margin: 24px 0;
+}
+.resource-fleet {
+  display: grid;
+  gap: 16px;
+}
+.resource-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr));
+  gap: 12px;
+  margin: 16px 0;
+}
+.resource-strip .panel {
+  margin: 0;
+  padding: 14px;
+  min-width: 0;
+}
+.resource-card h2 {
+  font-size: 0.95rem;
+}
+.resource-card p {
+  margin: 8px 0 0;
+}
+.resource-detail {
+  font-variant-numeric: tabular-nums;
+}
+.resource-state {
+  font-weight: 600;
+}
+.resource-meter {
+  position: relative;
+  height: 9px;
+  margin: 12px 0;
+  background: var(--border);
+  border-radius: 8px;
+}
+.resource-meter span {
+  display: block;
+  height: 100%;
+  background: var(--chart-avg);
+  border-radius: inherit;
+}
+.resource-meter i {
+  position: absolute;
+  top: -3px;
+  bottom: -3px;
+  width: 2px;
+  background: var(--ink);
+}
+.resource-warning .resource-meter span {
+  background: var(--chart-max);
+}
+.resource-old .resource-meter span {
+  background: var(--muted);
+}
+.resource-charts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 440px), 1fr));
+  gap: 16px;
+}
+.resource-charts .panel {
+  min-width: 0;
+  margin: 0;
+}
+.resource-chart {
+  border: 0;
+}
+.resource-axis {
+  fill: var(--muted);
+  font: 11px sans-serif;
+}
+.resource-gridline {
+  stroke: var(--border);
+  stroke-width: 1;
+}
+.resource-threshold {
+  stroke: var(--muted);
+  stroke-dasharray: 5 5;
+  stroke-width: 1;
+}
+.resource-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  font-size: 0.8rem;
+}
+.legend-maximum::before,
+.legend-average::before {
+  content: "";
+  display: inline-block;
+  width: 12px;
+  height: 3px;
+  margin-right: 5px;
+  vertical-align: middle;
+  background: var(--chart-max);
+}
+.legend-average::before {
+  background: var(--chart-avg);
+}
+.resource-readout {
+  min-height: 3.5em;
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+}
+.resource-charts input[type="range"] {
+  width: 100%;
+  padding: 0;
+  accent-color: var(--chart-avg);
+}
+.provider-help,
+.provider-tools,
+.provider-result {
+  grid-column: 1 / -1;
+}
+.provider-active {
+  padding: 12px;
+  border: 1px solid var(--border);
+  overflow-wrap: anywhere;
+}
+.provider-result:empty {
+  display: none;
+}

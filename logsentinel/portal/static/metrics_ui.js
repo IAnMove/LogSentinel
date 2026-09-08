@@ -18,7 +18,7 @@ function metricName(key) {
 }
 function metricValue(key, value) {
   if (value === undefined || value === null) return "—";
-  if (key.includes("bytes")) return bytes(value);
+  if (key.includes("bytes")) return resourceBytes(value);
   if (key === "uptime_seconds")
     return (value / 86400).toFixed(1) + " " + t("días");
   return (
@@ -101,7 +101,10 @@ function metricChart(key, rows) {
     svg,
     el(
       "p",
-      t("Naranja: máximo · Azul: media · Huecos: sin muestras"),
+      bilingual(
+        "Máximo y media · Huecos: sin muestras",
+        "Maximum and average · Gaps: no samples",
+      ),
       "subtle",
     ),
   );
@@ -117,48 +120,7 @@ async function metricsView(root) {
     return;
   }
   if (!scope) {
-    const overview = await api("/api/telemetry");
-    if (!root.isConnected) return;
-    root.replaceChildren();
-    root.append(
-      el(
-        "p",
-        t(
-          "Mediciones y alertas por máquina. Abre un equipo para configurar captura, umbrales e historial.",
-        ),
-      ),
-    );
-    if (overview.error) root.append(el("p", overview.error, "error"));
-    const cards = el("div", undefined, "metric-grid");
-    for (const state of overview.machines) {
-      const p = panel(machineName(state.machine_id));
-      p.append(
-        el("p", metricState(state.state)),
-        el("p", t("Última muestra") + ": " + stamp(state.latest?.observed)),
-      );
-      for (const key of ["cpu_pct", "ram_pct", "swap_pct", "disk_pct:/"])
-        p.append(
-          el(
-            "p",
-            metricName(key) +
-              ": " +
-              metricValue(key, state.latest?.values[key]),
-          ),
-        );
-      p.append(
-        button(t("Ver métricas y configurar"), () => {
-          scope = state.machine_id;
-          $("#machine-scope").value = scope;
-          render();
-        }),
-      );
-      cards.append(p);
-    }
-    root.append(cards);
-    setTimeout(() => {
-      if (root.isConnected && !scope)
-        metricsView(root).catch((error) => notice(error.message, true));
-    }, 5000);
+    await mountResourceOverview(root);
     return;
   }
   const machineId = scope,
@@ -166,6 +128,19 @@ async function metricsView(root) {
   const initial = await api("/api/telemetry/" + machineId);
   const live = el("div"),
     reports = panel(t("Análisis de tendencias guardados"));
+  const hours = field(
+    "chart_hours",
+    bilingual("Gráficos recientes", "Recent charts"),
+    "select",
+    1,
+    [
+      [1, bilingual("Última hora", "Last hour")],
+      [6, bilingual("Últimas 6 horas", "Last 6 hours")],
+      [24, t("Últimas 24 horas")],
+    ],
+  );
+  hours.querySelector("select").onchange = () =>
+    update().catch((error) => notice(error.message, true));
   const historyDays = field(
     "history_days",
     t("Días de historial diario"),
@@ -324,8 +299,9 @@ async function metricsView(root) {
   configPanel.append(
     el(
       "p",
-      t(
-        "El 98 % dispara una alerta crítica inmediata. Los demás umbrales requieren muestras consecutivas; se recuperan 5 puntos por debajo. Un pico compara con hasta 10 muestras anteriores. Las alertas usan los canales configurados y permanecen en Problemas hasta su revisión.",
+      bilingual(
+        "La captura es opcional y no usa tokens. RAM, swap y discos pueden alertar inmediatamente al superar el umbral crítico; CPU requiere muestras sostenidas. Los avisos se recuperan 5 puntos por debajo del umbral. El LLM de tendencias se activa por separado.",
+        "Collection is optional and uses no tokens. RAM, swap and disks can alert immediately above the critical threshold; CPU requires sustained samples. Alerts recover 5 points below their threshold. LLM trend analysis is enabled separately.",
       ),
     ),
     form,
@@ -354,12 +330,32 @@ async function metricsView(root) {
         " --disk /",
     ),
   );
+  const configDisclosure = disclosure(
+    t("Configurar captura y alertas"),
+    configPanel,
+  );
+  const inspection = el("p", "", "subtle");
+  if (!cfg.enabled) configDisclosure.open = true;
   root.append(
+    el(
+      "p",
+      bilingual(
+        "Mediciones opcionales · Captura y alertas sin LLM · Actualización automática",
+        "Optional measurements · Collection and alerts without an LLM · Automatic refresh",
+      ),
+      "subtle",
+    ),
+    button(t("Configurar captura y alertas"), () => {
+      configDisclosure.open = true;
+      configDisclosure.scrollIntoView({ block: "start" });
+    }),
+    hours,
     historyDays,
+    inspection,
     live,
     controls,
     reports,
-    disclosure(t("Configurar captura y alertas"), configPanel),
+    configDisclosure,
     disclosure(t("Conectar otro equipo"), remote),
   );
   async function update(data) {
@@ -370,7 +366,9 @@ async function metricsView(root) {
         "/api/telemetry/" +
           machineId +
           "?days=" +
-          historyDays.querySelector("select").value,
+          historyDays.querySelector("select").value +
+          "&hours=" +
+          hours.querySelector("select").value,
       ));
     if (!root.isConnected) return;
     live.replaceChildren();
@@ -418,8 +416,9 @@ async function metricsView(root) {
       status.append(
         el(
           "p",
-          t(
-            "Han pasado más de tres intervalos sin mediciones. Estos valores están desactualizados.",
+          bilingual(
+            "Se ha superado el plazo configurado sin mediciones. Estos valores están desactualizados.",
+            "The configured measurement deadline has passed. These values are out of date.",
           ),
           "monitor-warning",
         ),
@@ -452,12 +451,64 @@ async function metricsView(root) {
       "load15",
       "uptime_seconds",
     ];
-    for (const key of keys) {
-      const card = panel(metricName(key));
-      card.append(el("strong", metricValue(key, values[key]), "metric-value"));
-      tiles.append(card);
+    const primary = keys.filter(
+      (k) =>
+        ["cpu_pct", "ram_pct", "swap_pct"].includes(k) ||
+        k.startsWith("disk_pct:"),
+    );
+    for (const key of primary) {
+      tiles.append(resourceCard(key, data));
     }
-    live.append(tiles);
+    if (data.latest) live.append(tiles);
+    const extra = el("div", undefined, "metric-grid");
+    for (const key of keys.filter((k) => !primary.includes(k)))
+      extra.append(resourceCard(key, data));
+    if (data.recent?.rows.length) {
+      live.append(el("h2", bilingual("Evolución reciente", "Recent history")));
+      const charts = el("div", undefined, "resource-charts");
+      for (const key of primary.filter(
+        (k) => k.includes("_pct") && data.recent.rows.some((r) => r.key === k),
+      ))
+        charts.append(
+          recentMetricChart(
+            key,
+            data.recent,
+            resourceThreshold(key, data.config),
+          ),
+        );
+      live.append(
+        charts,
+        el(
+          "p",
+          bilingual(
+            "Picos conservados al agrupar muestras. Horas en tu zona local; el resumen diario usa UTC. La línea discontinua marca el umbral de aviso. No se interpolan periodos sin muestras.",
+            "Grouped samples preserve peaks. Times use your local zone; daily summaries use UTC. The dashed line marks the warning threshold. Periods without samples are not interpolated.",
+          ),
+          "subtle",
+        ),
+      );
+      if (data.recent.truncated)
+        live.append(
+          el(
+            "p",
+            bilingual(
+              "Gráfico limitado a las 10.000 muestras más recientes del periodo. Consulta también los resúmenes por hora.",
+              "Chart limited to the latest 10,000 samples in this period. Also check the hourly summaries.",
+            ),
+            "monitor-warning",
+          ),
+        );
+    }
+    if (data.latest)
+      live.append(
+        disclosure(
+          bilingual(
+            "Más contadores: E/S, carga, inodos y tiempo encendido",
+            "More counters: I/O wait, load, inodes and uptime",
+          ),
+          extra,
+        ),
+      );
     for (const alert of data.active_alerts)
       live.append(
         button(
@@ -468,13 +519,14 @@ async function metricsView(root) {
         ),
       );
     if (data.hourly.length) {
-      live.append(el("h2", t("Máximos y medias por hora, últimas 24 h")));
       const charts = el("div", undefined, "metric-grid");
       for (const key of keys.filter(
         (k) => k.includes("_pct") && data.hourly.some((r) => r.key === k),
       ))
         charts.append(metricChart(key, data.hourly));
-      live.append(charts);
+      live.append(
+        disclosure(t("Máximos y medias por hora, últimas 24 h"), charts),
+      );
     }
     if (data.daily.length) {
       live.append(
@@ -550,11 +602,19 @@ async function metricsView(root) {
   const poll = async () => {
     if (!root.isConnected) return;
     try {
-      await update();
+      // Keep the keyboard position while someone inspects a chart or history.
+      const inspecting = live.contains(document.activeElement);
+      inspection.textContent = inspecting
+        ? bilingual(
+            "Actualización visual en pausa mientras inspeccionas los datos. Haz clic fuera del gráfico o del historial para reanudarla; la captura continúa.",
+            "Display refresh paused while you inspect the data. Click outside the chart or history to resume; collection continues.",
+          )
+        : "";
+      if (!inspecting) await update();
     } catch (error) {
       notice(error.message, true);
     }
-    setTimeout(poll, 5000);
+    setTimeout(poll, 15000);
   };
-  setTimeout(poll, 5000);
+  setTimeout(poll, 15000);
 }
