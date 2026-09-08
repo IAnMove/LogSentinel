@@ -66,7 +66,11 @@ function drawMonitor(m) {
           ? t("Captura sin confirmación reciente; revisa las fuentes")
           : t("Captura inactiva");
   details.append(
-    el("div", "Logs", "subtle"),
+    el(
+      "div",
+      bilingual("Logs · estado global", "Logs · global status"),
+      "subtle",
+    ),
     el("div", t("Último evento recibido: ") + stamp(m.last_event), "subtle"),
   );
   const failedSources = Object.values(m.source_health).filter(
@@ -173,8 +177,8 @@ function drawMonitor(m) {
     );
   const toggle = button(
     m.analysis_enabled
-      ? t("Pausar análisis")
-      : t("Activar análisis automático"),
+      ? bilingual("Pausar análisis global", "Pause global analysis")
+      : bilingual("Activar análisis global", "Enable global analysis"),
     async () => {
       await api("/api/settings", { enabled: !m.analysis_enabled });
       S = await api("/api/state");
@@ -189,6 +193,20 @@ function drawMonitor(m) {
     },
   );
   root.replaceChildren(details, toggle);
+  const selectedMachine = S.machine.find((machine) => machine.id === scope);
+  if (selectedMachine?.monitoring_paused)
+    details.prepend(
+      el(
+        "p",
+        selectedMachine.name +
+          " · " +
+          bilingual(
+            "monitorización de esta máquina pausada",
+            "monitoring for this machine is paused",
+          ),
+        "monitor-warning",
+      ),
+    );
 }
 
 async function setupView(root) {

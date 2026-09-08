@@ -90,6 +90,10 @@ def register_telemetry(app, telemetry):
         ):
             raise HTTPException(401)
         cfg = telemetry.data.config(id)
+        if not store.monitoring_active(id):
+            raise HTTPException(
+                409, "Machine monitoring is paused; retain and retry samples"
+            )
         if not cfg.enabled or cfg.mode != "remote":
             raise HTTPException(409, "Remote metrics disabled")
         body = SampleBatch.model_validate(await request.json())

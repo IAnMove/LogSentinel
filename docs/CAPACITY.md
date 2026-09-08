@@ -17,3 +17,16 @@ Review these limits together:
 - Inspect high-volume services, then configure source priority/keyword selection with context. Use Rules to preview exclusion filters. Exclusions and unselected messages remain visibly unreviewed.
 
 All local journald sources capture the same host journal. The portal rejects a second enabled journald source, even on another machine card; the diagnostic also identifies legacy duplicates. The setup wizard reuses a matching local hostname when detecting this machine. Remote journals should arrive through push/file/folder sources associated with the remote machine.
+
+
+## Reviewed optimization
+
+Use **Machines → Optimize**, or select a machine in **Coverage and capacity → Optimize this machine**. The diagnostic reads at most 2,000 recent retained events from its enabled log sources in the last hour, applies existing exclusions, and compares several source policies. It does not call a model. Truncation, sampled counts, selection rates and coverage loss are shown. Rates extrapolated from a partial sample may not represent the whole window.
+
+The proposal compares three numeric-priority ceilings (warnings 4, errors 3, critical 2), each OR-ed with an explicit list of case-insensitive literal keywords. The preview exposes those exact terms. These policies retain originals, set automatic surrounding context to zero minutes and leave excluded/unselected records visibly unreviewed. Investigations can retrieve retained context later. A producer's priority is not authenticated proof of severity; critical-only selection cannot guarantee detection of all security issues.
+
+An indicative throughput estimate requires at least three successful, non-retried batches with the current model/budget/cadence since the latest source, rule or settings change. It uses median covered events, full-batch model time including verification, shared machine/call budgets and 25% headroom. Frequent recent errors with that model invalidate the estimate. The selected machine is counted even if paused, to account for its share when resumed. This remains an estimate, not a promised processing rate or a projection for larger unseen payloads.
+
+When possible, additional proposals allow a larger input budget within the already configured context, or a shorter interval when measured model work leaves time free. Global proposals require a separate acknowledgement because they affect other machines. The optimizer does not raise the model server's loaded context, download models or enable paused monitoring. A larger budget requires new measurements; a longer interval does not increase processing speed.
+
+**Apply this proposal** requires review of coverage loss. Plans expire after 15 minutes and become invalid if settings, source/rule configuration or machine state changes. Applying is transactional and audited. Old historical capacity omissions are not silently replayed. Compare at least three subsequent completed cycles and regenerate the diagnostic; if critical events still exceed capacity, reduce producer volume or use faster inference.

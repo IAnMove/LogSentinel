@@ -75,7 +75,17 @@ class Collector:
             return self._poll(source)
 
     def _poll(self, source):
-        if not source["enabled"]:
+        machine = self.store.get("machine", source["machine_id"])
+        if (
+            not source["enabled"]
+            or (
+                machine
+                and (
+                    machine.get("monitoring_paused") or machine.get("deletion_pending")
+                )
+            )
+            or self.store.meta("deleted_machine:" + source["machine_id"])
+        ):
             for key in [k for k in self.handles if k[0] == source["id"]]:
                 self.handles.pop(key).close()
             for item in list(self.retired):

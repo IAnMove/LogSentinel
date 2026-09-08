@@ -27,6 +27,9 @@ from .problem_context import context_for, chat_system, validate_chat
 from .research import Researcher, InvestigationRequest
 from .telemetry import Telemetry
 from .telemetry_api import register_telemetry
+from .disk_info import DiskScans, register_disk_info
+from .machines import MachineLifecycle, register_machines
+from .optimizer import register_optimizer
 from .chat_requests import ChatRequests
 from .model_timing import estimate_model_time
 from .notify import Outbox
@@ -63,6 +66,7 @@ def create_app(directory, background=True):
     monitor = Monitor(store, analyzer, background)
     researcher = Researcher(store, analyzer)
     telemetry = Telemetry(store, analyzer)
+    disk_scans = DiskScans(store, telemetry)
     outbox = Outbox(store)
     health_monitor = HealthMonitor(store, analyzer, monitor, telemetry, background)
     sessions = {}
@@ -153,6 +157,8 @@ def create_app(directory, background=True):
         researcher.recover()
         telemetry.recover()
         store.set_meta("model_active_call", "")
+        disk_scans.recover()
+        lifecycle.recover()
         chat_requests.recover()
         tasks = (
             [
@@ -165,6 +171,8 @@ def create_app(directory, background=True):
         try:
             yield
         finally:
+            await lifecycle.close()
+            await disk_scans.close()
             await chat_requests.close()
             for task in tasks:
                 task.cancel()
@@ -187,6 +195,7 @@ def create_app(directory, background=True):
     app.state.outbox = outbox
     app.state.health = health_monitor
     register_telemetry(app, telemetry)
+    register_disk_info(app, disk_scans)
     register_widget(app, store, monitor, telemetry, health_monitor)
 
     @app.get("/api/health")
@@ -345,6 +354,8 @@ def create_app(directory, background=True):
         source = data.get("source_id")
         if machine and not store.get("machine", machine):
             raise HTTPException(400, "Unknown machine")
+        if machine and store.get("machine", machine).get("deletion_pending"):
+            raise HTTPException(409, "Machine deletion is pending")
         if source:
             obj = store.get("source", source)
             if not obj or (machine and obj["machine_id"] != machine):
@@ -371,6 +382,13 @@ def create_app(directory, background=True):
         old = store.get(kind, id) if id else None
         if id and old is None:
             raise HTTPException(404)
+        if kind == "machine" and any(
+            k in body and body[k] != (old or {}).get(k, False)
+            for k in ("deletion_pending", "monitoring_paused")
+        ):
+            raise HTTPException(400, "Use the machine monitoring or deletion controls")
+        if old and old.get("deletion_pending"):
+            raise HTTPException(409, "Machine deletion is pending")
         if old:
             old.pop("id")
             merged = dict(old, **body)
@@ -713,6 +731,8 @@ def create_app(directory, background=True):
         source = store.get("source", id)
         if not source:
             raise HTTPException(404)
+        if not store.monitoring_active(source["machine_id"]):
+            raise HTTPException(409, "Machine monitoring is paused")
         if source["kind"] == "push":
             raise HTTPException(400, "Push sources receive events from a sender")
         count = await asyncio.to_thread(collector.poll, dict(source, enabled=True))
@@ -1040,6 +1060,8 @@ def create_app(directory, background=True):
             machine = problem["machine_id"]
         if not store.get("machine", machine):
             raise HTTPException(400, "Select a machine")
+        if store.get("machine", machine).get("deletion_pending"):
+            raise HTTPException(409, "Machine deletion is pending")
         if source and (
             not store.get("source", source)
             or store.get("source", source)["machine_id"] != machine
@@ -1122,6 +1144,19 @@ def create_app(directory, background=True):
 
     chat_requests = ChatRequests(store, analyzer, chat_context, execute_chat)
     app.state.chat_requests = chat_requests
+    lifecycle = MachineLifecycle(
+        store,
+        analyzer,
+        collector,
+        telemetry,
+        health_monitor,
+        outbox,
+        disk_scans,
+        chat_requests,
+    )
+    app.state.lifecycle = lifecycle
+    register_machines(app, lifecycle)
+    register_optimizer(app, store, monitor)
 
     @app.post("/api/chat/requests", status_code=202)
     async def submit_chat_request(request: Request):
@@ -1185,6 +1220,10 @@ def create_app(directory, background=True):
         source = store.get("source", id)
         if not source or source["kind"] != "push" or not source["enabled"]:
             raise HTTPException(409, "Source disabled")
+        if not store.monitoring_active(source["machine_id"]):
+            raise HTTPException(
+                409, "Machine monitoring is paused; retain and retry events"
+            )
         return source
 
     @app.post("/heartbeat/{id}")

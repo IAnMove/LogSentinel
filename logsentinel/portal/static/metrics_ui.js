@@ -1,5 +1,7 @@
 "use strict";
 function metricName(key) {
+  if (key.startsWith("cpu_thread_pct:"))
+    return bilingual("Hilo ", "Thread ") + key.split(":")[1];
   const [base, ...path] = key.split(":");
   return (
     ({
@@ -17,6 +19,7 @@ function metricName(key) {
   );
 }
 function metricValue(key, value) {
+  if (key.split(":")[0].endsWith("_bytes")) return resourceBytes(value);
   if (value === undefined || value === null) return "—";
   if (key.includes("bytes")) return resourceBytes(value);
   if (key === "uptime_seconds")
@@ -26,6 +29,11 @@ function metricValue(key, value) {
   );
 }
 function metricState(state) {
+  if (state === "paused")
+    return bilingual(
+      "Monitorización de la máquina pausada",
+      "Machine monitoring paused",
+    );
   return t(
     {
       active: "Mediciones activas",
@@ -37,78 +45,13 @@ function metricState(state) {
   );
 }
 function metricChart(key, rows) {
-  const card = panel(metricName(key)),
-    ns = "http://www.w3.org/2000/svg";
-  const svg = document.createElementNS(ns, "svg");
-  svg.setAttribute("viewBox", "0 0 480 120");
-  svg.setAttribute("role", "img");
-  svg.setAttribute(
-    "aria-label",
-    metricName(key) + " · " + t("Máximos y medias por hora, últimas 24 h"),
-  );
-  svg.classList.add("metric-chart");
-  const selected = rows.filter((r) => r.key === key);
-  const end = Date.now(),
-    start = end - 86400000;
-  const scale = key.split(":")[0].endsWith("_pct")
-    ? 100
-    : Math.max(1, ...selected.map((r) => r.maximum));
-  for (const type of ["maximum", "average"]) {
-    let points = [],
-      previous = null;
-    function draw() {
-      if (!points.length) return;
-      const line = document.createElementNS(ns, "polyline");
-      line.setAttribute("points", points.join(" "));
-      line.setAttribute("class", "metric-" + type);
-      svg.append(line);
-    }
-    for (const row of selected) {
-      const stamp = Date.parse(row.bucket);
-      if (previous !== null && stamp - previous > 3600000) {
-        draw();
-        points = [];
-      }
-      const x = Math.max(
-          5,
-          Math.min(475, 5 + (470 * (stamp - start)) / (end - start)),
-        ),
-        y = 110 - (100 * row[type]) / scale;
-      points.push(x + "," + y);
-      const dot = document.createElementNS(ns, "circle"),
-        title = document.createElementNS(ns, "title");
-      dot.setAttribute("cx", x);
-      dot.setAttribute("cy", y);
-      dot.setAttribute("r", 2);
-      dot.setAttribute("class", "metric-" + type);
-      title.textContent =
-        row.bucket +
-        " · " +
-        t(type === "maximum" ? "Máximo" : "Media") +
-        ": " +
-        metricValue(key, row[type]) +
-        " · " +
-        row.n +
-        " " +
-        t("muestras");
-      dot.append(title);
-      svg.append(dot);
-      previous = stamp;
-    }
-    draw();
-  }
-  card.append(
-    svg,
-    el(
-      "p",
-      bilingual(
-        "Máximo y media · Huecos: sin muestras",
-        "Maximum and average · Gaps: no samples",
-      ),
-      "subtle",
-    ),
-  );
-  return card;
+  const end = Date.now() / 1000;
+  return recentMetricChart(key, {
+    start: end - 86400,
+    end,
+    step_seconds: 3600,
+    rows: rows.map((r) => ({ ...r, observed: Date.parse(r.bucket) / 1000 })),
+  });
 }
 
 async function metricsView(root) {
@@ -178,6 +121,15 @@ async function metricsView(root) {
     cfg = initial.config;
   const fields = [
     field("enabled", t("Activar mediciones"), "checkbox", cfg.enabled),
+    field(
+      "discover_disks",
+      bilingual(
+        "Detectar discos locales montados",
+        "Discover mounted local disks",
+      ),
+      "checkbox",
+      cfg.discover_disks ?? true,
+    ),
     field("mode", t("Origen de las métricas"), "select", cfg.mode, [
       ["remote", t("Emisor remoto")],
       ...(machine.kind === "local"
@@ -274,6 +226,15 @@ async function metricsView(root) {
   ];
   const grid = el("div", undefined, "form-grid");
   grid.append(...fields);
+  const modeField = (form) => form.querySelector('[name="mode"]');
+  const updateLocalFields = () => {
+    const local = modeField(grid).value === "local";
+    for (const name of ["disk_paths", "discover_disks"])
+      grid.querySelector('[name="' + name + '"]').closest("label").hidden =
+        !local;
+  };
+  modeField(grid).addEventListener("change", updateLocalFields);
+  updateLocalFields();
   const save = el("button", t("Guardar configuración de métricas"));
   save.type = "submit";
   form.append(grid, save);
@@ -460,6 +421,7 @@ async function metricsView(root) {
       tiles.append(resourceCard(key, data));
     }
     if (data.latest) live.append(tiles);
+    if (data.latest) live.append(cpuThreadPanel(data));
     const extra = el("div", undefined, "metric-grid");
     for (const key of keys.filter((k) => !primary.includes(k)))
       extra.append(resourceCard(key, data));

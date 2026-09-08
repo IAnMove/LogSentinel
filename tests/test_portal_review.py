@@ -107,6 +107,7 @@ async def test_schedule_runs_without_a_manual_request_and_pause_is_separate(tmp_
     assert a.started == first
     cfg.enabled = False
     s.set_meta("settings", cfg.model_dump_json())
+    s.put("machine", {"name": "Remote", "kind": "imported"}, "m")
     s.put(
         "source", {"name": "remote", "machine_id": "m", "kind": "push", "enabled": True}
     )

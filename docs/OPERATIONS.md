@@ -147,3 +147,14 @@ Coverage remains `compact`; the app does not claim originals were reviewed. Open
 the finding to request an investigation when the model is available. Repeated
 automatic-cycle failures back off to at most one hour; a successful manual test or
 scan clears the backoff. Capture continues throughout.
+
+
+## Pausa y borrado de máquinas
+
+En **Máquinas** hay controles independientes **Pausar esta máquina**, **Reanudar esta máquina**, **Optimizar** y **Borrar máquina**. La pausa detiene captura, nuevos análisis automáticos, mediciones y avisos de ese equipo. Conserva fuentes, cursores e historial; una llamada ya enviada puede acabar y los avisos pendientes esperan a la reanudación. El chat manual puede seguir consultando el historial. El botón superior **Pausar análisis global** solo controla el planificador LLM de todas las máquinas, sin detener su captura; el encabezado indica que su estado es global.
+
+Los emisores remotos reciben HTTP 409 mientras una máquina está pausada y deben conservar su spool. Pausar el receptor no detiene los procesos externos ni su generación de logs: el origen necesita espacio y retención para recuperarse después. Reanudar conserva la configuración anterior y respeta la pausa global del análisis.
+
+**Borrar máquina** abre un diálogo con recuentos y confirmación explícita. Se detiene la máquina y se crea un trabajo duradero: espera las operaciones en curso, borra en una transacción sus fuentes, eventos/segmentos, hallazgos/evidencias/revisiones, análisis, conversaciones, consumo, métricas, filtros y canales de ámbito exclusivo. Las claves de sus emisores dejan de ser válidas. Los controles e historial de otras máquinas y los canales globales permanecen. El borrado sobrevive a cerrar la ventana o reiniciar el portal; un fallo permite reintentar desde su estado de borrado. La compactación recupera espacio SQLite y se informa si queda pendiente.
+
+Los archivos originales y journal del sistema, backups existentes y notificaciones ya enviadas/exportadas se conservan. No se revocan mensajes en Slack/Telegram ni se editan archivos exportados que puedan mezclar varias máquinas. Hay que detener o reconfigurar los emisores externos tras borrar su identidad. El portal conserva solo una constancia mínima de la operación y del ID retirado para impedir escrituras tardías; no es un borrado seguro de soportes o copias externas.

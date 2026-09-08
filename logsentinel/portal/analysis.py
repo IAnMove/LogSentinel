@@ -351,6 +351,8 @@ class Analyzer:
         )
         self.store.set_meta("machine_rotation", str(index + 1))
         for machine in machines:
+            if not self.store.monitoring_active(machine["id"]):
+                continue
             if calls >= cfg.max_calls:
                 break
             with self.store.connect() as db:
@@ -565,7 +567,11 @@ class Analyzer:
                 ]
                 self.store.mark(selected, "compact")
                 first_pass = resolved
-                if verdict.findings and calls < cfg.max_calls:
+                if (
+                    verdict.findings
+                    and calls < cfg.max_calls
+                    and self.store.monitoring_active(machine["id"])
+                ):
                     originals = self.store.events(
                         ids=[
                             id

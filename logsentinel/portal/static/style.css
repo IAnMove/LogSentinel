@@ -834,3 +834,84 @@ details > div {
 .panel li {
   margin-block: 0.6rem;
 }
+
+.resource-breakdown {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 5px 12px;
+  font-size: 0.85rem;
+}
+.resource-breakdown dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+.resource-breakdown dt {
+  color: var(--muted);
+}
+.resource-card {
+  overflow-wrap: anywhere;
+}
+.disk-space-bar {
+  display: flex;
+  height: 18px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  overflow: hidden;
+  margin: 14px 0 8px;
+}
+.disk-space-used {
+  background: var(--chart-max);
+}
+.disk-space-reserved {
+  background: var(--muted);
+}
+.disk-space-available {
+  background: var(--chart-avg);
+}
+.disk-space-legend {
+  display: grid;
+  gap: 5px;
+  font-size: 0.8rem;
+}
+.disk-space-legend span::before {
+  content: "";
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  margin-right: 6px;
+  background: var(--chart-max);
+}
+.disk-space-legend .disk-label-reserved::before {
+  background: var(--muted);
+}
+.disk-space-legend .disk-label-available::before {
+  background: var(--chart-avg);
+}
+.cpu-thread-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(115px, 1fr));
+  gap: 12px;
+  margin-top: 16px;
+}
+.cpu-thread {
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.cpu-thread strong {
+  display: block;
+  font-variant-numeric: tabular-nums;
+}
+.resource-cursor {
+  stroke: var(--ink);
+  stroke-width: 1;
+  stroke-dasharray: 2 3;
+  pointer-events: none;
+}
+.resource-chart .metric-maximum {
+  stroke-dasharray: 4 3;
+  stroke-width: 1.5;
+}
+.resource-chart .metric-average {
+  stroke-width: 2.5;
+}

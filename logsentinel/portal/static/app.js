@@ -258,6 +258,7 @@ $("#machine-scope").onchange = () => {
   }
   scope = $("#machine-scope").value;
   offset = 0;
+  drawMonitor(S.monitor);
   render();
 };
 $("#logout").onclick = async () => {
@@ -510,7 +511,7 @@ function objectView(root) {
   root.append(
     table(
       kind === "machine"
-        ? [t("Nombre"), t("Sistema"), t("Tipo"), t("Acciones")]
+        ? [t("Nombre"), t("Sistema"), t("Tipo"), t("Estado"), t("Acciones")]
         : [t("Nombre"), t("Máquina"), t("Tipo"), t("Estado"), t("Acciones")],
       items.map((obj) => {
         const b = [
@@ -519,6 +520,10 @@ function objectView(root) {
             render();
           }),
         ];
+        if (kind === "machine") {
+          if (obj.deletion_pending) b.length = 0;
+          b.push(...machineActions(obj));
+        }
         if (
           kind === "machine" ||
           (kind === "source" && obj.kind === "metrics")
@@ -595,14 +600,26 @@ function objectView(root) {
             ),
           );
         return kind === "machine"
-          ? [obj.name, obj.os || t("Sin especificar"), obj.kind, actions(...b)]
+          ? [
+              obj.name,
+              obj.os || t("Sin especificar"),
+              obj.kind,
+              machineMonitoringState(obj),
+              actions(...b),
+            ]
           : [
               obj.name,
               machineName(obj.machine_id),
               channelNames[obj.kind] ? t(channelNames[obj.kind]) : obj.kind,
               el(
                 "span",
-                (obj.enabled ? t("Activo") : t("Pausado")) +
+                (obj.machine_id &&
+                S.machine.find((m) => m.id === obj.machine_id)
+                  ?.monitoring_paused
+                  ? bilingual("Máquina pausada", "Machine paused")
+                  : obj.enabled
+                    ? t("Activo")
+                    : t("Pausado")) +
                   (S.health[obj.id]?.error
                     ? " · " + S.health[obj.id].error
                     : ""),
