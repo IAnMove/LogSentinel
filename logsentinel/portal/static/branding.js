@@ -1,12 +1,10 @@
 "use strict";
 
-const tentriArtwork = {
-  classic: "tentri-banner-classic-v1.png",
-  paper: "tentri-banner-paper-v1.png",
-  tokyo: "tentri-banner-tokyo-v1.png",
-  gruvbox: "tentri-banner-gruvbox-v1.png",
-  rose: "tentri-banner-rose-v1.png",
-};
+function tentriTheme() {
+  return portalThemes.some((theme) => theme.id === portalTheme)
+    ? portalTheme
+    : "classic";
+}
 // Artwork now follows the interface. Preserve an earlier opt-out, but migrate
 // the old default and fixed-palette choices to automatic theme matching.
 let tentriArtworkChoice = "auto";
@@ -44,14 +42,47 @@ const tentriCartridges = {
 };
 
 function updateTentriBanners() {
-  const src =
-    "/static/" + (tentriArtwork[portalTheme] || tentriArtwork.classic);
-  for (const banner of document.querySelectorAll("[data-tentri-banner]")) {
-    banner.hidden =
-      banner.id === "section-mascot" && tentriArtworkChoice === "hidden";
-    const img = banner.querySelector("img");
+  const theme = tentriTheme();
+  for (const img of document.querySelectorAll('[data-tentri-part="case"]')) {
+    const src = `/static/tentri-case-${theme}-v2.png`;
     if (img.getAttribute("src") !== src) img.src = src;
   }
+  for (const mascot of document.querySelectorAll("[data-tentri-companion]")) {
+    mascot.hidden =
+      mascot.id === "section-mascot" && tentriArtworkChoice === "hidden";
+    const img = mascot.querySelector('[data-tentri-part="body"]');
+    const src = `/static/tentri-body-${theme}-v2.png`;
+    if (img.getAttribute("src") !== src) img.src = src;
+  }
+}
+
+function tentriCartridge(section) {
+  const cartridge = el("span", undefined, "tentri-cartridge");
+  cartridge.dataset.cartridge = section;
+  cartridge.setAttribute("aria-hidden", "true");
+  const housing = el("img");
+  housing.dataset.tentriPart = "case";
+  housing.src = `/static/tentri-case-${tentriTheme()}-v2.png`;
+  housing.alt = "";
+  housing.width = 384;
+  housing.height = 384;
+  housing.decoding = "async";
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("fill", "none");
+  svg.setAttribute("stroke", "currentColor");
+  svg.setAttribute("stroke-width", "1.8");
+  svg.setAttribute("stroke-linecap", "round");
+  svg.setAttribute("stroke-linejoin", "round");
+  svg.innerHTML = tentriCartridges[section] || tentriCartridges.summary;
+  cartridge.append(housing, svg);
+  return cartridge;
+}
+
+function tentriNavButton(section, label) {
+  const item = button("", () => navigate(section));
+  item.append(tentriCartridge(section), el("span", t(label)));
+  return item;
 }
 
 function updateTentriSection(section, title) {
@@ -59,7 +90,7 @@ function updateTentriSection(section, title) {
   if (!mascot) return;
   const key = section === "problem_detail" ? "problems" : section;
   mascot.className = "tentri-companion";
-  mascot.dataset.tentriBanner = "";
+  mascot.dataset.tentriCompanion = "";
   mascot.dataset.cartridge = key;
   mascot.setAttribute("aria-hidden", "true");
   mascot.title = bilingual(
@@ -67,23 +98,17 @@ function updateTentriSection(section, title) {
     `Tentri · ${title} cartridge`,
   );
   if (!mascot.firstChild) {
-    const img = el("img");
-    img.alt = "";
-    img.width = 2172;
-    img.height = 724;
-    img.decoding = "async";
-    const cartridge = el("span", undefined, "tentri-cartridge");
-    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-    svg.setAttribute("viewBox", "0 0 24 24");
-    svg.setAttribute("fill", "none");
-    svg.setAttribute("stroke", "currentColor");
-    svg.setAttribute("stroke-width", "1.8");
-    svg.setAttribute("stroke-linecap", "round");
-    svg.setAttribute("stroke-linejoin", "round");
-    cartridge.append(svg);
-    mascot.append(img, cartridge);
+    const body = el("img", undefined, "tentri-body");
+    body.dataset.tentriPart = "body";
+    body.alt = "";
+    body.src = `/static/tentri-body-${tentriTheme()}-v2.png`;
+    body.decoding = "async";
+    const cartridge = tentriCartridge(key);
+    mascot.append(body, cartridge);
   }
-  // These SVG fragments are application constants, never log or user content.
+  // Only the symbol changes. The illustrated physical housing stays in place.
+  // These SVG fragments are constants, never log or user content.
+  mascot.querySelector(".tentri-cartridge").dataset.cartridge = key;
   mascot.querySelector("svg").innerHTML =
     tentriCartridges[key] || tentriCartridges.summary;
   updateTentriBanners();
@@ -91,17 +116,31 @@ function updateTentriSection(section, title) {
 
 function tentriBanner() {
   const banner = el("figure", undefined, "tentri-hero");
-  banner.dataset.tentriBanner = "";
-  const img = el("img");
-  img.src = "/static/" + (tentriArtwork[portalTheme] || tentriArtwork.classic);
-  img.alt = bilingual(
-    "Tentri, la mascota de LogSentinel",
-    "Tentri, the LogSentinel mascot",
+  const illustration = el("div", undefined, "tentri-artwork-preview");
+  illustration.setAttribute("role", "img");
+  illustration.setAttribute(
+    "aria-label",
+    bilingual(
+      "Tentri, la mascota de LogSentinel",
+      "Tentri, the LogSentinel mascot",
+    ),
   );
-  img.width = 2172;
-  img.height = 724;
-  img.loading = "lazy";
-  img.decoding = "async";
+  const wordmark = el("span", "TENTRI", "tentri-wordmark");
+  const companion = el(
+    "div",
+    undefined,
+    "tentri-companion tentri-companion-preview",
+  );
+  companion.dataset.tentriCompanion = "";
+  companion.setAttribute("aria-hidden", "true");
+  const body = el("img", undefined, "tentri-body");
+  body.dataset.tentriPart = "body";
+  body.alt = "";
+  body.loading = "lazy";
+  body.decoding = "async";
+  body.src = `/static/tentri-body-${tentriTheme()}-v2.png`;
+  companion.append(body, tentriCartridge("appearance"));
+  illustration.append(wordmark, companion);
   const caption = el("figcaption");
   const gallery = el(
     "a",
@@ -111,7 +150,7 @@ function tentriBanner() {
   gallery.target = "_blank";
   gallery.rel = "noopener";
   caption.append(el("span", "LogSentinel · Tentri"), gallery);
-  banner.append(img, caption);
+  banner.append(illustration, caption);
   return banner;
 }
 
@@ -151,8 +190,8 @@ function tentriAppearance() {
     el(
       "p",
       bilingual(
-        "LogSentinel es la aplicación; Tentri es tu mascota. Su ilustración sigue el tema y su cartucho identifica la sección que visitas. El modelo de análisis se elige en Modelo y análisis. Esta preferencia visual se guarda en este navegador.",
-        "LogSentinel is the application; Tentri is your mascot. Its artwork follows the theme and its cartridge identifies the section you visit. Choose the analysis model in Model and analysis. This visual preference is saved in this browser.",
+        "LogSentinel es la aplicación; Tentri es tu mascota. Su ilustración sigue el tema y su cartucho identifica la sección que visitas, también en el menú. El modelo de análisis se elige en Modelo y análisis. Esta preferencia visual se guarda en este navegador.",
+        "LogSentinel is the application; Tentri is your mascot. Its artwork follows the theme and its cartridge identifies the section you visit, including in the menu. Choose the analysis model in Model and analysis. This visual preference is saved in this browser.",
       ),
     ),
     select,
