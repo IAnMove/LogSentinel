@@ -4,7 +4,7 @@
 // Keep examples static: documentation must never receive saved credentials.
 const notificationDocsChecked = "2026-09-08";
 
-function notificationGuide(kind) {
+function notificationGuide(kind, slackMode = "webhook") {
   const b = bilingual;
   const guides = {
     telegram: {
@@ -59,14 +59,54 @@ function notificationGuide(kind) {
         ),
       ],
       note: b(
-        "Para un canal privado debes pertenecer a él. Esta integración utiliza la URL secreta del webhook; no necesita un token de bot en el formulario.",
-        "For a private channel, you must be a member. This integration uses the secret webhook URL; no bot token is needed in this form.",
+        "Para un canal privado debes pertenecer a él. Si tienes un token que empieza por xoxb-, cambia «Conexión de Slack» a «Token de bot + canal».",
+        "For a private channel, you must be a member. If you have a token starting with xoxb-, change “Slack connection” to “Bot token + channel”.",
       ),
       links: [
         [
           "Slack · Incoming webhooks",
           "https://docs.slack.dev/messaging/sending-messages-using-incoming-webhooks/",
         ],
+      ],
+    },
+    slack_bot: {
+      name: bilingual("Slack con token de bot", "Slack with a bot token"),
+      fields: b(
+        "Token de bot de Slack e ID del canal de Slack",
+        "Slack bot token and Slack channel ID",
+      ),
+      steps: [
+        b(
+          "En la configuración de tu app de Slack, abre OAuth & Permissions. Añade chat:write en Bot Token Scopes e instala o reinstala la app en tu espacio de trabajo.",
+          "In your Slack app settings, open OAuth & Permissions. Add chat:write under Bot Token Scopes and install or reinstall the app in your workspace.",
+        ),
+        b(
+          "Copia el Bot User OAuth Token, que empieza por xoxb-, en «Token de bot de Slack».",
+          "Paste the Bot User OAuth Token, starting with xoxb-, into “Slack bot token”.",
+        ),
+        b(
+          "Invita la app al canal donde quieres los avisos, por ejemplo con /invite @TuApp.",
+          "Invite the app to the notification channel, for example with /invite @YourApp.",
+        ),
+        b(
+          "Haz clic derecho en el canal → Ver detalles del canal. Copia el ID que aparece abajo (por ejemplo C0123456789) y pégalo en «ID del canal de Slack».",
+          "Right-click the channel → View channel details. Copy the ID at the bottom (for example C0123456789) and paste it into “Slack channel ID”.",
+        ),
+      ],
+      note: b(
+        "Este modo envía directamente con chat.postMessage. Un token xapp-, un Client Secret o un Signing Secret no sirve aquí. No necesitas una URL webhook.",
+        "This mode sends directly through chat.postMessage. An xapp- token, Client Secret or Signing Secret will not work here. No webhook URL is needed.",
+      ),
+      links: [
+        [
+          "Slack · App setup",
+          "https://docs.slack.dev/app-management/quickstart-app-settings/",
+        ],
+        [
+          "Slack · chat.postMessage",
+          "https://docs.slack.dev/reference/methods/chat.postMessage/",
+        ],
+        ["Slack · Tokens", "https://docs.slack.dev/authentication/tokens/"],
       ],
     },
     discord: {
@@ -254,12 +294,202 @@ function notificationGuide(kind) {
       links: [],
     },
   };
-  return guides[kind];
+  return guides[kind === "slack" && slackMode === "bot" ? "slack_bot" : kind];
+}
+
+function notificationChannelKey(form) {
+  const kind = form.elements.kind.value;
+  return kind === "slack" ? "slack_" + form.elements.slack_mode.value : kind;
+}
+
+function addNotificationConfiguration(form, saved) {
+  const b = bilingual,
+    originalKey =
+      saved.kind === "slack"
+        ? "slack_" + (saved.slack_mode || "webhook")
+        : saved.kind,
+    mode = field(
+      "slack_mode",
+      b("Conexión de Slack", "Slack connection"),
+      "select",
+      saved.slack_mode || "webhook",
+      [
+        ["webhook", b("URL webhook", "Webhook URL")],
+        ["bot", b("Token de bot + canal", "Bot token + channel")],
+      ],
+    );
+  mode.classList.add("notification-slack-mode");
+  form.append(mode);
+  addNotificationGuide(form);
+
+  const url = ["url", b("URL webhook", "Webhook URL"), "password"],
+    headers = [
+      "headers",
+      b("Cabeceras JSON (opcional)", "JSON headers (optional)"),
+      "textarea",
+    ],
+    configs = {
+      system: [],
+      telegram: [
+        ["token", b("Token de Telegram", "Telegram token"), "password"],
+        ["chat_id", t("Chat ID de Telegram"), "text"],
+      ],
+      slack_webhook: [url],
+      slack_bot: [
+        [
+          "token",
+          b("Token de bot de Slack", "Slack bot token"),
+          "password",
+          "xoxb-…",
+        ],
+        [
+          "slack_channel",
+          b("ID del canal de Slack", "Slack channel ID"),
+          "text",
+          "C0123456789",
+        ],
+      ],
+      discord: [url],
+      hermes: [
+        url,
+        [
+          "secret",
+          b("Secreto de firma Hermes", "Hermes signing secret"),
+          "password",
+        ],
+        headers,
+      ],
+      n8n: [url, headers],
+      webhook: [url, headers],
+      file: [
+        [
+          "path",
+          t("Nombre del archivo local (opcional)"),
+          "text",
+          "alerts.jsonl",
+        ],
+        ["rotation_mb", t("Rotar archivo de avisos a (MiB)"), "number"],
+        ["keep_archives", t("Copias comprimidas de avisos"), "number"],
+      ],
+    },
+    secrets = ["url", "token", "secret", "headers"];
+
+  for (const [key, fields] of Object.entries(configs)) {
+    const group = el("div", undefined, "notification-fields form-grid wide");
+    group.dataset.notificationChannel = key;
+    const stored = key === originalKey ? saved.configured_fields || [] : [];
+    for (const [name, label, type, placeholder] of fields) {
+      const value = secrets.includes(name)
+        ? ""
+        : ((key === originalKey ? saved[name] : undefined) ??
+          { rotation_mb: 10, keep_archives: 3 }[name] ??
+          "");
+      const control = field("notify_" + key + "_" + name, label, type, value),
+        input = control.querySelector("input,textarea");
+      input.dataset.notificationField = name;
+      if (placeholder) input.placeholder = placeholder;
+      if (secrets.includes(name)) input.autocomplete = "off";
+      if (stored.includes(name)) {
+        input.placeholder = b(
+          "Guardado; vacío conserva el valor",
+          "Saved; blank keeps the value",
+        );
+        control.append(
+          el(
+            "small",
+            b(
+              "Configurado. Déjalo vacío para conservarlo.",
+              "Configured. Leave blank to keep it.",
+            ),
+            "subtle",
+          ),
+        );
+      }
+      if (name === "headers") control.classList.add("wide");
+      if (name === "rotation_mb") {
+        input.min = "1";
+        input.max = "1024";
+      }
+      if (name === "keep_archives") {
+        input.min = "1";
+        input.max = "50";
+      }
+      group.append(control);
+    }
+    if (
+      stored.some((name) => fields.some(([fieldName]) => name === fieldName))
+    ) {
+      const clear = field(
+        "notify_" + key + "_clear",
+        t("Borrar secretos guardados al guardar"),
+        "checkbox",
+        false,
+      );
+      clear.querySelector("input").dataset.notificationField = "clear";
+      clear.classList.add("wide");
+      group.append(clear);
+    }
+    if (!fields.length)
+      group.append(
+        el(
+          "p",
+          b(
+            "Este destino usa la sesión de escritorio del servidor. No requiere credenciales.",
+            "This destination uses the server’s desktop session. No credentials are required.",
+          ),
+          "wide subtle",
+        ),
+      );
+    form.append(group);
+  }
+  mode
+    .querySelector("select")
+    .addEventListener("change", () => syncNotificationForm(form));
+  syncNotificationForm(form);
+}
+
+function syncNotificationForm(form) {
+  const slack = form.elements.kind.value === "slack";
+  form.querySelector(".notification-slack-mode").hidden = !slack;
+  form.elements.slack_mode.disabled = !slack;
+  const key = notificationChannelKey(form);
+  for (const group of form.querySelectorAll("[data-notification-channel]")) {
+    group.hidden = group.dataset.notificationChannel !== key;
+    for (const input of group.querySelectorAll("input,textarea"))
+      input.disabled = group.hidden;
+  }
+  updateNotificationGuide(form);
+}
+
+function notificationFormData(form) {
+  const data = formData(form);
+  // Hidden drafts stay in this form only; send just this provider's fields.
+  for (const name of Object.keys(data))
+    if (name.startsWith("notify_")) delete data[name];
+  if (data.kind !== "slack") delete data.slack_mode;
+  const group = form.querySelector(
+    '[data-notification-channel="' + notificationChannelKey(form) + '"]',
+  );
+  for (const input of group.querySelectorAll("[data-notification-field]")) {
+    const name = input.dataset.notificationField;
+    if (name === "clear") {
+      if (input.checked)
+        data.clear_secrets = ["url", "token", "secret", "headers"];
+    } else if (name === "headers")
+      data.headers = input.value ? JSON.parse(input.value) : {};
+    else
+      data[name] =
+        input.type === "number" ? Number(input.value) : input.value.trim();
+  }
+  return data;
 }
 
 function updateNotificationGuide(form) {
   const host = form.querySelector(".notification-howto"),
-    guide = notificationGuide(form.elements.kind.value);
+    guide = notificationGuide(
+      form.elements.kind.value,
+      form.elements.slack_mode?.value,
+    );
   if (!host || !guide) return;
   host.dataset.channel = form.elements.kind.value;
   const title = el(
@@ -335,7 +565,7 @@ function addNotificationGuide(form) {
   host.open = true;
   form.append(host);
   form.elements.kind.addEventListener("change", () =>
-    updateNotificationGuide(form),
+    syncNotificationForm(form),
   );
   updateNotificationGuide(form);
 }
@@ -343,5 +573,5 @@ function addNotificationGuide(form) {
 function refreshNotificationGuides() {
   document
     .querySelectorAll("form[data-notification-form]")
-    .forEach(updateNotificationGuide);
+    .forEach(syncNotificationForm);
 }

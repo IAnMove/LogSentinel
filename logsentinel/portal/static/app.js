@@ -713,7 +713,7 @@ function objectForm(kind, o) {
       o.kind || "telegram",
       Object.entries(channelNames).map(([key, label]) => [key, t(label)]),
     );
-    addNotificationGuide(f);
+    addNotificationConfiguration(f, o);
     add("machine_id", t("Ámbito de máquina"), "select", o.machine_id || "", [
       ["", t("Todas")],
       ...machines.slice(1),
@@ -729,45 +729,13 @@ function objectForm(kind, o) {
       o.min_severity || "MEDIUM",
       ["LOW", "MEDIUM", "HIGH", "CRITICAL"].map((x) => [x, x]),
     );
-    add("url", t("URL webhook (vacío conserva la guardada)"), "password", "");
-    add("token", t("Token de Telegram (vacío conserva)"), "password", "");
-    add("chat_id", t("Chat ID de Telegram"), "text", o.chat_id);
-    add(
-      "secret",
-      t("Secreto de firma Hermes (vacío conserva)"),
-      "password",
-      "",
-    );
-    add("headers", t("Cabeceras JSON (vacío conserva)"), "textarea", "");
-    add("path", t("Nombre del archivo local (opcional)"), "text", o.path);
     add(
       "cooldown_seconds",
       t("Agrupar avisos durante (segundos)"),
       "number",
       o.cooldown_seconds ?? 300,
     );
-    add(
-      "rotation_mb",
-      t("Rotar archivo de avisos a (MiB)"),
-      "number",
-      o.rotation_mb ?? 10,
-    );
-    add(
-      "keep_archives",
-      t("Copias comprimidas de avisos"),
-      "number",
-      o.keep_archives ?? 3,
-    );
     add("enabled", t("Destino activo"), "checkbox", o.enabled);
-    add("clear", t("Borrar secretos guardados al guardar"), "checkbox", false);
-    const help = el(
-      "p",
-      t(
-        "Configura solo los campos de tu canal. Hermes necesita ruta y firma; n8n, URL y autenticación. Claves existentes: ",
-      ) + (o.configured_fields || []).join(", "),
-      "wide subtle",
-    );
-    f.append(help);
   }
   if (kind === "rule") {
     add("machine_id", t("Máquina"), "select", o.machine_id || scope, [
@@ -829,13 +797,8 @@ function objectForm(kind, o) {
     ev.preventDefault();
     submit.disabled = true;
     try {
-      const data = formData(f);
-      if (kind === "destination") {
-        data.headers = data.headers ? JSON.parse(data.headers) : {};
-        if (data.clear)
-          data.clear_secrets = ["url", "token", "secret", "headers"];
-        delete data.clear;
-      }
+      const data =
+        kind === "destination" ? notificationFormData(f) : formData(f);
       if (o.id) data.id = o.id;
       await api("/api/objects/" + kind, data);
       edit = null;

@@ -8,6 +8,85 @@ from logsentinel.portal.notify import Outbox
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
+    "result, expected",
+    [
+        ({"ok": True, "channel": "C123", "ts": "1"}, "delivered"),
+        ({"ok": False, "error": "missing_scope"}, "chat:write"),
+        ({"ok": False, "error": "not_in_channel"}, "invite"),
+        ({"ok": False, "error": "invalid_auth"}, "invalid bot token"),
+        ({"ok": False, "error": "xoxb-synthetic-secret"}, "Slack rejected"),
+        (["xoxb-synthetic-secret"], "Slack rejected"),
+    ],
+)
+async def test_slack_bot_contract_and_safe_failures(
+    tmp_path, monkeypatch, result, expected
+):
+    requests = []
+
+    def handler(request):
+        requests.append(request)
+        return httpx.Response(200, json=result)
+
+    original = httpx.AsyncClient
+    monkeypatch.setattr(
+        httpx,
+        "AsyncClient",
+        lambda **kw: original(transport=httpx.MockTransport(handler), **kw),
+    )
+    store = Store(tmp_path)
+    dest = Destination(
+        name="Slack bot",
+        kind="slack",
+        slack_mode="bot",
+        enabled=True,
+        token="xoxb-synthetic-secret",
+        slack_channel="C123",
+        url="https://unrelated.invalid/never-use",
+        headers={"Authorization": "Bearer unrelated-secret"},
+    ).model_dump()
+    dest["id"] = store.put("destination", dest)
+    outcome = await Outbox(store).test(dest)
+    request = requests[0]
+    assert str(request.url) == "https://slack.com/api/chat.postMessage"
+    assert request.headers["Authorization"] == "Bearer xoxb-synthetic-secret"
+    assert request.headers["Content-Type"] == "application/json"
+    body = json.loads(request.content)
+    assert body["channel"] == "C123"
+    assert body["mrkdwn"] is False
+    assert "xoxb-synthetic-secret" not in request.content.decode()
+    assert "unrelated-secret" not in str(request.headers)
+    if expected == "delivered":
+        assert outcome["status"] == "delivered"
+    else:
+        assert outcome["status"] == "failed"
+        assert expected in outcome["error"]
+    assert "xoxb-synthetic-secret" not in json.dumps(store.rows("deliveries"))
+
+
+@pytest.mark.asyncio
+async def test_slack_legacy_webhook_accepts_plain_text(tmp_path, monkeypatch):
+    original = httpx.AsyncClient
+    requests = []
+
+    def handler(request):
+        requests.append(request)
+        return httpx.Response(200, text="ok")
+
+    monkeypatch.setattr(
+        httpx,
+        "AsyncClient",
+        lambda **kw: original(transport=httpx.MockTransport(handler), **kw),
+    )
+    dest = {"kind": "slack", "url": "https://synthetic.invalid/slack"}
+    assert (
+        await Outbox(Store(tmp_path)).send(dest, {"delivery_id": "test"}) == "delivered"
+    )
+    assert str(requests[0].url) == dest["url"]
+    assert "Authorization" not in requests[0].headers
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
     "kind", ["telegram", "slack", "discord", "hermes", "n8n", "webhook"]
 )
 async def test_outgoing_contracts(tmp_path, monkeypatch, kind):

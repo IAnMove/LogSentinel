@@ -15,7 +15,7 @@ import time
 from contextlib import contextmanager
 from pathlib import Path
 
-from .models import Settings
+from .models import Settings, destination_identity
 
 
 def uid():
@@ -124,11 +124,23 @@ class Store:
     def put(self, kind, data, id=None):
         id = id or uid()
         with self.connect() as db:
+            changed_destination = False
+            if kind == "destination":
+                previous = db.execute(
+                    "SELECT data FROM objects WHERE id=? AND kind=?", (id, kind)
+                ).fetchone()
+                changed_destination = bool(
+                    previous
+                    and destination_identity(json.loads(previous[0]))
+                    != destination_identity(data)
+                )
             db.execute(
                 "INSERT INTO objects VALUES(?,?,?,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data",
                 (id, kind, dumps(data), time.time()),
             )
-            if kind == "destination" and not data.get("enabled"):
+            if kind == "destination" and (
+                not data.get("enabled") or changed_destination
+            ):
                 db.execute(
                     "UPDATE deliveries SET status='cancelled' WHERE destination_id=? AND status IN ('pending','retry')",
                     (id,),

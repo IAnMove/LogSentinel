@@ -19,7 +19,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import ValidationError
 
 from .store import Store, dumps, uid
-from .models import Machine, Source, Destination, Rule, Settings
+from .models import Machine, Source, Destination, Rule, Settings, merge_destination
 from .collect import Collector, discovery, normalize
 from .analysis import Analyzer, ReviewClient, safe_error
 from .monitor import Monitor
@@ -370,9 +370,7 @@ def create_app(directory, background=True):
             old.pop("id")
             merged = dict(old, **body)
             if kind == "destination":
-                for key in ("token", "secret", "headers", "url"):
-                    if not body.get(key) and key not in clear:
-                        merged[key] = old.get(key)
+                merged = merge_destination(old, body, clear)
             body = merged
         data = MODELS[kind](**body).model_dump()
         if kind == "machine" and old and data["kind"] != "local":
