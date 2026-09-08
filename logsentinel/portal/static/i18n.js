@@ -662,6 +662,8 @@ function initLanguage() {
           else input.value = value;
         }
       }
+      // Restoring a draft select value does not dispatch a change event.
+      refreshNotificationGuides();
       drawMonitor(S.monitor);
     }
   };
