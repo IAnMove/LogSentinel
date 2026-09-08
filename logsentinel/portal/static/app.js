@@ -713,6 +713,7 @@ function objectForm(kind, o) {
       o.kind || "telegram",
       Object.entries(channelNames).map(([key, label]) => [key, t(label)]),
     );
+    addNotificationGuide(f);
     add("machine_id", t("Ámbito de máquina"), "select", o.machine_id || "", [
       ["", t("Todas")],
       ...machines.slice(1),
@@ -767,12 +768,6 @@ function objectForm(kind, o) {
       "wide subtle",
     );
     f.append(help);
-    f.append(
-      actions(
-        button(t("Plantilla Hermes"), () => showTemplate("hermes")),
-        button(t("Plantilla n8n"), () => showTemplate("n8n")),
-      ),
-    );
   }
   if (kind === "rule") {
     add("machine_id", t("Máquina"), "select", o.machine_id || scope, [
