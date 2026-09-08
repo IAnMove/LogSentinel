@@ -276,6 +276,7 @@ async function render() {
   $("#content").replaceChildren(root);
   $("#page-title").textContent =
     view === "problem_detail" ? t("Detalles del problema") : t(names[view]);
+  updateTentriSection(view, $("#page-title").textContent);
   [...$("#nav").children].forEach((n, i) =>
     n.classList.toggle("active", Object.keys(names)[i] === view),
   );
@@ -297,7 +298,6 @@ async function render() {
   if (view === "setup") return setupView(root);
 }
 async function summary(root) {
-  root.append(tentriBanner());
   const stats = scope
       ? await api("/api/stats?machine_id=" + encodeURIComponent(scope))
       : S.stats,

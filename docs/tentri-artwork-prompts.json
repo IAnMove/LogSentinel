@@ -2,6 +2,13 @@
   "tool": "built-in imagegen",
   "assets": [
     {
+      "key": "icon-monochrome",
+      "file": "tentri-icon-mono-v1.png",
+      "ref": "logsentinel/portal/static/tentri-v2.png",
+      "prompt": "Use case: precise-object-edit. Asset type: monochrome application icon and luminance mask. Input image: edit target is the attached Tentri contact sheet. Primary request: isolate and faithfully enlarge ONLY the tiny monochrome octopus silhouette in the BOTTOM LEFT corner (around x65–255, y775–960 of the 1536x1024 sheet). Reproduce that exact small mark, NOT any of the detailed colorful robots. Preserve its domed body, flowing curled tentacles, ear-like rings and squared brain cartridge with the geometric neural network emblem. Color inversion only: the entire silhouette is solid PURE WHITE #ffffff and the negative-space details are solid PURE BLACK #000000, on a uniform pure black background, so it can function as a luminance mask. Square image, mark centered filling about 88 percent of the image with even narrow black padding. Flat single-ink silhouette, crisp edges. No text, no border, no shadows, no gradients, no textures, no checkerboard. Keep the silhouette recognizable and identical to the bottom-left reference; do not add eyes, face or robot panel details.",
+      "status": "active application icon; white-on-black luminance mask tinted by the interface theme"
+    },
+    {
       "key": "icon",
       "file": "tentri-icon-v1.png",
       "ref": "logsentinel/portal/static/tentri-v1.png",
