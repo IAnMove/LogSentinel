@@ -34,7 +34,7 @@ dist/
 
 # Local tutorial production materials and private preview copies
 /logsentinel/portal/static/tutorials
-/docs/VIDEO_TUTORIALS.md
+/docs/
 /scripts/build_tutorials.py
 /scripts/tutorial_capture.py
 /scripts/tutorials_smoke.py

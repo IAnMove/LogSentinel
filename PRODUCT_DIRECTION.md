@@ -1,6 +1,6 @@
 # Dirección de producto: revisión de logs asistida por LLM
 
-Actualización de implementación: se ha construido una primera versión operativa. Consulta [el seguimiento y pendientes reales](docs/IMPLEMENTATION.md) y [los límites de operación](docs/OPERATIONS.md). El diagnóstico y las alternativas que siguen describen la propuesta original, no una lista de garantías certificadas.
+Actualización de implementación: se ha construido una primera versión operativa. El diagnóstico y las alternativas que siguen describen la propuesta original, no una lista de garantías certificadas.
 
 Documento de propuesta tras revisar el repositorio. No describe funcionalidades ya implementadas. Las capacidades solicitadas están acordadas; los valores de ejemplo (cadencia, tamaño de segmento), tecnologías candidatas y objetivos de rendimiento siguen pendientes de validación en el piloto.
 

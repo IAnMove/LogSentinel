@@ -44,8 +44,8 @@ async function desktopView(root) {
     el(
       "p",
       bilingual(
-        "La integración está preparada en el repositorio local. Antes de publicarla, valida el widget en una sesión real de Omarchy; consulta docs/OMARCHY.md.",
-        "The integration is prepared in the local repository. Validate the widget in a real Omarchy session before publishing; see docs/OMARCHY.md.",
+        "La integración está preparada en el repositorio. Antes de publicarla, valida el widget en una sesión real de Omarchy.",
+        "The integration is prepared in the repository. Validate the widget in a real Omarchy session before publishing.",
       ),
       "subtle",
     ),

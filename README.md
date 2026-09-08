@@ -1,12 +1,8 @@
 # LogSentinel
 
-[English documentation](docs/QUICKSTART.en.md) · Interfaz disponible en español e inglés.
+Interfaz disponible en español e inglés.
 
-[Temas y sincronización con Omarchy](docs/THEMES.md) · [Widget para Omarchy Quattro](docs/OMARCHY.md) · [Supervisión y recuperación](docs/OPERATIONS.md)
-
-[Configurar notificaciones: Telegram, Slack, Discord, Hermes, n8n y destinos locales](docs/NOTIFICATIONS.md)
-
-La integración de Omarchy Quattro está disponible como prueba: instala el widget con `omarchy plugin add https://github.com/IAnMove/LogSentinel.git --enable` y vincúlalo desde **Escritorio** en el portal. Falta completar la validación en un escritorio Omarchy real; todavía no está en el marketplace. El widget necesita un portal en ejecución y no instala un LLM ni empieza a enviar logs por sí solo. [Pasos de la primera prueba](docs/OMARCHY.md#first-test-on-your-omarchy-desktop).
+La integración de Omarchy Quattro está disponible como prueba: instala el widget con `omarchy plugin add https://github.com/IAnMove/LogSentinel.git --enable` y vincúlalo desde **Escritorio** en el portal. Falta completar la validación en un escritorio Omarchy real; todavía no está en el marketplace. El widget necesita un portal en ejecución y no instala un LLM ni empieza a enviar logs por sí solo.
 
 Portal local para revisar logs de Linux con un LLM, detectar problemas de funcionamiento y seguridad y conservar la evidencia. Cada fuente pertenece a una máquina. El modelo propone hallazgos y filtros; no ejecuta comandos ni cambia reglas por su cuenta.
 
@@ -27,11 +23,11 @@ Abre `http://127.0.0.1:8765` e introduce la clave que muestra la terminal. Los d
 3. Termina el asistente para activar el análisis automático al intervalo elegido. Las fuentes activas se leen continuamente (sondeos aproximadamente cada 2 segundos más lectura), incluso con el análisis pausado. El estado superior muestra próxima ejecución, última recepción, resultado y cobertura. El navegador puede cerrarse. **Modelo y análisis** ofrece los ajustes avanzados y el idioma de nuevos hallazgos.
 4. Consulta **Problemas**, su evidencia y **Copiar prompt**. **No notificar** mantiene el análisis; una regla de exclusión evita enviar las líneas coincidentes al modelo.
 5. Configura destinos en **Notificaciones**. Guardar no envía mensajes; **Enviar prueba** sí. Revisa los resultados en **Actividad**.
-6. En **Resumen → Recursos de los equipos** encontrarás CPU, RAM y discos con barras y cantidades en GiB. Abre una máquina para activar la captura opcional y ver gráficos de 1/6/24 horas, umbrales y mínimos/máximos diarios. Capturar y alertar no usa tokens; las tendencias con el LLM se activan por separado. [Configuración, retención y emisores remotos](docs/METRICS.md).
+6. En **Resumen → Recursos de los equipos** encontrarás CPU, RAM y discos con barras y cantidades en GiB. Abre una máquina para activar la captura opcional y ver gráficos de 1/6/24 horas, umbrales y mínimos/máximos diarios. Capturar y alertar no usa tokens; las tendencias con el LLM se activan por separado.
 
-**Servidores LLM:** el portal ofrece presets para Ollama, llama.cpp, LM Studio, vLLM, LiteLLM y balanceadores compatibles. Consulta modelos y prueba los ajustes del formulario antes de guardarlos. [Protocolos, límites y manejo de credenciales](docs/LLM_PROVIDERS.md).
+**Servidores LLM:** el portal ofrece presets para Ollama, llama.cpp, LM Studio, vLLM, LiteLLM y balanceadores compatibles. Consulta modelos y prueba los ajustes del formulario antes de guardarlos.
 
-Desde un problema, **Preguntar al asistente** muestra el hallazgo y envía su contexto y evidencias; puedes revisar el contenido exacto antes y después de consultar. **Ver más detalles** muestra originales y revisiones. **Buscar más detalles del problema** guarda una investigación ampliada sobre logs relacionados. [Alcance y límites de las investigaciones](docs/PROBLEM_INVESTIGATIONS.md).
+Desde un problema, **Preguntar al asistente** muestra el hallazgo y envía su contexto y evidencias; puedes revisar el contenido exacto antes y después de consultar. **Ver más detalles** muestra originales y revisiones. **Buscar más detalles del problema** guarda una investigación ampliada sobre logs relacionados.
 
 Los servidores LLM fuera de loopback requieren activar la autorización de envío remoto. Las claves de API y destinos son de escritura: el portal no las devuelve al navegador. Se almacenan en la base local con permisos de propietario, sin cifrado de aplicación. Los backups también contienen estas credenciales. La ocultación de secretos reconocibles no garantiza detectar todo dato sensible dentro de un log.
 
@@ -69,7 +65,7 @@ El emisor mantiene IDs y cola locales. El receptor confirma solo después de per
 
 ## Rotación, límites y notificaciones
 
-Consulta [Operación](docs/OPERATIONS.md) para límites, rotación y recuperación, y [Estado de implementación](docs/IMPLEMENTATION.md) para lo pendiente. El [plan completo](PRODUCT_DIRECTION.md) conserva propuestas de producto que no deben confundirse con garantías de esta versión.
+El [plan completo](PRODUCT_DIRECTION.md) conserva propuestas de producto que no deben confundirse con garantías de esta versión.
 
 Hermes recibe un webhook firmado V2 y un identificador de entrega estable. La plantilla del portal propone una ruta `deliver_only`; requiere configurar el gateway externo. n8n es opcional: la plantilla crea una entrada autenticada y un punto para conectar el destino elegido. No despliega ni activa n8n. Los proveedores externos requieren sus credenciales.
 
@@ -91,7 +87,7 @@ Hermes recibe un webhook firmado V2 y un identificador de entrega estable. La pl
 
 `constraints-tested-py312.txt` registra las versiones del entorno comprobado; úsalo como constraints de instalación en Python 3.12. La CI añade una matriz de versiones de Python; sus resultados en GitHub aún deben ejecutarse tras publicar los commits.
 
-La CLI anterior se conserva como compatibilidad. Sus instrucciones están en [Legacy CLI](docs/LEGACY_CLI.md); usa otra base y no es el motor del portal. El experimento de horarios SSH queda desactivado por defecto.
+La CLI anterior se conserva como compatibilidad; usa otra base y no es el motor del portal. El experimento de horarios SSH queda desactivado por defecto.
 
 ## About us
 
