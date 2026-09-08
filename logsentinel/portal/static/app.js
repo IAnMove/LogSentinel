@@ -16,6 +16,7 @@ const names = {
   machine: t("Máquinas"),
   metrics: t("Métricas"),
   health: t("Salud del observador"),
+  capacity: t("Cobertura y capacidad"),
   appearance: t("Apariencia"),
   desktop: t("Escritorio"),
   source: t("Fuentes"),
@@ -286,6 +287,7 @@ async function render() {
   if (view === "problem_detail") return problemPage(root);
   if (view === "metrics") return metricsView(root);
   if (view === "health") return healthView(root);
+  if (view === "capacity") return capacityView(root);
   if (view === "appearance") return appearanceView(root);
   if (view === "desktop") return desktopView(root);
   if (view === "events") return eventsView(root);
@@ -311,7 +313,7 @@ async function summary(root) {
     [
       t("Sin revisar por capacidad"),
       c.capacity || 0,
-      t("Cobertura reducida explícita"),
+      bilingual("Total histórico retenido", "Retained historical total"),
     ],
     [
       t("Tokens reportados"),
@@ -328,6 +330,11 @@ async function summary(root) {
     cards.append(p);
   });
   root.append(cards);
+  const coverage = el("div");
+  root.append(coverage);
+  mountCapacitySummary(coverage, scope).catch((error) =>
+    notice(error.message, true),
+  );
   if (S.machine.length) {
     const resources = el("section", undefined, "resource-overview");
     root.append(resources);
@@ -1049,7 +1056,7 @@ async function problemList(root, short = false) {
         t("Gravedad"),
         t("Problema"),
         t("Máquina"),
-        t("Apariciones"),
+        t("Eventos de evidencia"),
         t("Estado"),
         "",
       ],
@@ -1087,6 +1094,8 @@ async function problemDetail(id) {
     el("h3", t("Siguientes comprobaciones")),
     el("p", p.data.next_steps || t("Revisar evidencia original")),
   );
+  if (p.data.category === "monitor.capacity")
+    box.append(capacityProblemHint(p));
   box.append(
     actions(
       button(t("Copiar prompt"), async () => {

@@ -436,11 +436,21 @@ class Analyzer:
             previously_reviewed = {
                 e["id"] for e in events if e.get("status") in ("compact", "reviewed")
             }
-            self.store.mark(
-                [i for i in omitted if i not in previously_reviewed], "capacity"
-            )
+            new_capacity = [i for i in omitted if i not in previously_reviewed]
+            self.store.mark(new_capacity, "capacity")
             # Older unscheduled backlog is bounded to one interval, with honest coverage.
             with self.store.connect() as db:
+                new_capacity += [
+                    r[0]
+                    for r in db.execute(
+                        "SELECT id FROM events WHERE machine_id=? AND status='pending' AND received<? AND id NOT IN (SELECT value FROM json_each(?)) LIMIT 100",
+                        (
+                            machine["id"],
+                            time.time() - cfg.interval_seconds,
+                            dumps(selected),
+                        ),
+                    )
+                ]
                 db.execute(
                     "UPDATE events SET status='capacity' WHERE machine_id=? AND status='pending' AND received<? AND id NOT IN (SELECT value FROM json_each(?))",
                     (
@@ -453,8 +463,15 @@ class Analyzer:
                     "UPDATE jobs SET status='running',attempts=attempts+1,updated=? WHERE id=?",
                     (time.time(), job),
                 )
-            uncovered = self.store.events(
-                machine_id=machine["id"], status="capacity", limit=100
+            uncovered = (
+                self.store.events(
+                    machine_id=machine["id"],
+                    ids=new_capacity[:100],
+                    status="capacity",
+                    limit=100,
+                )
+                if new_capacity
+                else []
             )
             if uncovered:
                 spanish = cfg.language == "es"

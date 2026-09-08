@@ -713,3 +713,64 @@ details > div {
   font-size: 0.85rem;
   margin: 6px 0;
 }
+
+.coverage-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(135px, 1fr));
+  gap: 1rem;
+  margin-block: 1rem;
+}
+.coverage-stat {
+  border-inline-start: 3px solid var(--border);
+  padding-inline-start: 0.7rem;
+}
+.coverage-stat strong,
+.coverage-stat span {
+  display: block;
+}
+.coverage-stat strong {
+  font-size: 1.6rem;
+}
+.coverage-stat span {
+  font-size: 0.85rem;
+}
+.coverage-bar {
+  display: flex;
+  height: 0.7rem;
+  border-radius: 0.4rem;
+  overflow: hidden;
+  background: var(--border);
+}
+.coverage-bar .reviewed {
+  background: #4c9f70;
+}
+.coverage-bar .pending {
+  background: #638dc7;
+}
+.coverage-bar .capacity,
+.coverage-bar .error {
+  background: #cb6656;
+}
+.coverage-bar .policy {
+  background: #bc9851;
+}
+.coverage-bar .excluded,
+.coverage-bar .other {
+  background: #8e8899;
+}
+.coverage-stat.reviewed {
+  border-color: #4c9f70;
+}
+.coverage-stat.pending {
+  border-color: #638dc7;
+}
+.coverage-stat.capacity,
+.coverage-stat.error {
+  border-color: #cb6656;
+}
+.coverage-stat.policy {
+  border-color: #bc9851;
+}
+.panel li {
+  margin-block: 0.6rem;
+}
