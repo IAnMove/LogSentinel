@@ -3,7 +3,7 @@
   "id": "io.github.ianmove.logsentinel",
   "name": "LogSentinel",
   "version": "1.0.0",
-  "author": "LogSentinel contributors",
+  "author": "IAnMove",
   "license": "MIT",
   "description": "Local log and resource observatory status, with a read-only summary and quick access to the portal.",
   "kinds": ["bar-widget"],

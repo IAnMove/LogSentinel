@@ -39,6 +39,7 @@ const tentriCartridges = {
   activity: '<circle cx="12" cy="12" r="9"/><path d="M12 6v6l4 3"/>',
   backup: '<path d="M4 3h13l3 3v15H4ZM8 3v6h8V3M8 21v-7h8v7"/>',
   setup: '<path d="m4 17 10-10 3 3L7 20ZM14 2v2M21 7h-2M4 4l2 2M8 2v2"/>',
+  about: '<circle cx="12" cy="12" r="9"/><path d="M12 10v7M12 6v1"/>',
 };
 
 function updateTentriBanners() {

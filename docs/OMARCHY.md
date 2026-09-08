@@ -26,7 +26,7 @@ The public revision must contain the root `manifest.json` and the files under
 `integrations/omarchy/`. Local commits do not update the public repository.
 
 ```sh
-omarchy plugin add https://github.com/IAnMove/security-agent.git --enable
+omarchy plugin add https://github.com/IAnMove/LogSentinel.git --enable
 ```
 
 Alternatively build the small standalone bundle from this checkout:

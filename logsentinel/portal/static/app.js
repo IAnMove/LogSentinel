@@ -29,6 +29,7 @@ const names = {
   activity: t("Actividad"),
   backup: t("Copias"),
   setup: t("Configuración guiada"),
+  about: t("Sobre nosotros"),
 };
 const channelNames = {
   system: t("Sistema"),
@@ -278,6 +279,8 @@ $("#login-form").onsubmit = async (e) => {
 async function render() {
   const root = el("div");
   $("#content").replaceChildren(root);
+  $("#monitor-status").hidden = view === "about";
+  $(".scope").hidden = view === "about";
   $("#page-title").textContent =
     view === "problem_detail" ? t("Detalles del problema") : t(names[view]);
   updateTentriSection(view, $("#page-title").textContent);
@@ -300,6 +303,13 @@ async function render() {
   if (view === "activity") return activity(root);
   if (view === "backup") return backupView(root);
   if (view === "setup") return setupView(root);
+  if (view === "about") {
+    const profile = el("a", "@THEINAOG · X / Twitter");
+    profile.href = "https://x.com/THEINAOG";
+    profile.target = "_blank";
+    profile.rel = "noopener noreferrer";
+    root.append(profile);
+  }
 }
 async function summary(root) {
   const stats = scope

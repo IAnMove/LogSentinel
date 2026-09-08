@@ -31,3 +31,11 @@ dist/
 *.sqlite3
 *.db
 *.log
+
+# Local tutorial production materials and private preview copies
+/logsentinel/portal/static/tutorials
+/docs/VIDEO_TUTORIALS.md
+/scripts/build_tutorials.py
+/scripts/tutorial_capture.py
+/scripts/tutorials_smoke.py
+/.github/workflows/pages.yml

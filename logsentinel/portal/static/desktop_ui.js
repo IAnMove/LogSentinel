@@ -37,7 +37,7 @@ async function desktopView(root) {
     ),
     el(
       "pre",
-      "omarchy plugin add https://github.com/IAnMove/security-agent.git --enable",
+      "omarchy plugin add https://github.com/IAnMove/LogSentinel.git --enable",
     ),
   );
   install.append(
