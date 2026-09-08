@@ -304,11 +304,15 @@ async function render() {
   if (view === "backup") return backupView(root);
   if (view === "setup") return setupView(root);
   if (view === "about") {
-    const profile = el("a", "@THEINAOG · X / Twitter");
+    const profile = el("a", "@THEINAOG · x.com");
     profile.href = "https://x.com/THEINAOG";
     profile.target = "_blank";
     profile.rel = "noopener noreferrer";
-    root.append(profile);
+    const repository = el("a", "ianmove/LogSentinel · GitHub");
+    repository.href = "https://github.com/IAnMove/LogSentinel";
+    repository.target = "_blank";
+    repository.rel = "noopener noreferrer";
+    root.append(actions(profile, repository));
   }
 }
 async function summary(root) {

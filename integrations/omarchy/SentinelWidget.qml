@@ -44,10 +44,15 @@ BarWidget {
         connection = Status.configuration(text);
         snapshot = null;
         connectionState = connection ? "connecting" : "unpaired";
-        Qt.callLater(refresh);
+        if (connection)
+            Qt.callLater(refresh);
     }
     function refresh() {
-        if (!connection || request.running)
+        if (!connection) {
+            configFile.reload();
+            return;
+        }
+        if (request.running)
             return;
         responseText = "";
         request.stdinEnabled = true;
@@ -131,7 +136,7 @@ BarWidget {
 
         anchors.fill: parent
         bar: root.bar
-        text: root.connectionState !== "connected" ? "LS ?" : "LS " + (root.snapshot.health === "ok" && root.snapshot.analysis_enabled ? "" : "! ") + root.snapshot.open_problems
+        text: root.connectionState !== "connected" || !root.snapshot ? "LS ?" : "LS " + (root.snapshot.health === "ok" && root.snapshot.analysis_enabled ? "" : "! ") + root.snapshot.open_problems
         tooltipText: root.spanish ? "LogSentinel · estado y portal" : "LogSentinel · status and portal"
 
         onPressed: function (buttonCode) {
