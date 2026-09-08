@@ -3,10 +3,13 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>LogSentinel · Observatorio de logs</title>
+    <title>Tentri · Log observatory</title>
+    <link rel="icon" type="image/png" href="/static/tentri-icon-v1.png" />
+    <link rel="apple-touch-icon" href="/static/tentri-icon-v1.png" />
     <script src="/static/themes.js"></script>
     <link rel="stylesheet" href="/static/style.css" />
     <link rel="stylesheet" href="/static/themes.css" />
+    <link rel="stylesheet" href="/static/branding.css" />
   </head>
   <body>
     <div class="display-controls">
@@ -23,7 +26,15 @@
       >
     </div>
     <section id="login" class="login">
-      <div class="brand">◈ LogSentinel</div>
+      <div class="brand">
+        <img
+          class="tentri-icon"
+          src="/static/tentri-icon-v1.png"
+          alt=""
+          width="64"
+          height="64"
+        /><span>Tentri</span>
+      </div>
       <h1 data-i18n="Tu observatorio de logs.">Your log observatory.</h1>
       <p
         data-i18n="Accede con la clave que aparece al iniciar el portal en este equipo."
@@ -44,7 +55,15 @@
     </section>
     <div id="shell" hidden>
       <aside>
-        <div class="brand">◈ LogSentinel</div>
+        <div class="brand">
+          <img
+            class="tentri-icon"
+            src="/static/tentri-icon-v1.png"
+            alt=""
+            width="44"
+            height="44"
+          /><span>Tentri</span>
+        </div>
         <div class="eyebrow" data-i18n="OBSERVATORIO LOCAL">
           LOCAL OBSERVATORY
         </div>
@@ -126,6 +145,7 @@
     <script src="/static/health_ui.js" defer></script>
     <script src="/static/desktop_ui.js" defer></script>
     <script src="/static/capacity_ui.js" defer></script>
+    <script src="/static/branding.js" defer></script>
     <script src="/static/app.js" defer></script>
   </body>
 </html>

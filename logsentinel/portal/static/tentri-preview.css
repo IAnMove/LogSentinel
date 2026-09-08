@@ -96,3 +96,12 @@ footer {
     padding: 16px;
   }
 }
+
+.icon-preview > a {
+  display: block;
+  background: #122b31;
+}
+.icon-preview img {
+  max-width: 360px;
+  margin: auto;
+}

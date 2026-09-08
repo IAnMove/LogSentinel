@@ -297,6 +297,7 @@ async function render() {
   if (view === "setup") return setupView(root);
 }
 async function summary(root) {
+  root.append(tentriBanner());
   const stats = scope
       ? await api("/api/stats?machine_id=" + encodeURIComponent(scope))
       : S.stats,
