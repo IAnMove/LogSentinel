@@ -2,6 +2,8 @@
 
 Open **Model and analysis** (or the first setup step). Choose a server preset, edit its URL, find available models and select the exact installed model ID or proxy alias. **Test these settings without saving** sends synthetic data using the current form, reports time and reported input/output tokens, and preserves the active analysis configuration. **Save settings** activates it. The active endpoint and model are displayed separately. A successful test proves a complete, valid JSON response, not detection quality.
 
+**Model** is now a dropdown in both forms. It automatically lists Ollama's `/api/tags` or compatible `/v1/models` after connection details change; **Refresh models** reloads it. Remote discovery requires the remote-access checkbox. Listing does not load a model or run inference and works even while context/output fields are being edited. Choose **Enter model ID manually…** for unpublished aliases or unavailable discovery. A missing saved model stays editable with an explicit notice; no other model is selected automatically. Late replies from a previous server cannot replace the current list.
+
 | Preset | Protocol | Suggested URL |
 | --- | --- | --- |
 | Ollama | Native `/api/chat` | `http://127.0.0.1:11434` |

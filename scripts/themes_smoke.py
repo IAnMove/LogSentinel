@@ -137,6 +137,7 @@ with tempfile.TemporaryDirectory(prefix="sentinel-themes-") as directory:
                 page.get_by_role("button", name="View metrics and configure").click()
                 page.get_by_role("img").first.wait_for()
             page.get_by_role("button", name="Model and analysis", exact=True).click()
+            page.get_by_label("Model", exact=True).select_option("manual")
             model = page.locator('input[name="model"]')
             model.fill("unsaved-model-choice")
             page.get_by_label("Theme / Tema").select_option("paper")

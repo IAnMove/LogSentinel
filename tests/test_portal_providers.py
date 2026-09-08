@@ -123,6 +123,57 @@ def test_discovery_allows_missing_ollama_model_and_remote_consent_is_enforced(
     assert len(transport) == before
 
 
+@pytest.mark.parametrize(
+    "provider,path,models",
+    [
+        ("ollama", "/api/tags", ["installed:8b"]),
+        ("openai", "/v1/models", ["balanced-alias"]),
+    ],
+)
+def test_model_list_needs_no_model_metadata_or_inference(
+    client, transport, provider, path, models
+):
+    c, s = client
+    before = s.settings().model_dump()
+    response = c.post(
+        "/api/model/info?models_only=true",
+        json={"llm": {"provider": provider, "model": "/old/server/model.gguf"}},
+    )
+    assert response.status_code == 200
+    assert response.json()["models"] == models
+    assert [r.url.path for r in transport] == [path]
+    assert transport[0].method == "GET"
+    assert s.settings().model_dump() == before
+
+
+@pytest.mark.parametrize(
+    "provider,key,collection", [("ollama", "name", "models"), ("openai", "id", "data")]
+)
+def test_model_list_discards_invalid_and_duplicate_names(
+    client, monkeypatch, provider, key, collection
+):
+    c, s = client
+    original = httpx.AsyncClient
+    body = {
+        collection: [
+            {key: value} for value in ("second", None, "", "first", "second", 42, " ")
+        ]
+    }
+    monkeypatch.setattr(
+        httpx,
+        "AsyncClient",
+        lambda **kwargs: original(
+            transport=httpx.MockTransport(lambda r: httpx.Response(200, json=body)),
+            **kwargs,
+        ),
+    )
+    response = c.post(
+        "/api/model/info?models_only=true", json={"llm": {"provider": provider}}
+    )
+    assert response.status_code == 200
+    assert response.json()["models"] == ["first", "second"]
+
+
 def test_html_frontend_is_not_mistaken_for_a_model_server(client, monkeypatch):
     c, s = client
     original = httpx.AsyncClient

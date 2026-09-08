@@ -78,11 +78,14 @@ with tempfile.TemporaryDirectory(prefix="sentinel-setup-") as tmp:
             )
             page.get_by_role("button", name="Sign in", exact=True).click()
             page.get_by_role("heading", name="Connect the LLM", exact=True).wait_for()
-            page.get_by_label("Model", exact=True).fill("test-model")
+            page.get_by_label("Model ID (manual)", exact=True).fill("test-model")
             page.get_by_label("API key (blank keeps saved value)").fill("private-key")
             page.get_by_label("Language / Idioma").select_option("es")
             page.get_by_role("heading", name="Conectar el LLM", exact=True).wait_for()
-            assert page.get_by_label("Modelo", exact=True).input_value() == "test-model"
+            assert (
+                page.get_by_label("ID de modelo (manual)", exact=True).input_value()
+                == "test-model"
+            )
             assert (
                 page.get_by_label("Clave API (vacío conserva)").input_value()
                 == "private-key"
