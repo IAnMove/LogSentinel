@@ -154,8 +154,8 @@ def check_omarchy_sync(page, screenshots):
     )
     page.get_by_label("Theme / Tema").select_option("gruvbox")
     page.evaluate(PUBLISH_OMARCHY, night)
-    assert page.locator("html").get_attribute("data-theme-source") == "manual"
-    assert page.locator("html").get_attribute("data-theme") == "gruvbox"
+    assert page.locator("html").get_attribute("data-theme-source") == "skin"
+    assert page.locator("html").get_attribute("data-skin") == "gruvbox"
     assert model.input_value() == "draft-survives-desktop-switch"
     page.reload()
     assert page.get_by_label("Theme / Tema").input_value() == "gruvbox"
@@ -299,15 +299,42 @@ with tempfile.TemporaryDirectory(prefix="sentinel-themes-") as directory:
             page.get_by_label("Access key").fill(store.meta("admin_token"))
             page.get_by_role("button", name="Sign in", exact=True).click()
             page.get_by_role("button", name="Appearance", exact=True).click()
-            assert page.locator(".theme-card").count() == 5
+            ids = page.evaluate("() => portalThemes.map((theme) => theme.id)")
+            assert ids[0] == "classic"
+            assert ids[1] == "paper"
+            assert "tokyo-night" in ids
+            assert "rose-pine" in ids
+            assert len(ids) == 26
+            assert page.locator(".theme-card").count() == 26
+            tokyo = page.evaluate(
+                "() => RADIO_SKINS.find((skin) => skin.name === 'tokyo night')"
+            )
+            assert tokyo == dict(
+                name="tokyo night",
+                bg="#1a1b26",
+                fg="#c0caf5",
+                ac="#7aa2f7",
+                bd="#292e42",
+            )
             page.screenshot(path=str(screenshots / "gallery.png"), full_page=True)
-            for theme in ["classic", "paper", "tokyo", "gruvbox", "rose"]:
+            for theme in ids:
                 page.get_by_label("Theme / Tema").select_option(theme)
                 page.locator("#machine-scope").select_option("")
                 page.get_by_role("button", name="Overview", exact=True).click()
-                page.screenshot(
-                    path=str(screenshots / (theme + ".png")), full_page=True
-                )
+                if theme in (
+                    "classic",
+                    "paper",
+                    "tokyo-night",
+                    "gruvbox",
+                    "rose-pine",
+                    "nord",
+                    "white",
+                    "hackerman",
+                    "ethereal",
+                ):
+                    page.screenshot(
+                        path=str(screenshots / (theme + ".png")), full_page=True
+                    )
                 for foreground, background in [
                     ("--ink", "--surface"),
                     ("--muted", "--surface"),
@@ -327,11 +354,20 @@ with tempfile.TemporaryDirectory(prefix="sentinel-themes-") as directory:
                         colors,
                         contrast(*colors),
                     )
-                page.get_by_role("button", name="Observer health", exact=True).click()
-                page.get_by_text("Automatic supervision", exact=True).wait_for()
-                page.get_by_role("button", name="Metrics", exact=True).click()
-                page.get_by_role("button", name="View metrics and configure").click()
-                page.get_by_role("img").first.wait_for()
+                if theme == "tokyo-night":
+                    assert page.locator("html").get_attribute("data-skin") == "tokyo-night"
+                    assert (
+                        page.evaluate(
+                            "() => getComputedStyle(document.documentElement).getPropertyValue('--desktop-bg').trim()"
+                        )
+                        == "#1a1b26"
+                    )
+            page.get_by_label("Theme / Tema").select_option("classic")
+            page.get_by_role("button", name="Observer health", exact=True).click()
+            page.get_by_text("Automatic supervision", exact=True).wait_for()
+            page.get_by_role("button", name="Metrics", exact=True).click()
+            page.get_by_role("button", name="View metrics and configure").click()
+            page.get_by_role("img").first.wait_for()
             page.get_by_role("button", name="Model and analysis", exact=True).click()
             page.get_by_label("Model", exact=True).select_option("manual")
             model = page.locator('input[name="model"]')
@@ -386,7 +422,7 @@ with tempfile.TemporaryDirectory(prefix="sentinel-themes-") as directory:
             assert not errors, errors
             browser.close()
         print(
-            "Five themes and Omarchy sync passed: contrast, live updates, persistence, ES/EN, forms, metrics and mobile. Screenshots: "
+            "Classic, Paper, 24 Radio palettes and Omarchy sync passed: contrast, live updates, persistence, ES/EN, forms, metrics and mobile. Screenshots: "
             + str(screenshots)
         )
     finally:

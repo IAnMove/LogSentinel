@@ -1,9 +1,7 @@
 "use strict";
 
 function tentriTheme() {
-  return portalThemes.some((theme) => theme.id === portalPalette)
-    ? portalPalette
-    : "classic";
+  return TENTRI_ARTWORK.includes(portalPalette) ? portalPalette : "classic";
 }
 // Artwork now follows the interface. Preserve an earlier opt-out, but migrate
 // the old default and fixed-palette choices to automatic theme matching.

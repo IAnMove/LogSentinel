@@ -151,9 +151,10 @@
   --chart-max: #f6c177;
   --chart-avg: #9ccfd8;
 }
-/* Validated desktop colors are scoped to follow mode. Manual cards keep their
-   own palettes, and changing the selection never writes Omarchy's variables. */
-:root[data-theme-source="omarchy"] {
+/* Live desktop follow and Radio skins share the derived token block.
+   Classic and Paper keep their hand-tuned CSS. */
+:root[data-theme-source="omarchy"],
+:root[data-theme-source="skin"] {
   --bg: var(--desktop-bg);
   --surface: var(--desktop-surface);
   --surface-alt: var(--desktop-surface-alt);

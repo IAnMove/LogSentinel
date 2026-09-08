@@ -13,24 +13,16 @@ const portalThemes = [
     es: "Tinta, papel y precisión. Inspirado en la web de Omarchy.",
     en: "Ink, paper and precision. Inspired by the Omarchy website.",
   },
-  {
-    id: "tokyo",
-    name: "Tokyo Night",
-    es: "Azul eléctrico e índigo para largas noches de terminal.",
-    en: "Electric blue and indigo for long terminal nights.",
-  },
-  {
-    id: "gruvbox",
-    name: "Gruvbox",
-    es: "Carbón, ámbar y verde oliva. Un escritorio cálido.",
-    en: "Charcoal, amber and olive. A warmer desktop.",
-  },
-  {
-    id: "rose",
-    name: "Rosé Pine",
-    es: "Violeta profundo y rosa suave, con contraste sereno.",
-    en: "Deep violet and soft rose, with quiet contrast.",
-  },
+  ...RADIO_SKINS.map((skin) => {
+    const blurb = RADIO_BLURBS[skin.name] || ["Paleta de Omarchy Radio.", "Omarchy Radio palette."];
+    return {
+      id: radioSkinId(skin.name),
+      name: radioSkinTitle(skin.name),
+      es: blurb[0],
+      en: blurb[1],
+      seeds: skin,
+    };
+  }),
 ];
 let portalTheme = "classic";
 try {
@@ -38,6 +30,7 @@ try {
 } catch {
   /* Session-only preference. */
 }
+portalTheme = THEME_ALIASES[portalTheme] || portalTheme;
 if (
   portalTheme !== "omarchy" &&
   !portalThemes.some((theme) => theme.id === portalTheme)
@@ -48,27 +41,43 @@ let omarchyPalette = null;
 function themeText(es, en) {
   return document.documentElement.lang === "es" ? es : en;
 }
+function radioTheme(id) {
+  return portalThemes.find((theme) => theme.id === id && theme.seeds);
+}
 function refreshPortalTheme() {
   omarchyPalette = readOmarchyTheme();
   const following = portalTheme === "omarchy";
-  portalPalette = following
-    ? omarchyPalette?.artwork || "classic"
-    : portalTheme;
+  const skin = radioTheme(portalTheme);
   const root = document.documentElement;
-  root.dataset.theme = portalPalette;
-  root.dataset.themeSource = following
-    ? omarchyPalette
-      ? "omarchy"
-      : "fallback"
-    : "manual";
-  if (following && omarchyPalette) {
-    for (const [key, value] of Object.entries(omarchyPalette.tokens))
-      root.style.setProperty(`--desktop-${key}`, value);
+  clearDesktopTokens(root);
+  if (following) {
+    portalPalette = omarchyPalette?.artwork || "classic";
+    root.dataset.theme = portalPalette;
+    root.dataset.skin = "omarchy";
+    root.dataset.themeSource = omarchyPalette ? "omarchy" : "fallback";
+    if (omarchyPalette) {
+      applyDesktopTokens(root, omarchyPalette.tokens);
+      root.style.colorScheme = omarchyPalette.mode;
+    }
+  } else if (skin) {
+    const derived = deriveRadioSkin(skin.seeds);
+    portalPalette = derived.artwork;
+    root.dataset.theme = derived.artwork;
+    root.dataset.skin = skin.id;
+    root.dataset.themeSource = "skin";
+    applyDesktopTokens(root, derived.tokens);
+    root.style.colorScheme = derived.mode;
+  } else {
+    portalPalette = portalTheme;
+    root.dataset.theme = portalTheme;
+    root.dataset.skin = portalTheme;
+    root.dataset.themeSource = "manual";
   }
   if (typeof updateTentriBanners === "function") updateTentriBanners();
   updatePortalThemeControls();
 }
 function applyPortalTheme(id) {
+  id = THEME_ALIASES[id] || id;
   if (id !== "omarchy" && !portalThemes.some((theme) => theme.id === id))
     return;
   portalTheme = id;
@@ -113,8 +122,6 @@ function updatePortalThemeControls(scope = document) {
           );
   }
 }
-// Palette delivery is asynchronous; the initial read also covers extensions
-// that publish before our scripts load. The event carries no trusted payload.
 document.addEventListener("omarchythemechange", refreshPortalTheme);
 refreshPortalTheme();
 document.addEventListener("DOMContentLoaded", () => {
@@ -189,8 +196,8 @@ function appearanceView(root) {
     el(
       "p",
       bilingual(
-        "Tu observatorio, a tu manera. Elige entre cinco paletas o sigue el tema de tu escritorio Omarchy. El tema se recuerda en este navegador y puedes cambiarlo sin perder lo que estás editando.",
-        "Your observatory, your way. Choose from five palettes or follow your Omarchy desktop theme. This browser remembers your theme; switching keeps your unsaved edits.",
+        "Tu observatorio, a tu manera. Classic es el original; Paper es el de LogSentinel; el resto son las 24 paletas de Omarchy Radio, las mismas cuatro semillas. También puedes seguir el escritorio Omarchy. El tema se recuerda en este navegador y puedes cambiarlo sin perder lo que estás editando.",
+        "Your observatory, your way. Classic is the original; Paper is LogSentinel's own; the rest are Omarchy Radio's 24 palettes, the same four seeds. You can also follow your Omarchy desktop. This browser remembers your theme; switching keeps your unsaved edits.",
       ),
     ),
   );
@@ -198,8 +205,8 @@ function appearanceView(root) {
     el(
       "div",
       bilingual(
-        "5 PALETAS + OMARCHY · LOCAL",
-        "5 PALETTES + OMARCHY · LOCAL",
+        "CLASSIC · PAPER · 24 RADIO · OMARCHY",
+        "CLASSIC · PAPER · 24 RADIO · OMARCHY",
       ),
       "eyebrow",
     ),
@@ -210,6 +217,10 @@ function appearanceView(root) {
     card.dataset.palette = theme.id;
     card.setAttribute("aria-label", theme.name);
     card.setAttribute("aria-pressed", String(portalTheme === theme.id));
+    if (theme.seeds) {
+      const derived = deriveRadioSkin(theme.seeds);
+      applyTokenPreview(card, derived.tokens, derived.mode);
+    }
     const sample = el("span", undefined, "theme-preview");
     sample.setAttribute("aria-hidden", "true");
     sample.innerHTML =
@@ -234,8 +245,8 @@ function appearanceView(root) {
     el(
       "p",
       bilingual(
-        "Classic es el tema por defecto. Las cinco paletas manuales no requieren Omarchy. La sincronización adapta los colores del escritorio manteniendo legibles textos y alertas; Tentri usa la variante existente más cercana. Todos los recursos se sirven desde este portal.",
-        "Classic is the default. The five manual palettes need no Omarchy installation. Sync adapts desktop colors to keep text and alerts readable; Tentri uses the closest existing artwork. All assets are served by this portal.",
+        "Classic es el tema por defecto y no se ha tocado. Paper sigue siendo de LogSentinel. Las 24 paletas copian las semillas de Omarchy Radio (fondo, tinta, acento y línea). Tentri usa la ilustración existente más cercana. Todos los recursos se sirven desde este portal.",
+        "Classic is the default and is unchanged. Paper remains LogSentinel's own. The 24 palettes copy Omarchy Radio's seeds (ground, ink, accent and line). Tentri uses the closest existing artwork. All assets are served by this portal.",
       ),
       "subtle",
     ),

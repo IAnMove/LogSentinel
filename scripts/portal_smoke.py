@@ -194,7 +194,14 @@ with tempfile.TemporaryDirectory(prefix="sentinel-browser-") as d:
                 page.get_by_label("Slack bot token", exact=True).input_value()
                 == "xoxb-synthetic-bot-token"
             )
-            for theme in ["classic", "paper", "tokyo", "gruvbox", "rose"]:
+            for theme in [
+                "classic",
+                "paper",
+                "tokyo-night",
+                "gruvbox",
+                "rose-pine",
+                "nord",
+            ]:
                 page.get_by_label("Theme / Tema").select_option(theme)
                 assert (
                     page.get_by_label("Slack bot token", exact=True).input_value()
