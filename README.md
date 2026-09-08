@@ -2,7 +2,7 @@
 
 [English documentation](docs/QUICKSTART.en.md) · Interfaz disponible en español e inglés.
 
-[Cinco temas del portal](docs/THEMES.md) · [Widget para Omarchy Quattro](docs/OMARCHY.md) · [Supervisión y recuperación](docs/OPERATIONS.md)
+[Temas y sincronización con Omarchy](docs/THEMES.md) · [Widget para Omarchy Quattro](docs/OMARCHY.md) · [Supervisión y recuperación](docs/OPERATIONS.md)
 
 [Configurar notificaciones: Telegram, Slack, Discord, Hermes, n8n y destinos locales](docs/NOTIFICATIONS.md)
 

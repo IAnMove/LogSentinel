@@ -1,8 +1,8 @@
 "use strict";
 
 function tentriTheme() {
-  return portalThemes.some((theme) => theme.id === portalTheme)
-    ? portalTheme
+  return portalThemes.some((theme) => theme.id === portalPalette)
+    ? portalPalette
     : "classic";
 }
 // Artwork now follows the interface. Preserve an earlier opt-out, but migrate

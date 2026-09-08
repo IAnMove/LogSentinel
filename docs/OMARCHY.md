@@ -5,6 +5,11 @@ pending and unreviewed counts, and CPU/RAM/disk readings for up to four machines
 It polls every 30 seconds and opens the full portal for evidence and investigations.
 English is the default; set the widget's `language` setting to `es` for Spanish.
 
+The web portal can also follow the desktop's colors using the separate Chromium
+extension **Omarchy Theme Sync**. Enable **Appearance → Follow Omarchy theme**
+after [installing the browser integration](THEMES.md#follow-your-omarchy-desktop).
+This also works with a portal on another machine through an SSH tunnel.
+
 ## Compatibility and scope
 
 Requires **Omarchy Quattro with the plugin API**, Quickshell and `curl` on the
