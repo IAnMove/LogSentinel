@@ -99,80 +99,164 @@ with tempfile.TemporaryDirectory(prefix="sentinel-browser-") as d:
                     requests.append(request) if request.method != "GET" else None
                 ),
             )
-            draft = {
-                "url": "https://synthetic.invalid/draft-webhook",
-                "token": "synthetic-draft-token",
-                "secret": "synthetic-draft-secret",
-                "headers": '{"X-Test": "synthetic-draft-header"}',
-                "chat_id": "-1234",
+            expected_fields = {
+                "system": [],
+                "telegram": ["token", "chat_id"],
+                "slack_webhook": ["url"],
+                "slack_bot": ["token", "slack_channel"],
+                "discord": ["url"],
+                "hermes": ["url", "secret", "headers"],
+                "n8n": ["url", "headers"],
+                "webhook": ["url", "headers"],
+                "file": ["path", "rotation_mb", "keep_archives"],
             }
-            for name, value in draft.items():
-                page.locator(f"[name='{name}']").fill(value)
+            drafts = {}
             guide = page.locator(".notification-howto")
-            for locale, prefix in [("en", "How to add"), ("es", "Cómo añadir")]:
-                page.get_by_label("Language / Idioma").select_option(locale)
+
+            def select_channel(key):
+                kind = "slack" if key.startswith("slack_") else key
+                page.locator("select[name='kind']").select_option(kind)
+                if kind == "slack":
+                    page.locator("select[name='slack_mode']").select_option(
+                        key.removeprefix("slack_")
+                    )
+                return page.locator(f"[data-notification-channel='{key}']")
+
+            for language, prefix in [("en", "How to add"), ("es", "Cómo añadir")]:
+                page.get_by_label("Language / Idioma").select_option(language)
                 page.wait_for_function(
                     "prefix => document.querySelector('.notification-howto summary').textContent.startsWith(prefix)",
                     arg=prefix,
                 )
-                for channel in [
-                    "system",
-                    "telegram",
-                    "slack",
-                    "discord",
-                    "hermes",
-                    "n8n",
-                    "webhook",
-                    "file",
-                ]:
-                    page.locator("select[name='kind']").select_option(channel)
-                    assert guide.get_attribute("data-channel") == channel
+                for key, fields in expected_fields.items():
+                    group = select_channel(key)
+                    assert group.is_visible()
+                    assert page.locator(".notification-fields:visible").count() == 1
                     assert guide.locator("summary").inner_text().startswith(prefix)
-                    assert guide.locator("li").count() >= 3
-                    assert guide.locator("button").count() == (
-                        1 if channel in ("hermes", "n8n") else 0
+                    visible = page.locator("[data-notification-field]:visible")
+                    assert (
+                        visible.evaluate_all(
+                            "nodes => nodes.map(n => n.dataset.notificationField)"
+                        )
+                        == fields
                     )
-                    for name, value in draft.items():
-                        assert page.locator(f"[name='{name}']").input_value() == value
-                        assert value not in guide.inner_text()
+                    assert page.locator(
+                        "select[name='slack_mode']"
+                    ).is_visible() == key.startswith("slack_")
+                    for name in fields:
+                        input = group.locator(f"[data-notification-field='{name}']")
+                        if language == "en":
+                            value = (
+                                "10"
+                                if name in ("rotation_mb", "keep_archives")
+                                else (
+                                    '{"X-Test": "synthetic-header"}'
+                                    if name == "headers"
+                                    else (
+                                        "https://synthetic.invalid/" + key
+                                        if name == "url"
+                                        else (
+                                            "xoxb-synthetic-bot-token"
+                                            if key == "slack_bot" and name == "token"
+                                            else (
+                                                "C123"
+                                                if name == "slack_channel"
+                                                else key + "-draft-" + name
+                                            )
+                                        )
+                                    )
+                                )
+                            )
+                            input.fill(value)
+                            drafts[(key, name)] = value
+                        assert input.input_value() == drafts[(key, name)]
+                        assert (
+                            drafts[(key, name)] not in guide.inner_text()
+                            if name not in ("rotation_mb", "keep_archives")
+                            else True
+                        )
+                    assert guide.locator("button").count() == (
+                        1 if key in ("hermes", "n8n") else 0
+                    )
                     for link in guide.locator("a").all():
                         assert link.get_attribute("rel") == "noopener noreferrer"
                         assert "synthetic" not in link.get_attribute("href")
                     page.set_viewport_size({"width": 390, "height": 844})
                     assert page.evaluate(
                         "document.documentElement.scrollWidth <= window.innerWidth"
-                    ), channel
+                    ), key
                     page.set_viewport_size({"width": 1440, "height": 1000})
 
-            # Restoring the draft after a language switch must also update help;
-            # the unsaved selection differs from the default Telegram channel.
-            page.locator("select[name='kind']").select_option("n8n")
+            select_channel("slack_bot")
             page.get_by_label("Language / Idioma").select_option("en")
-            page.get_by_text("How to add n8n", exact=True).wait_for()
-            assert page.locator("select[name='kind']").input_value() == "n8n"
+            page.get_by_text("How to add Slack with a bot token", exact=True).wait_for()
+            assert (
+                page.get_by_label("Slack bot token", exact=True).input_value()
+                == "xoxb-synthetic-bot-token"
+            )
+            for theme in ["classic", "paper", "tokyo", "gruvbox", "rose"]:
+                page.get_by_label("Theme / Tema").select_option(theme)
+                assert (
+                    page.get_by_label("Slack bot token", exact=True).input_value()
+                    == "xoxb-synthetic-bot-token"
+                )
+            select_channel("n8n")
             page.get_by_role("button", name="n8n template", exact=True).click()
             page.locator("#modal[open]").wait_for()
             assert "Configure destination" in page.locator("#modal").inner_text()
             page.locator("#close-modal").click()
-            for theme in ["classic", "paper", "tokyo", "gruvbox", "rose"]:
-                page.get_by_label("Theme / Tema").select_option(theme)
-                assert guide.get_attribute("data-channel") == "n8n"
-                assert page.locator("[name='token']").input_value() == draft["token"]
             guide.locator("summary").focus()
             page.keyboard.press("Enter")
             assert not guide.evaluate("node => node.open")
             page.keyboard.press("Enter")
             assert guide.evaluate("node => node.open")
-            page.get_by_label("Language / Idioma").select_option("es")
-            page.get_by_text("Cómo añadir n8n", exact=True).wait_for()
             assert not requests, [(r.method, r.url) for r in requests]
-            for name in draft:
-                page.locator(f"[name='{name}']").fill("")
+
+            # Save only the selected Slack bot fields. Inactive provider drafts
+            # must never be submitted; saving and editing must not send messages.
+            select_channel("slack_bot")
+            page.get_by_role("button", name="Save", exact=True).click()
+            page.get_by_text("Configuration saved.", exact=True).wait_for()
+            submitted = [
+                r.post_data_json
+                for r in requests
+                if "/api/objects/destination" in r.url
+            ][-1]
+            assert submitted["token"] == "xoxb-synthetic-bot-token"
+            assert submitted["slack_mode"] == "bot"
+            assert (
+                not {"url", "secret", "headers", "chat_id", "path"} & submitted.keys()
+            )
+            saved = app.state.store.objects("destination")[0]
+            assert saved["token"] == "xoxb-synthetic-bot-token"
+            assert saved["url"] == saved["secret"] == saved["chat_id"] == ""
+            assert not app.state.store.rows("deliveries")
+            page.get_by_role("button", name="Edit", exact=True).click()
+            assert page.get_by_label("Slack bot token", exact=True).input_value() == ""
+            assert "Saved" in page.get_by_label(
+                "Slack bot token", exact=True
+            ).get_attribute("placeholder")
+            assert (
+                page.get_by_label("Slack channel ID", exact=True).input_value()
+                == "C123"
+            )
+            page.get_by_role("button", name="Save", exact=True).click()
+            page.get_by_text("Configuration saved.", exact=True).wait_for()
+            assert (
+                app.state.store.objects("destination")[0]["token"]
+                == "xoxb-synthetic-bot-token"
+            )
+            page.get_by_role("button", name="Edit", exact=True).click()
+            page.get_by_label("Language / Idioma").select_option("es")
+            page.get_by_text(
+                "Cómo añadir Slack con token de bot", exact=True
+            ).wait_for()
             page.get_by_label("Canal", exact=True).select_option("file")
             page.get_by_role("button", name="Guardar", exact=True).click()
             page.get_by_text("Configuración guardada.", exact=True).wait_for()
             page.get_by_role("button", name="Enviar prueba", exact=True).click()
             page.get_by_text("delivered", exact=True).wait_for()
+            assert app.state.store.objects("destination")[0]["token"] == ""
             page.get_by_role("button", name="Editar", exact=True).click()
             page.get_by_text("Cómo añadir un archivo local", exact=True).wait_for()
             page.get_by_role("button", name="Resumen", exact=True).click()
@@ -186,7 +270,7 @@ with tempfile.TemporaryDirectory(prefix="sentinel-browser-") as d:
         assert len(app.state.store.objects("rule")) == 1
         assert len(app.state.store.rows("problems")) == 1
         print(
-            "PASS: login, machine, import, analysis, evidence, mute, 8 notification guides, draft/language/theme preservation, templates, file delivery, edit and mobile layout"
+            "PASS: login, machine, import, analysis, evidence, mute, 8 provider forms, Slack bot/webhook isolation, draft/language/theme preservation, templates, file delivery, edit and mobile layout"
         )
     finally:
         server.should_exit = True

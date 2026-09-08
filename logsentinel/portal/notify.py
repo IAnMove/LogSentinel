@@ -17,6 +17,23 @@ from .store import uid, dumps
 
 RANK = {"LOW": 1, "MEDIUM": 2, "HIGH": 3, "CRITICAL": 4}
 
+# Only these local messages may be exposed; never echo a remote response body.
+SLACK_ERRORS = {
+    "invalid_auth": "Slack: invalid bot token. Copy the Bot User OAuth Token again.",
+    "token_revoked": "Slack: bot token revoked. Reinstall the app and update its token.",
+    "token_expired": "Slack: bot token expired. Update the token in this destination.",
+    "missing_scope": "Slack: grant chat:write under Bot Token Scopes and reinstall the app.",
+    "not_in_channel": "Slack: invite the app to the destination channel.",
+    "channel_not_found": "Slack: check the channel ID and invite the app to that channel.",
+    "is_archived": "Slack: the destination channel is archived. Select an active channel.",
+    "not_allowed_token_type": "Slack: use a Bot User OAuth Token (xoxb-).",
+    "no_permission": "Slack: check the app's channel membership and workspace permissions.",
+}
+
+
+class DestinationRejected(ValueError):
+    """An actionable error assembled exclusively from local, safe text."""
+
 
 def enqueue(store, problem_id, event_type="problem.updated"):
     problem = store.problem(problem_id)
@@ -178,6 +195,11 @@ class Outbox:
                 "unfurl_links": False,
                 "unfurl_media": False,
             }
+            if dest.get("slack_mode", "webhook") == "bot":
+                # Bot credentials always go to Slack's API, never a custom URL.
+                url = "https://slack.com/api/chat.postMessage"
+                headers = {"Authorization": "Bearer " + dest["token"]}
+                body["channel"] = dest["slack_channel"]
         elif kind == "discord":
             body = {"content": text[:1900], "allowed_mentions": {"parse": []}}
         raw = dumps(body).encode()
@@ -205,6 +227,18 @@ class Outbox:
             )
         if kind == "telegram" and response.json().get("ok") is not True:
             raise ValueError("Telegram rejected message")
+        if kind == "slack" and dest.get("slack_mode", "webhook") == "bot":
+            result = response.json()
+            if not isinstance(result, dict) or result.get("ok") is not True:
+                code = result.get("error") if isinstance(result, dict) else None
+                if code in ("ratelimited", "rate_limited"):
+                    raise RuntimeError("Slack rate limited; retry later")
+                raise DestinationRejected(
+                    SLACK_ERRORS.get(
+                        code if isinstance(code, str) else "",
+                        "Slack rejected the message. Check the bot token, chat:write permission and channel access.",
+                    )
+                )
         if kind == "hermes":
             status = response.json().get("status")
             if status in ("delivered", "duplicate"):
@@ -274,7 +308,11 @@ class Outbox:
                             if isinstance(exc, RuntimeError) and row["attempts"] < 2
                             else "failed"
                         )
-                        error = f"{type(exc).__name__}: delivery failed; verify destination configuration"
+                        error = (
+                            str(exc)
+                            if isinstance(exc, DestinationRejected)
+                            else f"{type(exc).__name__}: delivery failed; verify destination configuration"
+                        )
                 with self.store.connect() as db:
                     db.execute(
                         "UPDATE deliveries SET status=?,error=?,updated=?,next_try=? WHERE id=?",
@@ -304,8 +342,12 @@ class Outbox:
             status = await self.send(dest, payload)
         except Exception as exc:
             error = (
-                type(exc).__name__
-                + ": verify credentials, connectivity and destination"
+                str(exc)
+                if isinstance(exc, DestinationRejected)
+                else (
+                    type(exc).__name__
+                    + ": verify credentials, connectivity and destination"
+                )
             )
         with self.store.connect() as db:
             db.execute(

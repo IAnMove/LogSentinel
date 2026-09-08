@@ -110,6 +110,8 @@ class Destination(Model):
     url: str = ""
     token: str = ""
     chat_id: str = ""
+    slack_mode: Literal["webhook", "bot"] = "webhook"
+    slack_channel: str = Field(default="", max_length=200)
     secret: str = ""
     headers: dict[str, str] = Field(default_factory=dict)
     path: str = ""
@@ -119,19 +121,67 @@ class Destination(Model):
 
     @model_validator(mode="after")
     def complete(self):
+        if self.kind == "slack" and self.slack_mode == "bot" and self.token:
+            if not self.token.startswith("xoxb-"):
+                raise ValueError(
+                    "Slack requires a Bot User OAuth Token (xoxb-), not an app token or signing secret"
+                )
         if self.url:
             check_url(self.url)
         if self.enabled:
             if self.kind == "telegram" and not (self.token and self.chat_id):
                 raise ValueError("Telegram requires token and chat ID")
             if (
-                self.kind in ("slack", "discord", "hermes", "n8n", "webhook")
-                and not self.url
-            ):
+                self.kind in ("discord", "hermes", "n8n", "webhook")
+                or self.kind == "slack"
+                and self.slack_mode == "webhook"
+            ) and not self.url:
                 raise ValueError("Webhook URL required")
             if self.kind == "hermes" and not self.secret:
                 raise ValueError("Hermes signing secret required")
+            if self.kind == "slack" and self.slack_mode == "bot":
+                if not (self.token and self.slack_channel.strip()):
+                    raise ValueError(
+                        "Slack bot notifications require a bot token and channel ID"
+                    )
         return self
+
+
+def destination_identity(data):
+    """Credentials belong to a provider and authentication method."""
+    return (
+        data["kind"],
+        data.get("slack_mode", "webhook") if data["kind"] == "slack" else "",
+    )
+
+
+def merge_destination(old, patch, clear):
+    defaults = Destination(
+        name=old["name"], kind=patch.get("kind", old["kind"])
+    ).model_dump()
+    base = dict(old)
+    if destination_identity(old) != destination_identity(dict(old, **patch)):
+        # Never inherit another provider's token, URL, headers or target.
+        for key in (
+            "url",
+            "token",
+            "secret",
+            "headers",
+            "chat_id",
+            "slack_channel",
+            "slack_mode",
+            "path",
+            "rotation_mb",
+            "keep_archives",
+        ):
+            base[key] = defaults[key]
+    merged = dict(base, **patch)
+    for key in ("token", "secret", "headers", "url"):
+        if not patch.get(key):
+            merged[key] = (
+                defaults[key] if key in clear else base.get(key, defaults[key])
+            )
+    return merged
 
 
 class Rule(Model):

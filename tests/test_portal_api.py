@@ -227,3 +227,116 @@ def test_model_metadata_suggestion_uses_server_information(client, monkeypatch):
     assert result["suggested_context"] == 2048
     assert result["suggested_input_budget"] == 0
     assert s.settings().model_dump() == before
+
+
+@pytest.mark.parametrize("missing", ["token", "slack_channel"])
+def test_slack_bot_requires_its_own_credentials(client, missing):
+    c, store = client
+    data = dict(
+        name="Slack",
+        kind="slack",
+        slack_mode="bot",
+        enabled=True,
+        token="xoxb-synthetic-secret",
+        slack_channel="C123",
+    )
+    data.pop(missing)
+    response = c.post("/api/objects/destination", json=data)
+    assert response.status_code == 422
+    assert "xoxb-synthetic-secret" not in response.text
+    assert not store.objects("destination")
+
+
+def test_slack_bot_secret_retention_clear_and_method_switch(client):
+    c, store = client
+    data = dict(
+        name="Slack",
+        kind="slack",
+        slack_mode="bot",
+        enabled=True,
+        token="xoxb-synthetic-secret",
+        slack_channel="C123",
+    )
+    response = c.post("/api/objects/destination", json=data)
+    assert response.status_code == 200, response.text
+    saved = response.json()
+    assert "xoxb-synthetic-secret" not in response.text
+    assert saved["slack_mode"] == "bot"
+    assert saved["configured_fields"] == ["token"]
+    id = saved["id"]
+    # Public representations and empty fields preserve this provider's token.
+    assert c.post("/api/objects/destination", json=saved).status_code == 200
+    assert store.get("destination", id)["token"] == data["token"]
+    # Invalid credentials do not replace the working destination or leak input.
+    bad = c.post(
+        "/api/objects/destination",
+        json={"id": id, "token": "xapp-synthetic-wrong-type"},
+    )
+    assert bad.status_code == 422
+    assert "xapp-synthetic-wrong-type" not in bad.text
+    assert store.get("destination", id)["token"] == data["token"]
+    cleared = c.post(
+        "/api/objects/destination",
+        json={"id": id, "enabled": False, "clear_secrets": ["token"]},
+    )
+    assert cleared.status_code == 200
+    assert store.get("destination", id)["token"] == ""
+    assert (
+        c.post("/api/objects/destination", json={**data, "id": id}).status_code == 200
+    )
+    # Switching to a webhook removes the bot token and channel.
+    switched = c.post(
+        "/api/objects/destination",
+        json={
+            "id": id,
+            "slack_mode": "webhook",
+            "url": "https://synthetic.invalid/hook",
+        },
+    )
+    assert switched.status_code == 200, switched.text
+    current = store.get("destination", id)
+    assert current["token"] == current["slack_channel"] == ""
+    # Switching back must not silently restore previously saved bot secrets.
+    assert (
+        c.post(
+            "/api/objects/destination", json={"id": id, "slack_mode": "bot"}
+        ).status_code
+        == 422
+    )
+    assert not store.rows("deliveries")
+
+
+@pytest.mark.parametrize("target", ["slack", "telegram", "system", "file"])
+def test_changing_provider_drops_connection_and_pending_deliveries(client, target):
+    c, store = client
+    data = dict(
+        name="Original",
+        kind="hermes",
+        enabled=True,
+        url="https://synthetic.invalid/old",
+        secret="old-signing-secret",
+        token="old-unused-token",
+        headers={"Authorization": "old-header"},
+        chat_id="old-chat",
+    )
+    saved = c.post("/api/objects/destination", json=data).json()
+    id = saved["id"]
+    with store.connect() as db:
+        db.execute(
+            "INSERT INTO deliveries VALUES(?,?,?,?,?,?,?,?,?,?)",
+            ("queued", id, "p", "{}", "pending", 0, 0, 0, 0, None),
+        )
+    patch = dict(id=id, kind=target, enabled=True)
+    if target == "slack":
+        patch["url"] = "https://synthetic.invalid/new"
+    if target == "telegram":
+        patch.update(token="new-telegram-token", chat_id="new-chat")
+    response = c.post("/api/objects/destination", json=patch)
+    assert response.status_code == 200, response.text
+    current = store.get("destination", id)
+    assert current["secret"] == ""
+    assert current["headers"] == {}
+    assert current["token"] == patch.get("token", "")
+    assert current["url"] == patch.get("url", "")
+    assert current["chat_id"] == patch.get("chat_id", "")
+    assert store.rows("deliveries")[0]["status"] == "cancelled"
