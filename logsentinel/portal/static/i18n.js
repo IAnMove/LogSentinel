@@ -617,6 +617,7 @@ function t(key, params = {}) {
 }
 function staticLanguage() {
   document.documentElement.lang = locale;
+  updatePortalThemeControls();
   document.title = "LogSentinel · " + t("Resumen");
   document.querySelectorAll("[data-i18n]").forEach((n) => {
     n.textContent = t(n.dataset.i18n);

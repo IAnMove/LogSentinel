@@ -1,4 +1,4 @@
-"""Five real-browser themes: persistence, contrast, forms, language and mobile."""
+"""Manual themes and Omarchy sync: contrast, forms, persistence and mobile."""
 
 import sys
 from pathlib import Path
@@ -22,6 +22,202 @@ def contrast(a, b):
 
     x, y = sorted([luminance(a), luminance(b)])
     return (y + 0.05) / (x + 0.05)
+
+
+# The extension writes colors into <html> and dispatches this document event
+# without a payload. Exercise that public contract under the portal's real CSP,
+# including before our scripts start and before the optional page API exists.
+PUBLISH_OMARCHY = """(palette) => {
+  const root = document.documentElement;
+  for (const key of [...root.style])
+    if (key.startsWith('--omarchy-')) root.style.removeProperty(key);
+  delete root.dataset.omarchyTheme;
+  delete root.dataset.omarchyMode;
+  if (palette) {
+    for (const [key, value] of Object.entries(palette.colors))
+      root.style.setProperty('--omarchy-' + key.replaceAll('_', '-'), value);
+    root.dataset.omarchyTheme = palette.name;
+    root.dataset.omarchyMode = palette.mode;
+  }
+  document.dispatchEvent(new Event('omarchythemechange'));
+}"""
+
+
+def check_omarchy_sync(page, screenshots):
+    page.set_viewport_size({"width": 1440, "height": 1050})
+    page.get_by_label("Language / Idioma").select_option("en")
+    page.get_by_role("button", name="Appearance", exact=True).click()
+    page.locator("#follow-omarchy").click()
+    assert page.locator("html").get_attribute("data-theme-source") == "fallback"
+    assert "Waiting" in page.locator("#omarchy-theme-status").inner_text()
+    assert page.locator("#follow-omarchy").get_attribute("aria-pressed") == "true"
+
+    # Real upstream Tokyo Night seeds; no window.omarchy API is necessary.
+    night = dict(
+        name="Tokyo Night",
+        mode="dark",
+        colors=dict(
+            background="#1a1b26",
+            foreground="#a9b1d6",
+            bright_foreground="#c0caf5",
+            accent="#7aa2f7",
+            red="#f7768e",
+            yellow="#e0af68",
+            blue="#7aa2f7",
+        ),
+    )
+    light = dict(
+        name="White",
+        mode="light",
+        colors=dict(
+            background="#ffffff",
+            foreground="#222222",
+            accent="#444444",
+        ),
+    )
+    page.evaluate(PUBLISH_OMARCHY, night)
+    assert page.locator("html").get_attribute("data-theme-source") == "omarchy"
+    assert (
+        "Following desktop: Tokyo Night"
+        in page.locator("#omarchy-theme-status").inner_text()
+    )
+    assert page.get_by_label("Theme / Tema").input_value() == "omarchy"
+    assert page.locator('.theme-card[aria-pressed="true"]').count() == 0
+    page.screenshot(path=str(screenshots / "omarchy-night.png"), full_page=True)
+
+    page.get_by_role("button", name="Model and analysis", exact=True).click()
+    page.get_by_label("Model", exact=True).select_option("manual")
+    model = page.locator('input[name="model"]')
+    model.fill("draft-survives-desktop-switch")
+    document_requests = []
+    page.on(
+        "request",
+        lambda r: (
+            document_requests.append(r.url) if r.is_navigation_request() else None
+        ),
+    )
+    for palette in [
+        night,
+        light,
+        dict(
+            name="Custom low contrast",
+            mode="light",
+            colors=dict(
+                background="#777777",
+                foreground="#777777",
+                accent="#777777",
+                red="#777777",
+            ),
+        ),
+    ]:
+        page.evaluate(PUBLISH_OMARCHY, palette)
+        assert model.input_value() == "draft-survives-desktop-switch"
+        assert page.locator("html").get_attribute("data-theme-source") == "omarchy"
+        assert (
+            page.evaluate(
+                "() => getComputedStyle(document.documentElement).getPropertyValue('--bg').trim()"
+            )
+            == palette["colors"]["background"]
+        )
+        for fg, bg in [
+            ("--ink", "--surface"),
+            ("--muted", "--surface"),
+            ("--ink", "--surface-alt"),
+            ("--accent", "--surface"),
+            ("--button-ink", "--accent"),
+            ("--error-ink", "--error-bg"),
+            ("--warn-ink", "--warn-bg"),
+            ("--rail-muted", "--rail"),
+        ]:
+            colors = page.evaluate(
+                """([fg,bg]) => {
+              const n = document.createElement('span');
+              n.style.color = 'var('+fg+')'; n.style.backgroundColor = 'var('+bg+')';
+              document.body.append(n);
+              const s = getComputedStyle(n), result = [s.color, s.backgroundColor];
+              n.remove(); return result;
+            }""",
+                [fg, bg],
+            )
+            assert contrast(*colors) >= 4.5, (palette["name"], fg, colors)
+    assert not document_requests, "Desktop changes must not navigate/reload"
+
+    page.evaluate(PUBLISH_OMARCHY, light)
+    assert (
+        page.evaluate("() => getComputedStyle(document.documentElement).colorScheme")
+        == "light"
+    )
+    assert (
+        page.locator('[data-tentri-part="body"]')
+        .first.get_attribute("src")
+        .endswith("paper-v2.png")
+    )
+    page.get_by_label("Theme / Tema").select_option("gruvbox")
+    page.evaluate(PUBLISH_OMARCHY, night)
+    assert page.locator("html").get_attribute("data-theme-source") == "manual"
+    assert page.locator("html").get_attribute("data-theme") == "gruvbox"
+    assert model.input_value() == "draft-survives-desktop-switch"
+    page.reload()
+    assert page.get_by_label("Theme / Tema").input_value() == "gruvbox"
+
+    # Invalid CSS cannot create requests or break the page. Names remain text.
+    page.get_by_label("Theme / Tema").select_option("omarchy")
+    invalid = dict(
+        name='<img src="/unexpected" onerror="alert(1)">',
+        mode="dark",
+        colors=dict(
+            background="url(https://example.invalid/color)",
+            foreground="#ffffff",
+            accent="#000000",
+        ),
+    )
+    page.evaluate(PUBLISH_OMARCHY, invalid)
+    assert page.locator("html").get_attribute("data-theme-source") == "fallback"
+    page.get_by_role("button", name="Appearance", exact=True).click()
+    page.evaluate(PUBLISH_OMARCHY, dict(night, name=invalid["name"]))
+    assert invalid["name"] in page.locator("#omarchy-theme-status").inner_text()
+    assert page.locator("#omarchy-theme-status img").count() == 0
+
+    page.evaluate(PUBLISH_OMARCHY, night)
+    page.get_by_label("Language / Idioma").select_option("es")
+    page.get_by_role("button", name="Seguir tema de Omarchy", exact=True).wait_for()
+    assert (
+        "Siguiendo el escritorio: Tokyo Night"
+        in page.locator("#omarchy-theme-status").inner_text()
+    )
+    page.set_viewport_size({"width": 390, "height": 844})
+    assert page.evaluate("() => document.documentElement.scrollWidth <= innerWidth")
+    page.screenshot(path=str(screenshots / "omarchy-mobile.png"), full_page=True)
+    page.reload()
+    assert page.get_by_label("Theme / Tema").input_value() == "omarchy"
+    assert page.locator("html").get_attribute("data-theme-source") == "fallback"
+    page.evaluate(PUBLISH_OMARCHY, light)
+    assert page.locator("html").get_attribute("data-theme-source") == "omarchy"
+    page.evaluate(PUBLISH_OMARCHY, None)
+    assert page.locator("html").get_attribute("data-theme-source") == "fallback"
+
+    # Palette already published when themes.js is loaded (opposite race order).
+    import json
+
+    page.add_init_script(
+        """new MutationObserver((_, observer) => {
+      if (!document.documentElement) return;
+      observer.disconnect();
+      ("""
+        + PUBLISH_OMARCHY
+        + ")("
+        + json.dumps(night)
+        + ");\n"
+        + "}).observe(document, {childList:true});"
+    )
+    page.reload()
+    assert page.locator("html").get_attribute("data-theme-source") == "omarchy"
+    assert page.get_by_label("Theme / Tema").input_value() == "omarchy"
+    assert page.locator("html").get_attribute("lang") == "es"
+    assert (
+        page.evaluate("() => getComputedStyle(document.documentElement).colorScheme")
+        == "dark"
+    )
 
 
 with tempfile.TemporaryDirectory(prefix="sentinel-themes-") as directory:
@@ -186,10 +382,11 @@ with tempfile.TemporaryDirectory(prefix="sentinel-themes-") as directory:
             assert (
                 brand["y"] >= controls["y"] + controls["height"]
             ), "Mobile controls overlap the brand"
+            check_omarchy_sync(page, screenshots)
             assert not errors, errors
             browser.close()
         print(
-            "Five themes passed: contrast, persistence, ES/EN, metrics, health and mobile. Screenshots: "
+            "Five themes and Omarchy sync passed: contrast, live updates, persistence, ES/EN, forms, metrics and mobile. Screenshots: "
             + str(screenshots)
         )
     finally:

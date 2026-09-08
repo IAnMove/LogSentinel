@@ -151,6 +151,40 @@
   --chart-max: #f6c177;
   --chart-avg: #9ccfd8;
 }
+/* Validated desktop colors are scoped to follow mode. Manual cards keep their
+   own palettes, and changing the selection never writes Omarchy's variables. */
+:root[data-theme-source="omarchy"] {
+  --bg: var(--desktop-bg);
+  --surface: var(--desktop-surface);
+  --surface-alt: var(--desktop-surface-alt);
+  --ink: var(--desktop-ink);
+  --muted: var(--desktop-muted);
+  --border: var(--desktop-border);
+  --control-border: var(--desktop-control-border);
+  --accent: var(--desktop-accent);
+  --button-ink: var(--desktop-button-ink);
+  --soft: var(--desktop-soft);
+  --soft-border: var(--desktop-soft-border);
+  --focus: var(--desktop-focus);
+  --danger: var(--desktop-danger);
+  --error-bg: var(--desktop-error-bg);
+  --error-ink: var(--desktop-error-ink);
+  --error-border: var(--desktop-error-border);
+  --warn-bg: var(--desktop-warn-bg);
+  --warn-ink: var(--desktop-warn-ink);
+  --rail: var(--desktop-rail);
+  --rail-ink: var(--desktop-rail-ink);
+  --rail-muted: var(--desktop-rail-muted);
+  --rail-active: var(--desktop-rail-active);
+  --rail-accent: var(--desktop-rail-accent);
+  --rail-border: var(--desktop-rail-border);
+  --chart-max: var(--desktop-chart-max);
+  --chart-avg: var(--desktop-chart-avg);
+}
+#follow-omarchy[aria-pressed="true"] {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
 /* New skins change typography, geometry and hierarchy as well as the palette. */
 :root:not([data-theme="classic"]) body {
   font-family: var(--ui-font);
