@@ -1,0 +1,59 @@
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.tentri-icon {
+  width: 44px;
+  height: 44px;
+  flex: 0 0 44px;
+  object-fit: contain;
+  border-radius: 10px;
+}
+.login .tentri-icon {
+  width: 64px;
+  height: 64px;
+  flex-basis: 64px;
+  border-radius: 14px;
+}
+.tentri-hero {
+  margin: 0 0 24px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--surface);
+}
+.tentri-hero img {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 3 / 1;
+  object-fit: contain;
+}
+.tentri-hero figcaption {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 10px 16px;
+  border-top: 1px solid var(--border);
+  font-size: 12px;
+  color: var(--muted);
+}
+.panel .tentri-hero {
+  margin-top: 20px;
+  margin-bottom: 0;
+}
+:root:not([data-theme="classic"]) .tentri-hero {
+  border-radius: 3px;
+}
+@media (min-width: 1200px) {
+  #content > div > .tentri-hero {
+    max-width: 1050px;
+  }
+}
+@media (max-width: 600px) {
+  .tentri-hero figcaption {
+    padding: 8px 12px;
+  }
+}
