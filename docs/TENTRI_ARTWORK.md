@@ -28,6 +28,7 @@ Files live in `logsentinel/portal/static/`:
 - `tentri-banner-tokyo-v1.png`: Tokyo Night pixel art.
 - `tentri-banner-gruvbox-v1.png`: charcoal, olive and parchment terminal art.
 - `tentri-banner-rose-v1.png`: Rosé Pine pixel art.
+- `tentri-meshy-3d-v1.png`: a 1254 × 1254 textured 3D render for image-to-3D reconstruction in Meshy. Full body, cream shell, petrol-green arms, inserted brain cartridge and a neutral studio background. This is a reference image, not a mesh; the rear arm geometry remains partly occluded in the single view. Open `/static/tentri-meshy-3d-v1.png` directly. The exact generation prompt and reference paths are in [tentri-meshy-3d-prompt.json](tentri-meshy-3d-prompt.json).
 
 ## Direction and provenance
 

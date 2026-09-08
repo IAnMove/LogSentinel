@@ -1,0 +1,23 @@
+{
+  "asset": "logsentinel/portal/static/tentri-meshy-3d-v1.png",
+  "created_at": "2026-09-08",
+  "generator": "Built-in image_gen tool (not the CLI fallback)",
+  "use_case": "stylized-concept",
+  "purpose": "Single textured 3D render of Tentri for image-to-3D reconstruction in Meshy.",
+  "original_generated_file": "/root/.codex/generated_images/01a080d4-884b-7e12-b3b4-d6bd6685ca26/exec-0680bd5f-1a33-4d0d-a93d-8f4b0778bfe3.png",
+  "reference_images": [
+    "logsentinel/portal/static/tentri-v1.png",
+    "logsentinel/portal/static/tentri-body-classic-v2.png",
+    "logsentinel/portal/static/tentri-case-classic-v2.png"
+  ],
+  "prompt": "Use case: stylized-concept.\nAsset type: single reference image for image-to-3D reconstruction in Meshy, of the existing Tentri mascot.\nInput images: Image 1 is the approved Tentri concept sheet, use ONLY as character identity reference, do not reproduce the sheet layout. Image 2 is the close-up approved mascot design, use as shape and color reference. Image 3 is the separate approved brain cartridge, use as material and case shape reference.\nPrimary request: transform this exact lovable mechanical octopus mascot into a polished, convincing physically rendered 3D collectible with rich tactile surface texture. Retain its large rounded ivory cream shell, deep petroleum teal mechanical parts, dark rounded rectangular glass face with two vertical rounded mint eyes, round side ports with narrow amber rings, and eight thick articulated robot tentacles tipped with cream collars and teal or amber sensor lenses. Retain the removable rounded-square brain cartridge with four small corner screws and a mint geometric neural-node emblem on its front glass.\nComposition: one single complete mascot only, centrally framed, square high-resolution image, full body from cartridge top to the ends of every tentacle, generous approximately 10 percent clear margin all around. Near frontal three-quarter camera view with a slight elevated angle, sufficiently frontal to see both eyes and all appendages clearly. Eight individually countable tentacles radiate naturally from the lower shell, spaced apart in a relaxed balanced pose; avoid fused arms, overlapping tips, cropped appendages or crossed limbs. Fit all eight arms into the view, show dark gaps between them. The two rear tentacles can curve upward at the outer sides while front and lateral tentacles rest gently below the body. Keep the silhouette readable and mechanically plausible.\nImportant for reconstruction: the cartridge is half-seated firmly in the circular socket on top of the head, visibly connected, its upper face and neural emblem readable. No levitating parts, no beam between cartridge and socket, no loose accessories, no separate chips, no pedestals. All details belong to this one connected physical object.\nMaterials/textures: slightly weathered satin ceramic-coated ivory metal shell with extremely fine orange-peel microtexture and subtle edge wear; teal powder-coated metal panels with fine satin grain; articulated dark teal joints in softly textured molded rubber; machined metal collars and brushed brass trim; lightly scuffed glossy smoked glass face and cartridge screen, restrained mint and amber lens illumination. Realistic roughness, fine manufacturing seams, tiny fasteners and delicate believable wear. Not flat vector, not pixel art, not fuzzy plush, no heavy damage.\nLighting/backdrop: neutral light gray seamless studio background, soft broad diffuse lighting evenly illuminating all sides, gentle realistic ambient contact shadow only, no harsh directional shadows, no dramatic rim lights, no bloom, no shallow depth of field. Whole object sharply in focus, clear edges and surface texture. Pleasant friendly original personality, premium 3D render quality.\nConstraints: absolutely no text, lettering, watermark, logos other than the cartridge's simple geometric neural icon, arrows, data trails, server icons, alert bubbles, secondary characters, additional views, layout panels, UI or banner elements. Preserve the reference character proportions and palette.",
+  "inspection": {
+    "resolution": "1254 × 1254",
+    "format": "PNG, RGB",
+    "background": "Opaque neutral gray studio background.",
+    "character": "Ivory shell, teal articulated tentacles, mint eyes, textured metal and rubber, partially inserted brain cartridge.",
+    "preservation": "All earlier branding artwork is unchanged.",
+    "limitation": "This is a single-view image, not a 3D model. One rear tentacle is partly occluded; unseen geometry will have to be inferred by the reconstruction tool."
+  },
+  "local_preview_url": "http://localhost:8766/static/tentri-meshy-3d-v1.png"
+}
