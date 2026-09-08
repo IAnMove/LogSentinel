@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
 authors = [
-    { name = "LogSentinel Team" }
+    { name = "IAnMove" }
 ]
 keywords = ["security", "logs", "llm", "ollama", "journalctl", "syslog", "monitoring", "memory"]
 classifiers = [
@@ -42,7 +42,10 @@ logsentinel = "logsentinel.cli:main"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["logsentinel*"]
-exclude = ["tests*", "systemd*"]
+exclude = ["tests*", "systemd*", "logsentinel.portal.static.tutorials*"]
 
 [tool.setuptools.package-data]
 "logsentinel.portal" = ["static/*"]
+
+[tool.setuptools.exclude-package-data]
+"*" = ["static/tutorials", "static/tutorials/*", "static/tutorials/**/*"]

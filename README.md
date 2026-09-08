@@ -92,3 +92,7 @@ Hermes recibe un webhook firmado V2 y un identificador de entrega estable. La pl
 `constraints-tested-py312.txt` registra las versiones del entorno comprobado; úsalo como constraints de instalación en Python 3.12. La CI añade una matriz de versiones de Python; sus resultados en GitHub aún deben ejecutarse tras publicar los commits.
 
 La CLI anterior se conserva como compatibilidad. Sus instrucciones están en [Legacy CLI](docs/LEGACY_CLI.md); usa otra base y no es el motor del portal. El experimento de horarios SSH queda desactivado por defecto.
+
+## About us
+
+[@THEINAOG on X / Twitter](https://x.com/THEINAOG)

@@ -1,6 +1,7 @@
 "use strict";
 // Only interface strings go through t(). Log evidence and user content remain verbatim.
 const translations = {
+  "Sobre nosotros": "About us",
   "Ya hay una fuente activa capturando este journal local. Reutilízala o desactívala antes de activar otra.":
     "An enabled source already captures this local journal. Reuse it or disable it before enabling another.",
   "Cobertura y capacidad": "Coverage and capacity",
