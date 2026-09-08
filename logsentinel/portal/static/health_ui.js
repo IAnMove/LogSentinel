@@ -81,72 +81,9 @@ async function healthView(root) {
     live.replaceChildren(head, cards);
   }
   await update();
-  const capacity = await api(
-    "/api/capacity" + (scope ? "?machine_id=" + encodeURIComponent(scope) : ""),
-  );
-  if (!root.isConnected) return;
-  const throughput = panel(
-    bilingual(
-      "Volumen y cobertura de la última hora",
-      "Volume and coverage in the last hour",
-    ),
-  );
-  throughput.append(
-    el(
-      "p",
-      bilingual("La muestra retenida recibe ", "Retained sample arrival: ") +
-        capacity.incoming_per_minute.toFixed(1) +
-        bilingual(
-          " eventos/min; revisados en resumen u originales: ",
-          " events/min; covered as summaries or originals: ",
-        ) +
-        capacity.covered_per_minute.toFixed(1) +
-        "/min.",
-    ),
-  );
-  throughput.append(
-    el(
-      "p",
-      bilingual(
-        "No incluye originales ya caducados. Revisado no significa seguro. El contexto se reparte entre fuentes y servicios, dando preferencia a los disparadores. Si no basta, prueba selección por prioridad y contexto en Fuentes, o un modelo más rápido; revisa la vista previa antes de excluir líneas.",
-        "Expired originals are excluded. Reviewed does not mean safe. Context is shared between sources and services, with triggers first. If coverage is insufficient, try priority and context selection in Sources or a faster model; inspect the preview before excluding lines.",
-      ),
-    ),
-  );
-  if (capacity.analysis.calls)
-    throughput.append(
-      el(
-        "p",
-        capacity.analysis.calls +
-          bilingual(
-            " análisis · duración media ",
-            " analyses · average duration ",
-          ) +
-          (capacity.analysis.average_seconds || 0).toFixed(1) +
-          " s",
-      ),
-    );
-  throughput.append(
-    table(
-      [
-        t("Máquina"),
-        t("Servicio"),
-        t("Eventos"),
-        bilingual("Revisados", "Covered"),
-        bilingual("Sin capacidad", "Capacity gap"),
-        bilingual("Por política", "By policy"),
-      ],
-      capacity.services.map((service) => [
-        machineName(service.machine_id),
-        service.service,
-        service.events,
-        service.reviewed,
-        service.capacity,
-        service.policy,
-      ]),
-    ),
-  );
+  const throughput = el("div");
   root.append(throughput);
+  await mountCapacitySummary(throughput, scope);
   const config = panel(
       bilingual("Supervisión automática", "Automatic supervision"),
     ),

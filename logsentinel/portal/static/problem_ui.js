@@ -46,7 +46,7 @@ function problemContextCard(p) {
         [t("Categoría"), p.data.category],
         [t("Primera detección"), stamp(p.first_seen)],
         [t("Última detección"), stamp(p.last_seen)],
-        [t("Apariciones"), p.count],
+        [t("Eventos de evidencia"), p.count],
         [
           t("Fuentes de la evidencia"),
           (p.sources || []).map((s) => s.name).join(", ") || "—",
@@ -165,6 +165,8 @@ async function problemPage(root) {
   const id = detailsProblemId,
     p = await api("/api/problems/" + id);
   root.append(problemContextCard(p));
+  if (p.data.category === "monitor.capacity")
+    root.append(capacityProblemHint(p));
   const controls = panel(t("Investigar este problema")),
     f = el("form", undefined, "toolbar");
   const window = field(

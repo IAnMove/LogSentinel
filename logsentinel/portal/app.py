@@ -388,6 +388,15 @@ def create_app(directory, background=True):
         ):
             raise HTTPException(400, "Manage this source in Metrics or Health")
         scoped(kind, data)
+        if kind == "source" and data["kind"] == "journald" and data["enabled"]:
+            if any(
+                s["kind"] == "journald" and s["enabled"] and s["id"] != id
+                for s in store.objects("source")
+            ):
+                raise HTTPException(
+                    409,
+                    "An enabled source already captures this local journal. Reuse it or disable it before enabling another.",
+                )
         if kind == "source" and old and data["machine_id"] != old["machine_id"]:
             raise HTTPException(
                 400,

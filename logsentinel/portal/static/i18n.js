@@ -1,6 +1,10 @@
 "use strict";
 // Only interface strings go through t(). Log evidence and user content remain verbatim.
 const translations = {
+  "Ya hay una fuente activa capturando este journal local. Reutilízala o desactívala antes de activar otra.":
+    "An enabled source already captures this local journal. Reuse it or disable it before enabling another.",
+  "Cobertura y capacidad": "Coverage and capacity",
+  "Eventos de evidencia": "Evidence events",
   "Salud del observador": "Observer health",
   "Plazo sin señal del emisor remoto (segundos, 0 desactiva)":
     "Remote heartbeat timeout (seconds, 0 disables)",

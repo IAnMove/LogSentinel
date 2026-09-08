@@ -5,6 +5,7 @@ let setupStep = 0,
   helpHistory = [];
 
 function statusLabel(key) {
+  if (key === "MEDIUM") return locale === "es" ? "Media" : "Medium";
   const labels = {
     LOW: "Baja",
     MEDIUM: "Media",
@@ -140,7 +141,10 @@ function drawMonitor(m) {
         m.failed_jobs +
           t(" análisis con errores · ") +
           m.capacity +
-          t(" eventos sin revisar por capacidad"),
+          t(" eventos sin revisar por capacidad") +
+          (locale === "es"
+            ? " (total histórico retenido)"
+            : " (retained historical total)"),
         "monitor-warning",
       ),
     );
@@ -289,7 +293,10 @@ async function setupView(root) {
       button(t("Detectar este equipo"), async () => {
         const d = await api("/api/discovery");
         for (const [key, value] of Object.entries({
-          existing: "",
+          existing:
+            S.machine.find(
+              (m) => m.kind === "local" && m.hostname === d.hostname,
+            )?.id || "",
           name: d.hostname,
           hostname: d.hostname,
           os: d.os,
