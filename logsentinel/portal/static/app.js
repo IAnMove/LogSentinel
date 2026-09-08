@@ -83,8 +83,8 @@ async function api(path, body, method) {
   let data = r.headers.get("content-type")?.includes("json")
     ? await r.json()
     : await r.text();
-  if (!r.ok)
-    throw Error(
+  if (!r.ok) {
+    const error = Error(
       t(
         typeof data === "string"
           ? data
@@ -93,6 +93,9 @@ async function api(path, body, method) {
             : JSON.stringify(data.detail),
       ),
     );
+    error.status = r.status;
+    throw error;
+  }
   return data;
 }
 function button(label, fn, cls = "quiet") {
@@ -1206,115 +1209,6 @@ async function eventsView(root) {
     );
   }
   await load();
-}
-async function chatView(root) {
-  const problemId = chatProblemId;
-  const problem = problemId ? await api("/api/problems/" + problemId) : null;
-  const machineId = problem?.machine_id || scope || S.machine[0]?.id || "";
-  if (problem) {
-    const card = problemContextCard(problem);
-    card.append(
-      button(t("Ver más detalles"), () => openProblemPage(problem.id)),
-    );
-    root.append(card);
-  }
-  const p = panel(
-      t(problem ? "Preguntar sobre este problema" : "Preguntar sobre los logs"),
-    ),
-    f = el("form");
-  const m = field(
-    "machine_id",
-    t("Máquina"),
-    "select",
-    machineId,
-    S.machine.map((x) => [x.id, x.name]),
-  );
-  m.querySelector("select").disabled = !!problem;
-  m.querySelector("select").onchange = () => {
-    scope = m.querySelector("select").value;
-    render();
-  };
-  const q = field(
-    "message",
-    t("Pregunta o petición de filtro"),
-    "textarea",
-    chatDraft,
-  );
-  q.querySelector("textarea").required = true;
-  q.querySelector("textarea").maxLength = 4000;
-  q.querySelector("textarea").oninput = (e) => {
-    chatDraft = e.target.value;
-  };
-  const send = el("button", t("Consultar"));
-  send.type = "submit";
-  const feedback = el("p");
-  feedback.setAttribute("role", "status");
-  const preview = el("div");
-  const request = () => ({
-    ...formData(f),
-    problem_id: problemId,
-    language: locale,
-  });
-  async function previewContext() {
-    try {
-      const context = await api("/api/chat/context", request());
-      if (root.isConnected) preview.replaceChildren(contextDisclosure(context));
-    } catch (error) {
-      feedback.textContent = error.message;
-    }
-  }
-  f.append(
-    m,
-    q,
-    actions(send, button(t("Ver contexto antes de enviar"), previewContext)),
-  );
-  p.append(
-    el(
-      "p",
-      t(
-        problem
-          ? "Esta conversación incluye el hallazgo seleccionado, la máquina y una muestra de sus evidencias. El contexto se ajusta al modelo y los recortes se muestran."
-          : "Consulta una muestra acotada del histórico de la máquina. Las propuestas de filtros se revisan antes de aplicarlas.",
-      ),
-    ),
-    f,
-    feedback,
-    preview,
-  );
-  const conversation = el("div");
-  conversation.setAttribute("role", "log");
-  root.append(p, conversation);
-  const history = await api(
-    "/api/chat/history?machine_id=" +
-      encodeURIComponent(machineId) +
-      "&problem_id=" +
-      encodeURIComponent(problemId),
-  );
-  history.forEach((c) =>
-    conversation.append(
-      el("div", c.question, "message"),
-      chatReply(c.response),
-    ),
-  );
-  if (problem && chatDraft) await previewContext();
-  f.onsubmit = async (e) => {
-    e.preventDefault();
-    send.disabled = true;
-    const data = request();
-    feedback.textContent = t("Consultando el LLM…");
-    try {
-      const r = await api("/api/chat", data);
-      conversation.append(el("div", data.message, "message"), chatReply(r));
-      preview.replaceChildren();
-      feedback.textContent = "";
-      if (chatProblemId === problemId) chatDraft = "";
-      q.querySelector("textarea").value = "";
-    } catch (error) {
-      feedback.textContent = error.message;
-    } finally {
-      send.disabled = false;
-    }
-  };
 }
 function activity(root) {
   root.append(

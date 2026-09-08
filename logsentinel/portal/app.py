@@ -27,6 +27,8 @@ from .problem_context import context_for, chat_system, validate_chat
 from .research import Researcher, InvestigationRequest
 from .telemetry import Telemetry
 from .telemetry_api import register_telemetry
+from .chat_requests import ChatRequests
+from .model_timing import estimate_model_time
 from .notify import Outbox
 from .health import HealthMonitor
 from .widget_api import register_widget
@@ -150,6 +152,8 @@ def create_app(directory, background=True):
         store.recover()
         researcher.recover()
         telemetry.recover()
+        store.set_meta("model_active_call", "")
+        chat_requests.recover()
         tasks = (
             [
                 asyncio.create_task(f())
@@ -161,6 +165,7 @@ def create_app(directory, background=True):
         try:
             yield
         finally:
+            await chat_requests.close()
             for task in tasks:
                 task.cancel()
             await asyncio.gather(*tasks, return_exceptions=True)
@@ -1060,28 +1065,37 @@ def create_app(directory, background=True):
     async def chat(request: Request):
         body = await request.json()
         if analyzer.lock.locked():
-            raise HTTPException(409, "Monitor is analyzing; try chat shortly")
+            raise HTTPException(
+                409,
+                "Question not sent: the model is busy. Use the portal chat queue or retry later.",
+            )
         async with analyzer.lock:
-            payload, coverage, system, machine, source, problem_id = chat_context(body)
-            allowed = {e["id"] for e in payload["events"]}
-            validate = lambda value: validate_chat(value, allowed)
             try:
-                result = validate(
-                    await ReviewClient(store).call(
-                        payload,
-                        kind="chat",
-                        machine=machine,
-                        sources=sorted({e["source_id"] for e in payload["events"]}),
-                        system=system,
-                        validate=validate,
-                    )
-                )
+                return await execute_chat(body)
             except (httpx.HTTPError, ValueError, KeyError, TypeError) as exc:
                 raise HTTPException(
                     502,
                     "Chat request failed: "
                     + safe_error(exc, (store.settings().llm.api_key,)),
                 )
+
+    async def execute_chat(body, request_id=""):
+        cfg = store.settings()
+        payload, coverage, system, machine, source, problem_id = chat_context(body)
+        allowed = {e["id"] for e in payload["events"]}
+        validate = lambda value: validate_chat(value, allowed)
+        result = validate(
+            await ReviewClient(store).call(
+                payload,
+                kind="chat",
+                job=request_id,
+                machine=machine,
+                sources=sorted({e["source_id"] for e in payload["events"]}),
+                system=system,
+                validate=validate,
+                config=cfg,
+            )
+        )
         proposal = result.get("filter")
         if proposal:
             proposal = validate_rule(
@@ -1097,6 +1111,7 @@ def create_app(directory, background=True):
         store.put(
             "chat",
             {
+                "request_id": request_id,
                 "machine_id": machine,
                 "problem_id": problem_id,
                 "question": redact(body["message"], (store.settings().llm.api_key,)),
@@ -1104,6 +1119,47 @@ def create_app(directory, background=True):
             },
         )
         return reply
+
+    chat_requests = ChatRequests(store, analyzer, chat_context, execute_chat)
+    app.state.chat_requests = chat_requests
+
+    @app.post("/api/chat/requests", status_code=202)
+    async def submit_chat_request(request: Request):
+        return chat_requests.submit(await request.json())
+
+    @app.get("/api/chat/model-status")
+    def chat_model_status():
+        return dict(
+            estimate_model_time(store),
+            busy=analyzer.lock.locked(),
+            analysis_running=analyzer.running,
+        )
+
+    @app.get("/api/chat/requests")
+    def list_chat_requests(machine_id: str, problem_id: str = ""):
+        jobs = [
+            j
+            for j in store.objects("chat_request")
+            if j["machine_id"] == machine_id and j["problem_id"] == problem_id
+        ]
+        return [
+            chat_requests.public(j)
+            for j in sorted(jobs, key=lambda j: j["created"])[-20:]
+        ]
+
+    @app.get("/api/chat/requests/{id}")
+    def get_chat_request(id: str):
+        job = store.get("chat_request", id)
+        if not job:
+            raise HTTPException(404, "Unknown chat request")
+        return chat_requests.public(job)
+
+    @app.post("/api/chat/requests/{id}/cancel")
+    async def cancel_chat_request(id: str):
+        try:
+            return chat_requests.cancel(id)
+        except KeyError:
+            raise HTTPException(404, "Unknown chat request")
 
     @app.post("/api/sources/{id}/token")
     def source_token(id: str):
