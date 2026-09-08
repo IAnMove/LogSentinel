@@ -150,6 +150,27 @@ function drawMonitor(m) {
     );
   if (m.worker_error)
     details.append(el("div", m.worker_error, "monitor-warning"));
+  if (m.last_model_error)
+    details.append(
+      el(
+        "div",
+        bilingual(
+          "Último error registrado del modelo: ",
+          "Last recorded model error: ",
+        ) +
+          (m.last_model_error.error.includes("Timeout")
+            ? bilingual(
+                "sin respuesta completa dentro de ",
+                "no complete response within ",
+              ) +
+              m.model_timeout_seconds +
+              " s"
+            : m.last_model_error.error) +
+          " · " +
+          stamp(m.last_model_error.updated),
+        "subtle",
+      ),
+    );
   const toggle = button(
     m.analysis_enabled
       ? t("Pausar análisis")

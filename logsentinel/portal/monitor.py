@@ -72,6 +72,9 @@ class Monitor:
                 "SELECT count(*) FROM jobs WHERE status IN ('failed','retry','partial')"
             ).fetchone()[0]
             last_event = db.execute("SELECT max(received) FROM events").fetchone()[0]
+            last_error = db.execute(
+                "SELECT error,updated FROM jobs WHERE error IS NOT NULL AND status IN ('failed','retry','partial') ORDER BY updated DESC LIMIT 1"
+            ).fetchone()
         retry_after = float(self.store.meta("model_retry_after") or 0)
         due = max(
             self.next_due,
@@ -109,6 +112,8 @@ class Monitor:
             "capacity": counts.get("capacity", 0),
             "error_events": counts.get("error", 0),
             "failed_jobs": failed,
+            "last_model_error": dict(last_error) if last_error else None,
+            "model_timeout_seconds": cfg.llm.timeout_seconds,
             "retry_after": retry_after if retry_after > time.time() else None,
             "consecutive_failed_cycles": int(
                 self.store.meta("model_cycle_failures") or 0
