@@ -139,7 +139,12 @@ class LinuxSampler:
                 fields, fs = left.split(), right.split()
                 mount = re.sub(r"\\([0-7]{3})", lambda m: chr(int(m[1], 8)), fields[4])
                 # Discover local mounted storage, excluding pseudo/network filesystems.
-                if fs[1].startswith("/dev/") or mount == "/":
+                if mount == "/" or (
+                    fs[1].startswith("/dev/")
+                    and not fs[1].startswith("/dev/loop")
+                    and fs[0] not in ("squashfs", "iso9660", "erofs")
+                    and "rw" in fields[5].split(",")
+                ):
                     result.append(DiskInfo(mount=mount, device=fs[1], filesystem=fs[0]))
         except (OSError, ValueError, IndexError):
             pass
