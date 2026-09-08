@@ -21,8 +21,14 @@ with tempfile.TemporaryDirectory(prefix="sentinel-metrics-") as directory:
         values={
             "cpu_pct": 25,
             "ram_pct": 60,
+            "ram_total_bytes": 32 * 1024**3,
+            "ram_available_bytes": 12.8 * 1024**3,
+            "cpu_count": 8,
             "swap_total_bytes": 0,
             "disk_pct:/": 40,
+            "disk_pct:/data": 70,
+            "disk_total_bytes:/data": 100 * 1024**3,
+            "disk_available_bytes:/data": 30 * 1024**3,
             "inode_pct:/": 10,
             "load1": 1,
             "uptime_seconds": 86400,
@@ -61,17 +67,25 @@ with tempfile.TemporaryDirectory(prefix="sentinel-metrics-") as directory:
             page.goto(f"http://127.0.0.1:{port}")
             page.get_by_label("Access key").fill(store.meta("admin_token"))
             page.get_by_role("button", name="Sign in").click()
-            page.get_by_role("button", name="Metrics", exact=True).click()
+            page.get_by_role("heading", name="Machine resources", exact=True).wait_for()
+            page.get_by_text("Measurements disabled", exact=True).wait_for()
+            assert calls == []
             page.get_by_role("button", name="View metrics and configure").click()
-            page.get_by_text("Configure collection and alerts", exact=True).click()
             page.get_by_label("Enable measurements", exact=True).check()
             page.get_by_label("Metrics source", exact=True).select_option("local")
             page.get_by_label("Measurement interval (seconds)").fill("10")
             page.get_by_role("button", name="Save metrics configuration").click()
-            page.get_by_text("Measurements active", exact=True).wait_for(timeout=15000)
-            page.get_by_role(
-                "img", name="CPU · Hourly peaks and averages, last 24 hours"
-            ).wait_for()
+            page.get_by_text("Measurements active", exact=True).wait_for(timeout=25000)
+            page.get_by_text("19.2 GiB / 32.0 GiB", exact=True).wait_for()
+            page.get_by_text("70.0 GiB / 100.0 GiB", exact=True).wait_for()
+            page.get_by_role("img", name="CPU · Recent history").wait_for()
+            page.get_by_label("Recent charts", exact=True).select_option("6")
+            slider = page.get_by_role(
+                "slider", name="CPU · Recent history · Inspect sample", exact=True
+            )
+            slider.focus()
+            slider.press("Home")
+            assert "25.0 %" in slider.get_attribute("aria-valuetext")
             assert calls == []
             page.get_by_role("button", name="Analyze trends", exact=True).click()
             page.get_by_text(

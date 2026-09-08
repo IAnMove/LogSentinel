@@ -25,7 +25,9 @@ Abre `http://127.0.0.1:8765` e introduce la clave que muestra la terminal. Los d
 3. Termina el asistente para activar el análisis automático al intervalo elegido. Las fuentes activas se leen continuamente (sondeos aproximadamente cada 2 segundos más lectura), incluso con el análisis pausado. El estado superior muestra próxima ejecución, última recepción, resultado y cobertura. El navegador puede cerrarse. **Modelo y análisis** ofrece los ajustes avanzados y el idioma de nuevos hallazgos.
 4. Consulta **Problemas**, su evidencia y **Copiar prompt**. **No notificar** mantiene el análisis; una regla de exclusión evita enviar las líneas coincidentes al modelo.
 5. Configura destinos en **Notificaciones**. Guardar no envía mensajes; **Enviar prueba** sí. Revisa los resultados en **Actividad**.
-6. En **Métricas**, abre una máquina y activa las mediciones: CPU, RAM, swap, discos, inodos, carga y tiempo encendido. Hay umbrales, picos, gráficas y mínimos/máximos diarios, además de análisis de tendencias con el LLM. [Configuración, retención y emisores remotos](docs/METRICS.md).
+6. En **Resumen → Recursos de los equipos** encontrarás CPU, RAM y discos con barras y cantidades en GiB. Abre una máquina para activar la captura opcional y ver gráficos de 1/6/24 horas, umbrales y mínimos/máximos diarios. Capturar y alertar no usa tokens; las tendencias con el LLM se activan por separado. [Configuración, retención y emisores remotos](docs/METRICS.md).
+
+**Servidores LLM:** el portal ofrece presets para Ollama, llama.cpp, LM Studio, vLLM, LiteLLM y balanceadores compatibles. Consulta modelos y prueba los ajustes del formulario antes de guardarlos. [Protocolos, límites y manejo de credenciales](docs/LLM_PROVIDERS.md).
 
 Desde un problema, **Preguntar al asistente** muestra el hallazgo y envía su contexto y evidencias; puedes revisar el contenido exacto antes y después de consultar. **Ver más detalles** muestra originales y revisiones. **Buscar más detalles del problema** guarda una investigación ampliada sobre logs relacionados. [Alcance y límites de las investigaciones](docs/PROBLEM_INVESTIGATIONS.md).
 
