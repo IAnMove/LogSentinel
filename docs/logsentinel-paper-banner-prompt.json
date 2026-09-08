@@ -1,0 +1,7 @@
+{
+  "tool": "built-in image_gen.imagegen",
+  "mode": "edit",
+  "reference": "logsentinel/portal/static/tentri-banner-paper-v1.png",
+  "output": "logsentinel/portal/static/logsentinel-banner-paper-v1.png",
+  "prompt": "Use case: text-localization. Edit target: the attached wide paper-style banner, original local file tentri-banner-paper-v1.png. Create a new product banner by changing ONLY the large title on the left from \"TENTRI\" to the exact mixed-case spelling \"LogSentinel\" (capital L, capital S, all other letters lowercase). This is the product name; Tentri remains the mascot. Preserve the original cream paper background, black stipple/halftone hand-drawn retro robot octopus on the right, gold details, floating interchangeable brain cartridge, dotted data trails, original placement and wide 3:1 composition. Keep the same chunky retro pixel-inspired black lettering aesthetic, adapting title font size to fit the longer word in the existing left region with generous margins, one line preferred. Keep the short black-and-gold dotted underline. Do not add slogans, subtitles, new objects, or any other text. Do not replace the robot or recolor it. Deliver a faithful clean edit of the original, not a redesign."
+}

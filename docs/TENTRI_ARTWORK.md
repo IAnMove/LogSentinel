@@ -25,6 +25,7 @@ Files live in `logsentinel/portal/static/`:
 - `tentri-icon-v1.png`: earlier full-color icon on opaque teal; retained in the gallery.
 - `tentri-banner-classic-v1.png`: original cream and teal horizontal illustration.
 - `tentri-banner-paper-v1.png`: paper and ink with halftone shading.
+- `logsentinel-banner-paper-v1.png`: product presentation variant with the exact mixed-case title **LogSentinel**, preserving the Paper mascot composition. Edited with the built-in image generation tool; the original Tentri banner remains unchanged. [Exact edit prompt](logsentinel-paper-banner-prompt.json).
 - `tentri-banner-tokyo-v1.png`: Tokyo Night pixel art.
 - `tentri-banner-gruvbox-v1.png`: charcoal, olive and parchment terminal art.
 - `tentri-banner-rose-v1.png`: Rosé Pine pixel art.
