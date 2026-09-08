@@ -19,3 +19,6 @@ def test_omarchy_plugin_wrapper_refuses_non_omarchy_and_does_not_publish():
     assert "marketplace" in text.lower()
     assert "io.github.ianmove.logsentinel" in text
     assert "plugin add https://" not in text
+    enable_at = text.find("omarchy plugin enable")
+    rescan_at = text.find("rescanPlugins")
+    assert rescan_at != -1 and enable_at != -1 and rescan_at < enable_at

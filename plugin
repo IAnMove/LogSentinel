@@ -33,7 +33,6 @@ echo "This does not upload or list anything on the Omarchy marketplace."
 
 if [[ -d "$dest/.git" ]]; then
   omarchy plugin update "$id"
-  omarchy plugin enable "$id"
 else
   mkdir -p "$dest/integrations/omarchy"
   # Copy only widget files. A full checkout contains a venv with symlinks,
@@ -46,12 +45,14 @@ else
     install -m 644 "$root/integrations/omarchy/$file" "$dest/integrations/omarchy/$file"
   done
   omarchy plugin validate "$dest"
-  omarchy plugin enable "$id"
 fi
 
+# Discovery happens after the files are on disk. Enable fails with "unknown"
+# if the shell has not rescanned yet.
 if command -v omarchy-shell >/dev/null 2>&1; then
-  omarchy-shell shell rescanPlugins >/dev/null 2>&1 || true
+  omarchy-shell shell rescanPlugins
 fi
+omarchy plugin enable "$id"
 
 echo "Widget id: $id"
 echo "Keep the portal running (./portal), then pair it in the UI: Desktop → Create widget key."
