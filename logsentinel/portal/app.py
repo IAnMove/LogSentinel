@@ -464,7 +464,7 @@ def create_app(directory, background=True):
         return discovery()
 
     @app.post("/api/model/info")
-    async def model_info(request: Request):
+    async def model_info(request: Request, models_only: bool = False):
         cfg = await requested_settings(request)
         llm = cfg.llm
         if (
@@ -493,6 +493,14 @@ def create_app(directory, background=True):
                         for m in response.json().get("models", [])
                         if isinstance(m, dict)
                     ]
+                    if models_only:
+                        return {
+                            "models": sorted(
+                                {m for m in models if isinstance(m, str) and m.strip()}
+                            ),
+                            "provider": llm.provider,
+                            "base_url": llm.base_url,
+                        }
                     response = await client.post(
                         base + "/api/show", headers=headers, json={"model": llm.model}
                     )
@@ -532,7 +540,7 @@ def create_app(directory, background=True):
             + [n for n in (maximum, running) if type(n) is int and n > 0]
         )
         return {
-            "models": models,
+            "models": sorted({m for m in models if isinstance(m, str) and m.strip()}),
             "model": llm.model,
             "provider": llm.provider,
             "base_url": llm.base_url,

@@ -62,6 +62,162 @@ function llmFormSettings(form, cfg) {
   };
 }
 
+function llmModelPicker(form, cfg) {
+  const group = el("div", undefined, "model-picker"),
+    choiceField = field("", t("Modelo"), "select", "manual"),
+    choice = choiceField.querySelector("select"),
+    manualField = field(
+      "model",
+      bilingual("ID de modelo (manual)", "Model ID (manual)"),
+      "text",
+      cfg.llm.model,
+    ),
+    input = manualField.querySelector("input"),
+    status = el("p", "", "subtle");
+  status.setAttribute("role", "status");
+  let models = [],
+    revision = 0,
+    timer;
+  const manualLabel = () =>
+    bilingual("Escribir ID de modelo manualmente…", "Enter model ID manually…");
+  function populate() {
+    choice.replaceChildren();
+    const manual = el("option", manualLabel());
+    manual.value = "manual";
+    choice.append(manual);
+    models.forEach((id, index) => {
+      const option = el("option", id);
+      option.value = "model:" + index;
+      choice.append(option);
+    });
+    const selected = models.indexOf(input.value);
+    choice.value = selected >= 0 ? "model:" + selected : "manual";
+    manualField.hidden = selected >= 0;
+  }
+  choice.onchange = () => {
+    const manual = choice.value === "manual";
+    manualField.hidden = !manual;
+    if (manual) input.focus();
+    else {
+      input.value = models[Number(choice.value.slice(6))];
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+  };
+  const connection = () => {
+    const value = (name) => form.elements.namedItem(name);
+    return {
+      llm: {
+        provider: value("provider").value,
+        base_url: value("base_url").value.trim(),
+        api_key: value("api_key").value,
+      },
+      clear_api_key: value("clear_api_key").checked,
+      remote_allowed: value("remote_allowed")?.checked ?? cfg.remote_allowed,
+    };
+  };
+  async function refreshModels() {
+    clearTimeout(timer);
+    const requestId = ++revision;
+    if (!form.isConnected) return;
+    const request = connection();
+    let url;
+    try {
+      url = new URL(request.llm.base_url);
+      if (!["http:", "https:"].includes(url.protocol)) throw Error();
+    } catch {
+      status.textContent = bilingual(
+        "Introduce una URL de servidor válida para consultar sus modelos.",
+        "Enter a valid server URL to list its models.",
+      );
+      return;
+    }
+    if (
+      !["localhost", "127.0.0.1", "[::1]"].includes(url.hostname) &&
+      !request.remote_allowed
+    ) {
+      status.textContent = bilingual(
+        "Activa la autorización de servidor remoto para consultar sus modelos.",
+        "Allow access to the configured remote server to list its models.",
+      );
+      return;
+    }
+    status.textContent = bilingual("Consultando modelos…", "Loading models…");
+    try {
+      const info = await api("/api/model/info?models_only=true", request);
+      if (requestId !== revision || !form.isConnected) return;
+      models = [
+        ...new Set(
+          info.models.filter((m) => typeof m === "string" && m.trim()),
+        ),
+      ];
+      populate();
+      status.textContent = models.length
+        ? models.length +
+          bilingual(
+            " modelos disponibles. Seleccionar no guarda ni carga el modelo.",
+            " models available. Selecting does not save or load the model.",
+          )
+        : bilingual(
+            "El servidor no publica modelos. Puedes introducir el ID manualmente.",
+            "The server publishes no models. You can enter the ID manually.",
+          );
+      if (models.length && choice.value === "manual" && input.value)
+        status.textContent +=
+          " " +
+          bilingual(
+            "El ID actual no aparece en esta lista.",
+            "The current ID is not in this list.",
+          );
+    } catch (error) {
+      if (requestId !== revision || !form.isConnected) return;
+      models = [];
+      populate();
+      status.textContent =
+        bilingual(
+          "No se pudo cargar la lista. Puedes usar un ID manual o volver a intentarlo. ",
+          "Could not load the list. You can enter an ID manually or retry. ",
+        ) + error.message;
+    }
+  }
+  function changed(load = true) {
+    clearTimeout(timer);
+    revision++;
+    models = [];
+    populate();
+    status.textContent = bilingual(
+      "Actualiza la lista para este servidor.",
+      "Refresh the list for this server.",
+    );
+    if (load) timer = setTimeout(refreshModels, 500);
+  }
+  form.addEventListener("input", (event) => {
+    if (["base_url", "api_key"].includes(event.target.name))
+      changed(event.target.name === "base_url");
+  });
+  form.addEventListener("change", (event) => {
+    if (
+      [
+        "server_type",
+        "provider",
+        "base_url",
+        "api_key",
+        "clear_api_key",
+        "remote_allowed",
+      ].includes(event.target.name)
+    )
+      changed();
+  });
+  populate();
+  group.append(
+    choiceField,
+    manualField,
+    button(bilingual("Actualizar modelos", "Refresh models"), refreshModels),
+    status,
+  );
+  timer = setTimeout(refreshModels, 500);
+  return group;
+}
+
 function llmServerFields(form, cfg) {
   const currentType =
     cfg.llm.provider === "ollama" ? "ollama" : cfg.llm.server_type || "custom";
@@ -92,7 +248,7 @@ function llmServerFields(form, cfg) {
       ],
     ),
     field("base_url", t("URL del servidor"), "url", cfg.llm.base_url),
-    field("model", t("Modelo"), "text", cfg.llm.model),
+    llmModelPicker(form, cfg),
     field("api_key", t("Clave API (vacío conserva)"), "password", ""),
     field(
       "clear_api_key",
@@ -142,54 +298,29 @@ function llmServerFields(form, cfg) {
     tools = actions(
       button(
         bilingual(
-          "Buscar modelos en este servidor",
-          "Find models on this server",
-        ),
-        async () => {
-          const info = await api("/api/model/info", llmFormSettings(form, cfg));
-          const box = el("div");
-          box.append(
-            el("p", info.base_url),
-            el(
-              "p",
-              bilingual(
-                "Selecciona un modelo para el formulario. Después prueba la conexión y guarda para activarlo.",
-                "Select a model for this form. Then test the connection and save to activate it.",
-              ),
-            ),
-          );
-          for (const id of info.models)
-            box.append(
-              button(id, () => {
-                form.elements.namedItem("model").value = id;
-                $("#modal").close();
-              }),
-            );
-          if (!info.models.length)
-            box.append(
-              el(
-                "p",
-                bilingual(
-                  "El servidor no publica modelos. Introduce su identificador o alias manualmente.",
-                  "The server publishes no models. Enter its model identifier or alias manually.",
-                ),
-              ),
-            );
-          modal(t("Modelos disponibles: "), box);
-        },
-      ),
-      button(
-        bilingual(
           "Probar estos ajustes sin guardar",
           "Test these settings without saving",
         ),
         async () => {
           result.replaceChildren(el("p", t("Comprobando modelo…")));
           try {
-            const data = await api(
-              "/api/model/test",
-              llmFormSettings(form, cfg),
-            );
+            const tested = llmFormSettings(form, cfg);
+            const data = await api("/api/model/test", tested);
+            if (
+              JSON.stringify(tested) !==
+              JSON.stringify(llmFormSettings(form, cfg))
+            ) {
+              result.replaceChildren(
+                el(
+                  "p",
+                  bilingual(
+                    "Los ajustes cambiaron durante la prueba. Vuelve a probar la configuración actual.",
+                    "Settings changed during the test. Test the current configuration again.",
+                  ),
+                ),
+              );
+              return;
+            }
             result.replaceChildren(
               el(
                 "strong",
@@ -241,4 +372,6 @@ function llmServerFields(form, cfg) {
     );
   tools.classList.add("provider-tools");
   form.append(tools, result);
+  form.addEventListener("input", () => result.replaceChildren());
+  form.addEventListener("change", () => result.replaceChildren());
 }

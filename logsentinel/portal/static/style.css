@@ -699,3 +699,17 @@ details > div {
 .provider-result:empty {
   display: none;
 }
+.model-picker {
+  min-width: 0;
+}
+.model-picker label {
+  margin-bottom: 8px;
+}
+.model-picker select {
+  width: 100%;
+  min-width: 0;
+}
+.model-picker p {
+  font-size: 0.85rem;
+  margin: 6px 0;
+}
