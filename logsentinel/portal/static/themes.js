@@ -24,13 +24,33 @@ const portalThemes = [
     };
   }),
 ];
-let portalTheme = "classic";
-try {
-  portalTheme = localStorage.getItem("logsentinel-theme") || "classic";
-} catch {
-  /* Session-only preference. */
+function applyHostPalette(host) {
+  if (!host?.colors) return;
+  const root = document.documentElement;
+  for (const [key, value] of Object.entries(host.colors)) {
+    if (typeof value === "string" && /^#[0-9a-f]{6}$/i.test(value))
+      root.style.setProperty("--omarchy-" + key.replaceAll("_", "-"), value);
+  }
+  if (host.name) root.dataset.omarchyTheme = String(host.name).slice(0, 120);
 }
-portalTheme = THEME_ALIASES[portalTheme] || portalTheme;
+function initialPortalTheme() {
+  let stored = null;
+  try {
+    stored = localStorage.getItem("logsentinel-theme");
+  } catch {
+    stored = null;
+  }
+  if (stored != null) return THEME_ALIASES[stored] || stored;
+  const host = window.LOGSENTINEL_OMARCHY;
+  if (host?.present && host.id && portalThemes.some((theme) => theme.id === host.id))
+    return host.id;
+  if (host?.present && host.colors?.background && host.colors?.accent) {
+    applyHostPalette(host);
+    return "omarchy";
+  }
+  return "classic";
+}
+let portalTheme = initialPortalTheme();
 if (
   portalTheme !== "omarchy" &&
   !portalThemes.some((theme) => theme.id === portalTheme)
@@ -106,20 +126,24 @@ function updatePortalThemeControls(scope = document) {
     follow.setAttribute("aria-pressed", String(portalTheme === "omarchy"));
   const status = scope.querySelector("#omarchy-theme-status");
   if (status) {
+    const host = window.LOGSENTINEL_OMARCHY;
     status.textContent = omarchyPalette
       ? (portalTheme === "omarchy"
           ? themeText("Siguiendo el escritorio: ", "Following desktop: ")
           : themeText("Tema disponible: ", "Desktop theme available: ")) +
         omarchyPalette.name
-      : portalTheme === "omarchy"
-        ? themeText(
-            "Esperando una paleta válida de Omarchy Theme Sync. Se muestra Classic mientras tanto.",
-            "Waiting for a valid palette from Omarchy Theme Sync. Showing Classic in the meantime.",
-          )
-        : themeText(
-            "No se ha recibido un tema de Omarchy en este navegador.",
-            "No Omarchy theme has been received in this browser.",
-          );
+      : host?.present && host.id
+        ? themeText("Tema de este Omarchy: ", "Theme on this Omarchy: ") +
+          host.id.replaceAll("-", " ")
+        : portalTheme === "omarchy"
+          ? themeText(
+              "Esperando una paleta válida de Omarchy. Se muestra Classic mientras tanto.",
+              "Waiting for a valid Omarchy palette. Showing Classic in the meantime.",
+            )
+          : themeText(
+              "No se ha detectado un tema de Omarchy en este equipo.",
+              "No Omarchy theme was detected on this machine.",
+            );
   }
 }
 document.addEventListener("omarchythemechange", refreshPortalTheme);
@@ -160,8 +184,8 @@ function omarchyAppearance() {
     el(
       "p",
       bilingual(
-        "Instala Omarchy Theme Sync en el equipo Omarchy donde abres Chromium y reinicia completamente el navegador. Esta opción sigue los cambios del escritorio sin recargar el portal, también al entrar por un túnel SSH.",
-        "Install Omarchy Theme Sync on the Omarchy desktop where you run Chromium, then fully restart the browser. This option follows desktop changes without reloading the portal, including over an SSH tunnel.",
+        "Si arrancas el portal en Omarchy, se aplica solo el tema del escritorio cuando encaja con una paleta conocida y no has elegido otra. Recarga la página después de cambiar el tema del sistema. La extensión Omarchy Theme Sync sigue los cambios en vivo, también por un túnel SSH.",
+        "If you start the portal on Omarchy, the desktop theme is applied when it matches a known palette and you have not chosen another. Reload after changing the system theme. The Omarchy Theme Sync extension follows live changes, including over an SSH tunnel.",
       ),
     ),
   );

@@ -37,6 +37,7 @@ from .health import HealthMonitor
 from .widget_api import register_widget
 from .capacity import capacity_report
 from .rules import validate_rule, matches, excluded, redact, sanitize
+from .omarchy_detect import host_javascript
 
 STATIC = Path(__file__).parent / "static"
 MODELS = {
@@ -278,6 +279,10 @@ def create_app(directory, background=True):
     @app.get("/")
     def index():
         return FileResponse(STATIC / "index.html")
+
+    @app.get("/omarchy-host.js")
+    def omarchy_host_js():
+        return PlainTextResponse(host_javascript(), media_type="text/javascript")
 
     app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
