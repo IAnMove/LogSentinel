@@ -6,7 +6,7 @@
 
 [Configurar notificaciones: Telegram, Slack, Discord, Hermes, n8n y destinos locales](docs/NOTIFICATIONS.md)
 
-La integración de Omarchy está preparada para validación en escritorio antes de publicarla. El portal funciona de forma independiente en Linux.
+La integración de Omarchy Quattro está disponible como prueba: instala el widget con `omarchy plugin add https://github.com/IAnMove/LogSentinel.git --enable` y vincúlalo desde **Escritorio** en el portal. Falta completar la validación en un escritorio Omarchy real; todavía no está en el marketplace. El widget necesita un portal en ejecución y no instala un LLM ni empieza a enviar logs por sí solo. [Pasos de la primera prueba](docs/OMARCHY.md#first-test-on-your-omarchy-desktop).
 
 Portal local para revisar logs de Linux con un LLM, detectar problemas de funcionamiento y seguridad y conservar la evidencia. Cada fuente pertenece a una máquina. El modelo propone hallazgos y filtros; no ejecuta comandos ni cambia reglas por su cuenta.
 
@@ -95,4 +95,4 @@ La CLI anterior se conserva como compatibilidad. Sus instrucciones están en [Le
 
 ## About us
 
-[@THEINAOG on X / Twitter](https://x.com/THEINAOG)
+[@THEINAOG · x.com](https://x.com/THEINAOG) · [ianmove/LogSentinel · GitHub](https://github.com/IAnMove/LogSentinel)

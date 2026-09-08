@@ -38,7 +38,7 @@ with tarfile.open(fileobj=buffer, mode="w") as archive:
         if name == "docs/QUICKSTART.en.md":
             data = data.replace(
                 b"](REVIEW_2026-09-07.md)",
-                b"](https://github.com/IAnMove/security-agent/blob/main/docs/REVIEW_2026-09-07.md)",
+                b"](https://github.com/IAnMove/LogSentinel/blob/main/docs/REVIEW_2026-09-07.md)",
             )
         info = tarfile.TarInfo(prefix + "/" + name)
         info.mode, info.mtime, info.size = 0o644, 0, len(data)

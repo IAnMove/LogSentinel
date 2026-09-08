@@ -14,11 +14,40 @@ plugin. Install/run the LogSentinel portal and an LLM separately; see
 [the quick start](QUICKSTART.en.md). The portal can run on another Linux machine
 accessed through a local SSH tunnel.
 
+If you install the portal on the desktop too, use a separate checkout outside
+`~/.config/omarchy/plugins/`. Python virtual environments contain symlinks, which
+Omarchy rejects inside a plugin directory, including when validating updates.
+
 This implementation follows the [development guide](https://plugins.omarchy.org/develop.html)
 and [official shell contract](https://github.com/omacom/omarchy/blob/quattro/shell/README.md)
-reviewed on 7 September 2026. It is prepared for testing/publication. The development
+reviewed again on 8 September 2026. This is a preview for installation testing. The development
 host is Ubuntu without an Omarchy desktop; real bar placement and shell lifecycle
 validation must be completed on Omarchy before calling it a supported release.
+
+The plugin author is **ianmove**. [@THEINAOG · x.com](https://x.com/THEINAOG) ·
+[ianmove/LogSentinel · GitHub](https://github.com/IAnMove/LogSentinel).
+
+## First test on your Omarchy desktop
+
+1. Run `omarchy plugin list`. If your installation has no `plugin` command, it
+   does not provide the Quattro plugin interface needed by this widget. The web
+   portal can still be used through your browser; this plugin does not upgrade
+   or replace the desktop.
+2. Install the widget with the command below. You can use your existing portal
+   on another machine, so there is no need to install a second LLM or portal just
+   to try the widget.
+3. Open a loopback SSH tunnel to that portal, then open its local URL in the
+   browser. Use **Desktop → Create widget key** and save its JSON on the Omarchy
+   desktop as described below. Do not use the administrator login key.
+4. Click `LS` in the bar and check **Open portal**, **Refresh**, Escape and reopening.
+   `LS ?` before pairing is expected. Refresh retries reading the configuration;
+   creating the file after installation does not require restarting the shell.
+
+The widget displays machines known to the connected portal. Installing it does
+not automatically register the Omarchy computer or send its logs. To monitor
+that computer too, configure a machine and remote sender in the portal; see
+[remote log forwarding](https://github.com/IAnMove/LogSentinel#enviar-desde-otro-equipo) and
+[resource collection](METRICS.md).
 
 ## Install from a published repository
 
@@ -52,6 +81,9 @@ replacing that directory; Git installations use `omarchy plugin update`.
    the displayed JSON as `widget.json`, mode 0600. Set `url` to the portal's actual
    loopback address/port, such as `http://127.0.0.1:8765` (or `8766` if configured).
    The file is on the **desktop**, which may differ from the portal server.
+   Create the directory with `install -d -m 700 ~/.config/logsentinel`, paste the
+   JSON into `~/.config/logsentinel/widget.json` using your editor, and run
+   `chmod 600 ~/.config/logsentinel/widget.json`.
 3. The widget watches the file. Click `LS` to inspect the panel, or use the shell
    command below. For another file location set `configPath` to its absolute path
    in the widget's settings. Never store the token in the shared shell settings.
@@ -90,7 +122,7 @@ model, ingest data or create a login session. Revoke it in **Desktop**. The plug
 runs with ordinary user permissions, like other Omarchy plugins; the credential
 limits portal access, not the plugin process's OS permissions.
 
-## Validate before publication
+## Validate the desktop preview
 
 ```sh
 PLUGIN_DIR=~/.config/omarchy/plugins/io.github.ianmove.logsentinel
@@ -106,9 +138,26 @@ portal, token rotation and removal. Automated tests cover the API permission
 boundary, parsing, portal pairing flow and manifest bundle. On the Ubuntu development
 host QML can be syntax checked; installed-shell import/lifecycle checks need Omarchy.
 
+The release preparation checks the clean source tree and the standalone bundle
+with Omarchy's official manifest validator. The parser/credential checks and
+portal permission tests also run locally. These checks do not substitute for
+`qmllint` against the installed Quattro imports or the desktop interactions above.
+
+If the widget does not appear, inspect the shell log on the desktop:
+
+```sh
+qs log -p "$OMARCHY_PATH/shell" --tail 100
+```
+
+For a test report, include the Omarchy version, validator output and relevant QML
+errors. Do not include `widget.json`, access keys or actual log evidence.
+
 The [publishing guide](https://plugins.omarchy.org/publish.html) describes the public
 GitHub repository and marketplace submission. Nothing is published or submitted by
-the packaging script. Keep the permanent plugin ID when releasing updates.
+the packaging script. Installing directly from GitHub does not require a
+marketplace listing. After successful desktop testing, a marketplace listing
+requires submitting the repository and waiting for the maintainers' review.
+Keep the permanent plugin ID when releasing updates.
 
 ## Remove
 
