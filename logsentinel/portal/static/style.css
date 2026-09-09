@@ -930,3 +930,172 @@ details > div {
 .resource-chart .metric-average {
   stroke-width: 2.5;
 }
+
+/* --- Depth, motion and interaction ------------------------------------- */
+/* Shadows and easing come from theme tokens, so every palette and the Omarchy
+   skins keep their own character. Skins that define their own panel shadow
+   (paper's hard offset) outrank these by specificity and are left alone.
+   All motion here is switched off by the prefers-reduced-motion block. */
+
+.card,
+.panel {
+  box-shadow: var(--shadow);
+  transition:
+    box-shadow 0.18s ease,
+    transform 0.18s ease,
+    border-color 0.18s ease;
+}
+.cards .card:hover,
+.table-wrap:hover {
+  box-shadow: var(--shadow-lift);
+}
+.cards .card:hover {
+  transform: translateY(-2px);
+  border-color: var(--soft-border);
+}
+.table-wrap {
+  box-shadow: var(--shadow);
+  transition: box-shadow 0.18s ease;
+}
+
+/* A number is the point of these cards; give it the weight and let the label
+   recede. Tabular figures stop the value jittering as it refreshes. */
+.cards .card .metric,
+.metric-value {
+  font-variant-numeric: tabular-nums;
+}
+.cards .card {
+  position: relative;
+  overflow: hidden;
+}
+.cards .card::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
+  background: var(--accent);
+  opacity: 0;
+  transition: opacity 0.18s ease;
+}
+.cards .card:hover::before {
+  opacity: 0.55;
+}
+
+tbody tr {
+  transition: background 0.12s ease;
+}
+tbody tr:hover {
+  background: var(--surface-alt);
+}
+
+button {
+  transition:
+    filter 0.15s ease,
+    transform 0.08s ease,
+    box-shadow 0.15s ease;
+}
+button:active:not(:disabled) {
+  transform: translateY(1px);
+}
+.quiet:hover:not(:disabled) {
+  filter: none;
+  background: var(--soft);
+  border-color: var(--soft-border);
+}
+/* Rail buttons are quiet too, but they sit on the dark rail: the light hover
+   above would paint rail-coloured text onto a light surface. The id selector
+   outranks it in both directions. */
+#nav button:hover:not(:disabled),
+#nav button.active:hover {
+  background: var(--rail-active);
+  color: var(--rail-ink);
+  border-color: transparent;
+}
+nav button {
+  transition:
+    background 0.15s ease,
+    color 0.15s ease,
+    padding-left 0.15s ease;
+}
+nav button.active {
+  padding-left: 12px;
+}
+
+/* Critical has to out-rank high at a glance; sharing one colour made them
+   read as the same thing. */
+.badge.CRITICAL {
+  background: var(--error-ink);
+  color: var(--surface);
+  letter-spacing: 0.4px;
+}
+
+/* Views replace each other in place, so a short rise tells you the content
+   changed rather than the page having always looked like this. */
+@keyframes view-enter {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+main > * {
+  animation: view-enter 0.22s ease-out both;
+}
+
+/* --- Charts ------------------------------------------------------------- */
+/* The series keep their theme colours; what changes is that a line now reads
+   as a shape with a body, and the sample dots stop competing with it. */
+.metric-chart polyline {
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+.metric-area {
+  fill: var(--chart-avg);
+  fill-opacity: 0.12;
+  stroke: none;
+}
+.metric-chart circle {
+  opacity: 0.45;
+  transition:
+    r 0.12s ease,
+    opacity 0.12s ease;
+}
+.metric-chart circle:hover {
+  opacity: 1;
+  r: 4;
+}
+.resource-gridline {
+  stroke-dasharray: 2 4;
+}
+/* Drawing the line in on arrival makes the direction of time obvious. */
+@keyframes chart-draw {
+  from {
+    stroke-dashoffset: 1;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+@keyframes chart-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.metric-chart polyline {
+  stroke-dasharray: 1;
+  animation: chart-draw 0.9s ease-out both;
+}
+.metric-area {
+  animation: chart-fade 0.6s ease-out 0.3s both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .metric-chart polyline {
+    stroke-dasharray: none;
+  }
+}

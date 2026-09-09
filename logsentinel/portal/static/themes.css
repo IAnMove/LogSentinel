@@ -18,6 +18,11 @@
   --warn-ink: #8c6815;
   --chart-max: #b86e19;
   --chart-avg: #217ba9;
+  /* Depth is a token like any other colour: light surfaces need a soft grey
+     shadow, dark ones need a deeper black to read at all. */
+  --shadow: 0 1px 2px #0f172a0f, 0 2px 6px #0f172a0a;
+  --shadow-lift: 0 2px 4px #0f172a14, 0 10px 26px #0f172a17;
+  --ring: #0f172a12;
   --ui-font:
     ui-monospace, "Cascadia Code", "SFMono-Regular", Consolas,
     "Liberation Mono", monospace;
@@ -60,6 +65,16 @@
   --rail-border: #59574f;
   --chart-max: #9b5900;
   --chart-avg: #3f5f7d;
+}
+:root[data-theme="tokyo"],
+[data-palette="tokyo"],
+:root[data-theme="gruvbox"],
+[data-palette="gruvbox"],
+:root[data-theme="rose"],
+[data-palette="rose"] {
+  --shadow: 0 1px 2px #00000059, 0 2px 8px #00000038;
+  --shadow-lift: 0 2px 6px #00000066, 0 12px 30px #00000047;
+  --ring: #ffffff14;
 }
 :root[data-theme="tokyo"],
 [data-palette="tokyo"] {
