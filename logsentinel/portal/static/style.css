@@ -1029,8 +1029,9 @@ nav button.active {
   letter-spacing: 0.4px;
 }
 
-/* Views replace each other in place, so a short rise tells you the content
-   changed rather than the page having always looked like this. */
+/* A short rise on navigation says the content changed. It is applied by
+   render() only when the reader asked for a different view — never on the
+   background refresh, which rebuilds the same view and must stay invisible. */
 @keyframes view-enter {
   from {
     opacity: 0;
@@ -1041,7 +1042,7 @@ nav button.active {
     transform: none;
   }
 }
-main > * {
+.view-enter {
   animation: view-enter 0.22s ease-out both;
 }
 

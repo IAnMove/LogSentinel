@@ -7,6 +7,7 @@ const $ = (s) => document.querySelector(s),
     return n;
   };
 let S = {},
+  entering = true,
   view = "summary",
   scope = "",
   edit = null,
@@ -237,6 +238,9 @@ async function refresh() {
   await render();
 }
 function navigate(v) {
+  // Only a navigation animates the content in. A background refresh rebuilds
+  // the same view and must not flash.
+  entering = true;
   if (v === "chat") {
     chatProblemId = "";
     chatDraft = "";
@@ -304,6 +308,8 @@ $("#login-form").onsubmit = async (e) => {
 };
 async function render() {
   const root = el("div");
+  if (entering) root.className = "view-enter";
+  entering = false;
   $("#content").replaceChildren(root);
   $("#monitor-status").hidden = view === "about";
   $(".scope").hidden = view === "about";
@@ -1362,6 +1368,19 @@ setInterval(async () => {
   }
 }, 5000);
 setInterval(() => {
-  if (!$("#shell").hidden && view === "summary" && !$("#modal").open)
-    refresh().catch((e) => notice(e.message, true));
+  if ($("#shell").hidden || view !== "summary" || $("#modal").open) return;
+  // This rebuilds the whole content section every 15 seconds. Keeping the data
+  // live is worth it; losing the reader's place is not. Stay out of the way
+  // while something inside is focused or text is selected, and put the page
+  // back where it was afterwards.
+  const active = document.activeElement;
+  if (active && active !== document.body && $("#content").contains(active)) return;
+  const selection = document.getSelection();
+  if (selection && !selection.isCollapsed) return;
+  const top = window.scrollY;
+  refresh()
+    .then(() => {
+      if (window.scrollY !== top) window.scrollTo(0, top);
+    })
+    .catch((e) => notice(e.message, true));
 }, 15000);
