@@ -10,6 +10,18 @@ from logsentinel.core.engine import SentinelEngine
 from logsentinel.core.models import LLMVerdict, LogEntry
 
 
+def test_portal_never_prints_bootstrap_credential_to_service_logs(tmp_path, monkeypatch):
+    import uvicorn
+    from logsentinel.portal.store import Store
+    monkeypatch.setattr(uvicorn, "run", lambda *a, **kw: None)
+    result = CliRunner().invoke(cli.app, ["portal", "--data-dir", str(tmp_path)])
+    assert result.exit_code == 0, result.exception
+    key = Store(tmp_path).meta("admin_token")
+    assert key not in result.output
+    assert (tmp_path / "access-key.txt").read_text().strip() == key
+    assert (tmp_path / "access-key.txt").stat().st_mode & 0o777 == 0o600
+
+
 @pytest.fixture
 def isolated_cli(tmp_path, monkeypatch):
     cfg = Config()
@@ -120,3 +132,42 @@ def test_diagnostics_fail_exit_status_for_failed_component(isolated_cli, monkeyp
     monkeypatch.setattr(cli, "SentinelEngine", lambda *_: engine)
     result = CliRunner().invoke(cli.app, ["test"])
     assert result.exit_code == 1, result.output
+
+
+def test_system_service_never_defaults_to_root(tmp_path, monkeypatch):
+    import getpass
+    monkeypatch.setattr(getpass, "getuser", lambda: "root")
+    monkeypatch.setattr(cli, "SYSTEM_UNIT_DIR", tmp_path / "units")
+    result = CliRunner().invoke(cli.app, ["service", "install", "--system"])
+    assert result.exit_code == 1
+    assert not (tmp_path / "units").exists()
+    assert "--run-as" in result.output
+
+
+def test_installed_unit_names_an_account_and_drops_privileges(tmp_path, monkeypatch):
+    import getpass
+    monkeypatch.setattr(getpass, "getuser", lambda: "root")
+    monkeypatch.setattr(cli, "get_default_data_dir", lambda: tmp_path / "data")
+    monkeypatch.setattr(cli, "SYSTEM_UNIT_DIR", tmp_path / "units")
+    result = CliRunner().invoke(
+        cli.app, ["service", "install", "--system", "--run-as", "logsentinel-agent"]
+    )
+    assert result.exit_code == 0, result.exception
+    unit = (tmp_path / "units" / "logsentinel.service").read_text()
+    assert "User=logsentinel-agent" in unit and "Group=logsentinel-agent" in unit
+    for directive in ["NoNewPrivileges=yes", "CapabilityBoundingSet=", "ProtectSystem=strict"]:
+        assert directive in unit
+    # The account is not ours, so the unit must not guess a writable path for it.
+    assert "ReadWritePaths=" not in unit
+
+
+def test_user_unit_keeps_write_access_to_its_own_data_directory(tmp_path, monkeypatch):
+    monkeypatch.setattr(cli, "get_default_data_dir", lambda: tmp_path / "data")
+    monkeypatch.setattr(cli.Path, "home", classmethod(lambda cls: tmp_path))
+    result = CliRunner().invoke(cli.app, ["service", "install"])
+    assert result.exit_code == 0, result.exception
+    unit = (tmp_path / ".config" / "systemd" / "user" / "logsentinel.service").read_text()
+    assert f"ReadWritePaths={tmp_path / 'data'}" in unit
+    assert "NoNewPrivileges=yes" in unit
+    # User= is rejected by systemd in user units.
+    assert "User=" not in unit

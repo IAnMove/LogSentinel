@@ -14,7 +14,7 @@ from rich.text import Text
 import typer
 import yaml
 from logsentinel import __version__
-from logsentinel.config import Config, get_default_config_dir
+from logsentinel.config import Config, get_default_config_dir, get_default_data_dir
 from logsentinel.core.engine import SentinelEngine
 from logsentinel.core.models import (
     Alert,
@@ -523,27 +523,79 @@ def config_init(
 
 # --- Service Subcommands ---
 
+SYSTEM_UNIT_DIR = Path("/etc/systemd/system")
+
+# Applied to every generated unit. A log reader needs no privilege beyond reading
+# the files it was granted, so the unit drops capabilities and write access up front
+# instead of relying on the operator to remember.
+SERVICE_HARDENING = """NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+UMask=0077"""
+
+
 @service_app.command(name="install")
 def service_install(
     system: bool = typer.Option(False, "--system", help="Install system-wide service (/etc/systemd/system)"),
+    run_as: Optional[str] = typer.Option(None, "--run-as", help="Account for a system service (default: current user)"),
+    allow_root: bool = typer.Option(False, "--allow-root", help="Permit a system service running as root"),
 ) -> None:
     """Generate and install systemd service unit."""
+    import getpass
+
+    account = ""
+    if system:
+        # A system unit without User= runs as root. Reading logs never requires that,
+        # so name the account explicitly and refuse root unless it is asked for.
+        account = run_as or getpass.getuser()
+        if account == "root" and not allow_root:
+            console.print(
+                "[red]A system service would run as root.[/red] Pass --run-as with a "
+                "dedicated account that can read the logs, or --allow-root to accept it."
+            )
+            raise typer.Exit(1)
+    elif run_as:
+        raise typer.BadParameter("--run-as applies to --system units; a user unit runs as you")
+
+    identity = "" if not account or account == "root" else f"User={account}\nGroup={account}\n"
+    # The daemon resolves its data directory from the running account's home, so only
+    # grant write access when this install knows that path: the account is ours.
+    own_account = not account or account == getpass.getuser()
+    writable = f"ReadWritePaths={get_default_data_dir()}\n" if own_account else ""
     unit_content = f"""[Unit]
 Description=LogSentinel AI Log Monitoring Daemon
 After=network.target
 
 [Service]
 Type=simple
-ExecStart={sys.executable} -m logsentinel.cli run
+{identity}ExecStart={sys.executable} -m logsentinel.cli run
 Restart=always
 RestartSec=5s
 Environment=PYTHONUNBUFFERED=1
+{writable}{SERVICE_HARDENING}
 
 [Install]
 WantedBy=default.target
 """
     if system:
-        unit_dir = Path("/etc/systemd/system")
+        unit_dir = SYSTEM_UNIT_DIR
     else:
         unit_dir = Path.home() / ".config" / "systemd" / "user"
 
@@ -554,6 +606,11 @@ WantedBy=default.target
         f.write(unit_content)
 
     console.print(f"[green]✓ Systemd unit written to:[/green] {unit_file}")
+    if account and not own_account:
+        console.print(
+            f"[yellow]Add ReadWritePaths for the data directory of {account}[/yellow] "
+            "before starting; the unit grants no write access yet."
+        )
     if not system:
         console.print("[cyan]To enable and start:[/cyan]")
         console.print("  systemctl --user daemon-reload")
@@ -572,8 +629,14 @@ def portal(data_dir: str = typer.Option("~/.local/share/logsentinel/portal", "--
     from logsentinel.portal.app import create_app
     application = create_app(data_dir)
     console.print(f"Portal: http://127.0.0.1:{port}")
-    console.print("Access key (enter in the local login form):", markup=False)
-    console.print(application.state.store.meta("admin_token"), markup=False)
+    # stdout is often captured by journald and then read back as log evidence.
+    # Keep the bootstrap credential in an owner-only local file instead.
+    key_path = application.state.store.directory / "access-key.txt"
+    fd = os.open(key_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    os.fchmod(fd, 0o600)
+    with os.fdopen(fd, "w") as key_file:
+        key_file.write(application.state.store.meta("admin_token") + "\n")
+    console.print("Read the access key for local login from:", key_path, markup=False)
     uvicorn.run(application, host="127.0.0.1", port=port, proxy_headers=False)
 
 
