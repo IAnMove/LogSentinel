@@ -648,11 +648,7 @@ function initLanguage() {
       /* preference is session-only */
     }
     staticLanguage();
-    $("#nav").replaceChildren(
-      ...Object.entries(names).map(([key, label]) =>
-        tentriNavButton(key, label),
-      ),
-    );
+    buildNav();
     if (!$("#shell").hidden) {
       await render();
       for (const [name, value] of values) {

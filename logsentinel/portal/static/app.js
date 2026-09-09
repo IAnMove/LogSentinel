@@ -249,9 +249,35 @@ function navigate(v) {
   $("#notice").hidden = true;
   render();
 }
-Object.entries(names).forEach(([key, label]) =>
-  $("#nav").append(tentriNavButton(key, label)),
-);
+// Eighteen flat entries made the rail a list to read rather than a place to
+// aim at, and it scrolled on a laptop. Grouping puts what you check daily at
+// the top and the things you set once further down. `names` still holds every
+// label, so page titles are unaffected by this order.
+const navGroups = [
+  {
+    label: ["Observar", "Watch"],
+    keys: ["summary", "problems", "events", "metrics", "capacity", "health", "activity"],
+  },
+  {
+    label: ["Configurar", "Configure"],
+    keys: ["machine", "source", "destination", "rule", "settings", "setup"],
+  },
+  {
+    label: ["Herramientas", "Tools"],
+    keys: ["chat", "backup", "appearance", "desktop", "about"],
+  },
+];
+// The rail is rebuilt when the language changes, so it is built in one place
+// and the group headings are translated at build time rather than at load.
+function buildNav() {
+  const rail = $("#nav");
+  rail.replaceChildren();
+  for (const group of navGroups) {
+    rail.append(el("p", bilingual(group.label[0], group.label[1]), "nav-group"));
+    for (const key of group.keys) rail.append(tentriNavButton(key, names[key]));
+  }
+}
+buildNav();
 $("#machine-scope").onchange = () => {
   if (view === "chat") {
     chatProblemId = "";
@@ -284,9 +310,11 @@ async function render() {
   $("#page-title").textContent =
     view === "problem_detail" ? t("Detalles del problema") : t(names[view]);
   updateTentriSection(view, $("#page-title").textContent);
-  [...$("#nav").children].forEach((n, i) =>
-    n.classList.toggle("active", Object.keys(names)[i] === view),
-  );
+  // Matched by view rather than by position, so the group headings between the
+  // buttons cannot shift which one reads as active.
+  $("#nav")
+    .querySelectorAll("button[data-view]")
+    .forEach((n) => n.classList.toggle("active", n.dataset.view === view));
   if (["machine", "source", "destination", "rule"].includes(view))
     return objectView(root);
   if (view === "summary") return summary(root);

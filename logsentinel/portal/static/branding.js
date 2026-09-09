@@ -82,6 +82,7 @@ function tentriCartridge(section) {
 
 function tentriNavButton(section, label) {
   const item = button("", () => navigate(section));
+  item.dataset.view = section;
   item.append(tentriCartridge(section), el("span", t(label)));
   return item;
 }

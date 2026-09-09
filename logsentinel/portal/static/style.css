@@ -1134,3 +1134,28 @@ main > * {
 .monitor-coverage span {
   color: var(--muted);
 }
+
+/* --- Rail grouping ------------------------------------------------------ */
+.nav-group {
+  color: var(--rail-muted);
+  font-size: 10px;
+  font-weight: 750;
+  letter-spacing: 1.4px;
+  text-transform: uppercase;
+  margin: 14px 0 4px;
+  padding: 0 12px;
+}
+.nav-group:first-child {
+  margin-top: 0;
+}
+/* The headings cost vertical space, so the buttons give some back: the rail
+   ends up no taller than the ungrouped list it replaces. */
+nav {
+  margin-top: 22px;
+  gap: 1px;
+}
+nav button {
+  padding: 7px 12px;
+  min-height: 36px;
+  line-height: 1.35;
+}
