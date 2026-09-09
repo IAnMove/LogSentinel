@@ -785,6 +785,59 @@ def enroll_command(
     )
 
 
+@app.command(name="prepare-host")
+def prepare_host(
+    account: str = typer.Option("logsentinel-agent", "--account", help="System account the agent will run as"),
+    source: list[str] = typer.Option(None, "--source", help="Log file or directory to grant read access to"),
+    journal: bool = typer.Option(False, "--journal", help="Also grant read access to the whole systemd journal"),
+    apply_changes: bool = typer.Option(False, "--apply", help="Make the changes; without it nothing is touched"),
+) -> None:
+    """Create the agent's account and grant it read access. Shows the plan before acting."""
+    from logsentinel import hostprep
+    try:
+        targets = [hostprep.check_source(item) for item in (source or [])]
+    except ValueError as refusal:
+        raise typer.BadParameter(str(refusal))
+    if not targets and not journal:
+        raise typer.BadParameter("Name at least one --source or pass --journal")
+    steps = hostprep.plan(account, targets, journal)
+
+    table = Table(title="Planned changes", show_lines=False)
+    table.add_column("Command", style="cyan", overflow="fold")
+    table.add_column("Why", overflow="fold")
+    for step in steps:
+        table.add_row(" ".join(step["command"]), step["why"])
+    console.print(table)
+    for note in hostprep.rotation_notes(targets, account):
+        console.print(f"[yellow]Note:[/yellow] {note}")
+    if not apply_changes:
+        console.print("[yellow]Nothing was changed.[/yellow] Re-run with --apply as root to make it so.")
+        return
+    try:
+        hostprep.apply(steps)
+    except PermissionError as refusal:
+        console.print(f"[red]{refusal}[/red]")
+        raise typer.Exit(1)
+    except RuntimeError as failure:
+        console.print(f"[red]Stopped: {failure}[/red]")
+        raise typer.Exit(1)
+
+    console.print("[green]\u2713 Applied.[/green] Reading back as the account itself:")
+    unreadable = []
+    for check in hostprep.verify(account, targets, journal):
+        mark = "[green]readable[/green]" if check["readable"] else "[red]NOT readable[/red]"
+        console.print(f"  {check['target']}: {mark}")
+        if not check["readable"]:
+            unreadable.append(check["target"])
+    if unreadable:
+        console.print(
+            "[red]Some sources are still unreachable.[/red] Check the directories above them "
+            "and whether the owning program restricts its files further."
+        )
+        raise typer.Exit(1)
+    console.print(f"[cyan]Install the service with:[/cyan] logsentinel service install --system --run-as {account}")
+
+
 @app.command(name="spool-status")
 def spool_status(spool: str = typer.Option(..., "--spool")) -> None:
     """Read sender queue counts and errors without opening or changing the spool."""
