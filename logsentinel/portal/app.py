@@ -37,6 +37,7 @@ from .widget_api import register_widget
 from .capacity import capacity_report
 from .rules import validate_rule, matches, excluded, redact, sanitize
 from .ingest import register_ingest
+from .enroll import register_enrollment
 
 STATIC = Path(__file__).parent / "static"
 MODELS = {
@@ -1211,6 +1212,7 @@ def create_app(directory, background=True):
         }
 
     register_ingest(app, store)
+    register_enrollment(app, store)
 
     @app.post("/api/backup")
     async def backup():

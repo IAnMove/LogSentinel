@@ -732,6 +732,59 @@ def metrics_forward_command(
     asyncio.run(forward_metrics(receiver, machine_id, token, spool, interval, disk, once))
 
 
+@app.command(name="enrollment-package")
+def enrollment_package(
+    source_id: str = typer.Option(..., "--source-id", help="Push source this package enrolls"),
+    receiver: str = typer.Option(..., "--receiver", help="Address the sender will reach, e.g. https://central.lan:8767"),
+    data_dir: str = typer.Option("~/.local/share/logsentinel/portal", "--data-dir"),
+    ca_cert: Optional[str] = typer.Option(None, "--ca-cert", help="PEM certificate the sender must trust"),
+    validity: int = typer.Option(3600, "--validity", min=60, max=604800, help="Seconds the code stays valid"),
+    out: str = typer.Option(..., "--out", help="Where to write the package"),
+) -> None:
+    """Write the onboarding package a sender imports. Run this on the central."""
+    import json
+    from logsentinel.portal.store import Store
+    from logsentinel.portal.enroll import issue_package
+    certificate = Path(ca_cert).expanduser().read_text() if ca_cert else ""
+    try:
+        package = issue_package(Store(data_dir), source_id, receiver, certificate, validity)
+    except ValueError as refusal:
+        raise typer.BadParameter(str(refusal))
+    target = Path(out).expanduser()
+    fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as handle:
+        json.dump(package, handle, indent=2)
+    console.print(f"[green]\u2713 Package written to:[/green] {target}")
+    console.print("Deliver it over a channel you trust; it holds a single-use code, not the credential.")
+    if package.get("fingerprint"):
+        console.print("Certificate fingerprint:", package["fingerprint"], markup=False)
+
+
+@app.command(name="enroll")
+def enroll_command(
+    package_file: str = typer.Argument(..., help="Package written by the central"),
+    spool: str = typer.Option(..., "--spool", help="Directory holding this sender's queue and credential"),
+) -> None:
+    """Redeem an onboarding package and store this sender's credential."""
+    import json
+    from logsentinel.portal.enrollment_client import claim
+    package = json.loads(Path(package_file).expanduser().read_text())
+    try:
+        result = claim(package, Path(spool).expanduser())
+    except ValueError as refusal:
+        console.print(f"[red]{refusal}[/red]")
+        raise typer.Exit(1)
+    console.print(f"[green]\u2713 Enrolled as source[/green] {result['source_id']}")
+    console.print("Credential stored in:", result["token_path"], markup=False)
+    if result.get("ca_path"):
+        console.print("Trusted certificate stored in:", result["ca_path"], markup=False)
+    console.print("[cyan]Start forwarding with:[/cyan]")
+    console.print(
+        f"  LOGSENTINEL_PUSH_TOKEN=$(cat {result['token_path']}) logsentinel forward /path/app.log "
+        f"--receiver {result['receiver']} --source-id {result['source_id']} --spool {spool}"
+    )
+
+
 @app.command(name="spool-status")
 def spool_status(spool: str = typer.Option(..., "--spool")) -> None:
     """Read sender queue counts and errors without opening or changing the spool."""

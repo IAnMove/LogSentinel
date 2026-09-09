@@ -17,6 +17,7 @@ from fastapi.responses import JSONResponse
 
 from .store import dumps
 from .collect import normalize
+from .enroll import register_enrollment
 
 # Senders batch up to 500 events of 256 KB, but a well-behaved batch stays far
 # below this; it bounds what one unauthenticated request can make us buffer.
@@ -150,4 +151,5 @@ def create_ingest_app(store):
         return {"status": "ok"}
 
     register_ingest(app, store)
+    register_enrollment(app, store)
     return app
