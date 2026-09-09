@@ -621,12 +621,43 @@ WantedBy=default.target
         console.print("  sudo systemctl enable --now logsentinel")
 
 
+LOOPBACK = ("127.0.0.1", "::1", "localhost")
+
+
+def _split_listen(value: str) -> tuple[str, int]:
+    """Split HOST:PORT, accepting a bracketed IPv6 literal."""
+    host, _, port = value.rpartition(":")
+    host = host.strip("[]")
+    if not host or not port.isdigit() or not 1 <= int(port) <= 65535:
+        raise typer.BadParameter("Use HOST:PORT, for example 0.0.0.0:8767")
+    return host, int(port)
+
+
 @app.command(name="portal")
 def portal(data_dir: str = typer.Option("~/.local/share/logsentinel/portal", "--data-dir"),
-           port: int = typer.Option(8765, "--port")) -> None:
+           port: int = typer.Option(8765, "--port"),
+           ingest_listen: Optional[str] = typer.Option(None, "--ingest-listen", help="HOST:PORT serving reception only, separate from the panel"),
+           tls_cert: Optional[str] = typer.Option(None, "--tls-cert", help="Certificate for the reception listener"),
+           tls_key: Optional[str] = typer.Option(None, "--tls-key", help="Private key for the reception listener")) -> None:
     """Run the local portal and its independent monitoring workers."""
     import uvicorn
     from logsentinel.portal.app import create_app
+    if (tls_cert or tls_key) and not ingest_listen:
+        raise typer.BadParameter("--tls-cert and --tls-key apply to --ingest-listen")
+    if bool(tls_cert) != bool(tls_key):
+        raise typer.BadParameter("Give both --tls-cert and --tls-key")
+    ingest_host = ingest_port = None
+    if ingest_listen:
+        ingest_host, ingest_port = _split_listen(ingest_listen)
+        # Loopback stays open for an SSH tunnel and for local testing. Anything
+        # reachable from the network carries source tokens, so it needs TLS.
+        if ingest_host not in LOOPBACK and not tls_cert:
+            raise typer.BadParameter(
+                "A reception listener outside loopback requires --tls-cert and --tls-key"
+            )
+        for label, path in (("certificate", tls_cert), ("private key", tls_key)):
+            if path and not Path(path).expanduser().is_file():
+                raise typer.BadParameter(f"Cannot read the TLS {label}: {path}")
     application = create_app(data_dir)
     console.print(f"Portal: http://127.0.0.1:{port}")
     # stdout is often captured by journald and then read back as log evidence.
@@ -637,7 +668,36 @@ def portal(data_dir: str = typer.Option("~/.local/share/logsentinel/portal", "--
     with os.fdopen(fd, "w") as key_file:
         key_file.write(application.state.store.meta("admin_token") + "\n")
     console.print("Read the access key for local login from:", key_path, markup=False)
-    uvicorn.run(application, host="127.0.0.1", port=port, proxy_headers=False)
+    if not ingest_listen:
+        uvicorn.run(application, host="127.0.0.1", port=port, proxy_headers=False)
+        return
+
+    from logsentinel.portal.ingest import create_ingest_app
+
+    scheme = "https" if tls_cert else "http"
+    console.print(f"Reception: {scheme}://{ingest_host}:{ingest_port} (senders only)")
+    servers = [
+        uvicorn.Server(
+            uvicorn.Config(
+                application, host="127.0.0.1", port=port, proxy_headers=False
+            )
+        ),
+        uvicorn.Server(
+            uvicorn.Config(
+                create_ingest_app(application.state.store),
+                host=ingest_host,
+                port=ingest_port,
+                proxy_headers=False,
+                ssl_certfile=tls_cert,
+                ssl_keyfile=tls_key,
+            )
+        ),
+    ]
+
+    async def serve():
+        await asyncio.gather(*(server.serve() for server in servers))
+
+    asyncio.run(serve())
 
 
 @app.command(name="forward")

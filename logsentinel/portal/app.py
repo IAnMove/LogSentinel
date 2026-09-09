@@ -15,12 +15,11 @@ from urllib.parse import urlsplit
 
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
-from fastapi.staticfiles import StaticFiles
 from pydantic import ValidationError
 
 from .store import Store, dumps, uid
 from .models import Machine, Source, Destination, Rule, Settings, merge_destination
-from .collect import Collector, discovery, normalize
+from .collect import Collector, discovery
 from .analysis import Analyzer, ReviewClient, safe_error
 from .monitor import Monitor
 from .problem_context import context_for, chat_system, validate_chat
@@ -37,6 +36,7 @@ from .health import HealthMonitor
 from .widget_api import register_widget
 from .capacity import capacity_report
 from .rules import validate_rule, matches, excluded, redact, sanitize
+from .ingest import register_ingest
 
 STATIC = Path(__file__).parent / "static"
 MODELS = {
@@ -1210,82 +1210,7 @@ def create_app(directory, background=True):
             "message": "Shown once. Previous token is now invalid.",
         }
 
-    def push_source(id, request):
-        token = request.headers.get("authorization", "").removeprefix("Bearer ")
-        expected = store.meta("push:" + id)
-        if not expected or not hmac.compare_digest(
-            hashlib.sha256(token.encode()).hexdigest(), expected
-        ):
-            raise HTTPException(401)
-        source = store.get("source", id)
-        if not source or source["kind"] != "push" or not source["enabled"]:
-            raise HTTPException(409, "Source disabled")
-        if not store.monitoring_active(source["machine_id"]):
-            raise HTTPException(
-                409, "Machine monitoring is paused; retain and retry events"
-            )
-        return source
-
-    @app.post("/heartbeat/{id}")
-    async def heartbeat(id: str, request: Request):
-        push_source(id, request)
-        body = await request.json()
-        if (
-            not isinstance(body, dict)
-            or type(body.get("ok")) is not bool
-            or type(body.get("pending")) is not int
-            or not 0 <= body["pending"] <= 1000000000
-            or set(body) != {"ok", "pending"}
-        ):
-            raise HTTPException(
-                400, "Send ok (boolean) and pending (non-negative integer)"
-            )
-        old = json.loads(store.meta("health:" + id) or "{}")
-        old.update(
-            heartbeat=time.time(),
-            status="ok" if body["ok"] else "error",
-            sender_pending=body["pending"],
-            error=(
-                ""
-                if body["ok"]
-                else "Sender capture failed; inspect its spool and permissions"
-            ),
-        )
-        store.set_meta("health:" + id, dumps(old))
-        return {"ok": True}
-
-    @app.post("/ingest/{id}")
-    async def ingest(id: str, request: Request):
-        source = push_source(id, request)
-        body = await request.json()
-        items = body.get("events", [])
-        if not isinstance(items, list) or not 1 <= len(items) <= 500:
-            raise HTTPException(400, "Send 1–500 events")
-        entries = []
-        for item in items:
-            if (
-                not isinstance(item, dict)
-                or not isinstance(item.get("id"), str)
-                or not 1 <= len(item["id"]) <= 200
-                or not isinstance(item.get("raw"), str)
-                or len(item["raw"].encode()) > 256_000
-            ):
-                raise HTTPException(400, "Invalid event")
-            entries.append(normalize(item["raw"], "remote", item["id"]))
-        try:
-            count = store.ingest(source, entries)
-        except OSError:
-            raise HTTPException(507, "Storage full; retain and retry these events")
-        old_health = json.loads(store.meta("health:" + id) or "{}")
-        old_health.update(checked=time.time(), new_events=count)
-        if "heartbeat" not in old_health:
-            old_health["status"] = "ok"
-        store.set_meta("health:" + id, dumps(old_health))
-        return {
-            "status": "durable",
-            "accepted": count,
-            "acknowledged": [item["id"] for item in items],
-        }
+    register_ingest(app, store)
 
     @app.post("/api/backup")
     async def backup():
