@@ -68,9 +68,16 @@ async def run_workers(capture, deliver, interval, store, once):
     async def delivery_loop():
         delay = 2
         while True:
-            ok = await deliver()
-            delay = 2 if ok else min(60, delay * 2)
-            await asyncio.sleep(delay)
+            result = await deliver()
+            if type(result) is int:
+                # The receiver stated how long its quota needs; waiting less only
+                # spends the sender's own retries against a refusal it can predict.
+                # A stated pause is not a transport failure, so backoff stays reset.
+                pause, delay = max(1, min(3600, result)), 2
+            else:
+                delay = 2 if result else min(60, delay * 2)
+                pause = delay
+            await asyncio.sleep(pause)
 
     if once:
         await collect_once()

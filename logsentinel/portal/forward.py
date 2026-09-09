@@ -108,18 +108,29 @@ async def forward(path, receiver, source_id, token, directory, once=False):
                             heartbeat_due = time.monotonic() + 30
                         status(store, "delivery", True)
                         return True
-                    except (httpx.HTTPError, ValueError, TypeError):
+                    except (httpx.HTTPError, ValueError, TypeError) as failure:
+                        # A quota refusal states how long to wait, so honour it
+                        # instead of spending retries on a predictable rejection.
+                        wait = 0
+                        if (
+                            isinstance(failure, httpx.HTTPStatusError)
+                            and failure.response.status_code == 429
+                        ):
+                            header = failure.response.headers.get("retry-after", "")
+                            wait = min(3600, int(header) if header.isdigit() else 60)
                         status(
                             store,
                             "delivery",
                             False,
-                            "Delivery failed; durable spool retained; retrying with backoff",
+                            f"Receiver quota spent; spool retained, retrying in {wait}s"
+                            if wait
+                            else "Delivery failed; durable spool retained; retrying with backoff",
                         )
                         if once:
                             raise RuntimeError(
                                 "Forwarding failed; spool retained for retry"
                             ) from None
-                        return False
+                        return wait or False
 
                 await run_workers(capture, deliver, 2, store, once)
         finally:

@@ -71,6 +71,10 @@ class Settings(Model):
     max_calls: int = Field(default=3, ge=1, le=10)
     retention_days: int = Field(default=30, ge=1, le=3650)
     disk_limit_mb: int = Field(default=1024, ge=32, le=1_000_000)
+    # Per sender, so one noisy or compromised machine cannot spend the shared
+    # disk quota and the review budget on its own.
+    sender_mb_per_hour: int = Field(default=256, ge=1, le=1_000_000)
+    sender_events_per_hour: int = Field(default=200_000, ge=100, le=100_000_000)
     sensitivity: Literal["light", "balanced", "thorough"] = "balanced"
     remote_allowed: bool = False
     health_alerts: bool = True

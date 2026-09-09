@@ -22,6 +22,9 @@ def uid():
     return secrets.token_hex(12)
 
 
+QUOTA_WINDOW = 3600.0
+
+
 def dumps(value):
     return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
 
@@ -54,6 +57,7 @@ class Store:
             CREATE INDEX IF NOT EXISTS deliveries_due ON deliveries(status,next_try);
             CREATE TABLE IF NOT EXISTS audit(id INTEGER PRIMARY KEY,created REAL,action TEXT,object_id TEXT,detail TEXT);
             CREATE TABLE IF NOT EXISTS metrics(source_id TEXT,key TEXT,value INTEGER,PRIMARY KEY(source_id,key));
+            CREATE TABLE IF NOT EXISTS sender_quota(source_id TEXT PRIMARY KEY,window_start REAL,bytes INTEGER,events INTEGER);
             """
             )
             version = db.execute(
@@ -194,6 +198,53 @@ class Store:
             "INSERT INTO metrics VALUES(?,?,?) ON CONFLICT(source_id,key) DO UPDATE SET value=value+excluded.value",
             (source, key, value),
         )
+
+    def charge_sender_quota(self, source_id, size, count, settings, now=None):
+        """Bill one request against this sender's hourly allowance.
+
+        Authenticating a sender says who it is, not that its volume is reasonable.
+        The charge covers what was offered, not what was stored, so a sender that
+        keeps replaying rejected batches still backs off. Returns the seconds to
+        wait when the allowance is spent, and 0 when the request may proceed.
+        """
+        now = time.time() if now is None else now
+        limit_bytes = settings.sender_mb_per_hour * 1024 * 1024
+        with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute(
+                "SELECT window_start,bytes,events FROM sender_quota WHERE source_id=?",
+                (source_id,),
+            ).fetchone()
+            start, used_bytes, used_events = tuple(row) if row else (0.0, 0, 0)
+            if now - start >= QUOTA_WINDOW:
+                start, used_bytes, used_events = now, 0, 0
+            if (
+                used_bytes + size > limit_bytes
+                or used_events + count > settings.sender_events_per_hour
+            ):
+                return max(1, int(start + QUOTA_WINDOW - now))
+            db.execute(
+                "INSERT OR REPLACE INTO sender_quota VALUES(?,?,?,?)",
+                (source_id, start, used_bytes + size, used_events + count),
+            )
+        return 0
+
+    def sender_quota(self, source_id, settings, now=None):
+        """Report what is left of this sender's hourly allowance."""
+        now = time.time() if now is None else now
+        with self.connect() as db:
+            row = db.execute(
+                "SELECT window_start,bytes,events FROM sender_quota WHERE source_id=?",
+                (source_id,),
+            ).fetchone()
+        start, used_bytes, used_events = tuple(row) if row else (0.0, 0, 0)
+        if now - start >= QUOTA_WINDOW:
+            start, used_bytes, used_events = now, 0, 0
+        return {
+            "bytes_remaining": max(0, settings.sender_mb_per_hour * 1024 * 1024 - used_bytes),
+            "events_remaining": max(0, settings.sender_events_per_hour - used_events),
+            "resets_in": max(0, int(start + QUOTA_WINDOW - now)),
+        }
 
     def size(self):
         return sum(

@@ -90,3 +90,72 @@ def test_portal_refuses_an_unprotected_or_incomplete_reception_listener(tmp_path
     monkeypatch.setattr(uvicorn, "run", lambda *a, **kw: None)
     result = CliRunner().invoke(cli.app, ["portal", "--data-dir", str(tmp_path), *flags])
     assert result.exit_code != 0
+
+
+def test_one_sender_cannot_spend_more_than_its_hourly_allowance(pair):
+    panel, reception, source, token = pair
+    store = panel.app.state.store
+    settings = store.settings()
+    settings.sender_events_per_hour = 100
+    settings.sender_mb_per_hour = 1
+    store.set_meta("settings", __import__("json").dumps(settings.model_dump()))
+    headers = {"Authorization": "Bearer " + token}
+
+    def send(first):
+        return reception.post(
+            "/ingest/" + source,
+            json={"events": [{"id": f"e{first + n}", "raw": "x" * 40_000} for n in range(30)]},
+            headers=headers,
+        )
+
+    accepted = 0
+    for batch in range(10):
+        result = send(batch * 30)
+        if result.status_code == 429:
+            assert int(result.headers["Retry-After"]) > 0
+            break
+        assert result.status_code == 200, result.text
+        accepted += 1
+    else:
+        pytest.fail("The sender was never held to its allowance")
+    # 1 MiB an hour is spent well before ten 1.2 MB batches land.
+    assert accepted <= 1
+
+
+def test_a_refused_sender_does_not_block_another(pair):
+    panel, reception, source, token = pair
+    store = panel.app.state.store
+    settings = store.settings()
+    settings.sender_events_per_hour = 100
+    store.set_meta("settings", __import__("json").dumps(settings.model_dump()))
+    other = panel.post(
+        "/api/objects/source",
+        json={
+            "name": "second",
+            "machine_id": store.objects("machine")[0]["id"],
+            "kind": "push",
+            "enabled": True,
+        },
+    ).json()["id"]
+    other_token = panel.post("/api/sources/" + other + "/token").json()["token"]
+
+    def batch(prefix, count):
+        return {"events": [{"id": f"{prefix}{n}", "raw": "line"} for n in range(count)]}
+
+    first = {"Authorization": "Bearer " + token}
+    second = {"Authorization": "Bearer " + other_token}
+    assert reception.post("/ingest/" + source, json=batch("a", 100), headers=first).status_code == 200
+    assert reception.post("/ingest/" + source, json=batch("b", 1), headers=first).status_code == 429
+    # The allowance belongs to the sender, not to the receiver as a whole.
+    assert reception.post("/ingest/" + other, json=batch("c", 100), headers=second).status_code == 200
+
+
+def test_accepted_delivery_reports_what_is_left(pair):
+    _, reception, source, token = pair
+    result = reception.post(
+        "/ingest/" + source,
+        json={"events": [{"id": "e1", "raw": "synthetic line"}]},
+        headers={"Authorization": "Bearer " + token},
+    ).json()
+    assert result["quota"]["events_remaining"] > 0
+    assert 0 < result["quota"]["resets_in"] <= 3600

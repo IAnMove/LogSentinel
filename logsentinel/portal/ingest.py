@@ -88,6 +88,16 @@ def register_ingest(app, store):
             ):
                 raise HTTPException(400, "Invalid event")
             entries.append(normalize(item["raw"], "remote", item["id"]))
+        offered = sum(len(item["raw"].encode()) for item in items)
+        retry_after = store.charge_sender_quota(
+            source["id"], offered, len(items), store.settings()
+        )
+        if retry_after:
+            raise HTTPException(
+                429,
+                "Sender quota spent; retain and retry these events",
+                headers={"Retry-After": str(retry_after)},
+            )
         try:
             count = store.ingest(source, entries)
         except OSError:
@@ -101,6 +111,7 @@ def register_ingest(app, store):
             "status": "durable",
             "accepted": count,
             "acknowledged": [item["id"] for item in items],
+            "quota": store.sender_quota(source["id"], store.settings()),
         }
 
 def create_ingest_app(store):
