@@ -481,6 +481,21 @@ a {
 .monitor-status div {
   overflow-wrap: anywhere;
 }
+.monitor-coverage {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 28px;
+  margin: 12px 0;
+}
+.monitor-coverage > div {
+  display: grid;
+  gap: 2px;
+}
+.monitor-coverage strong {
+  font-size: 1.4rem;
+  font-variant-numeric: tabular-nums;
+}
+.monitor-coverage span { font-size: .85rem; }
 .monitor-warning {
   color: var(--error-ink);
   font-weight: 600;

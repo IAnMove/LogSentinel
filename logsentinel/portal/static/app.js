@@ -574,13 +574,11 @@ function objectView(root) {
               }),
             );
           b.push(
-            button(t("Reanalizar retenidos"), async () => {
+            button(bilingual("Recuperar retenidos sin analizar", "Recover unreviewed retained logs"), async () => {
               const r = await api("/api/reanalyze", { source_id: obj.id });
               notice(
                 r.scheduled +
-                  t(" eventos programados (máximo ") +
-                  r.limit +
-                  ").",
+                  bilingual(" logs añadidos a la cola. Se procesarán por lotes; los ya analizados conservan su estado.", " logs added to the queue. They will run in batches; previously reviewed logs keep their status."),
               );
             }),
           );
@@ -907,15 +905,24 @@ function settingsView(root) {
     ],
   );
   add("max_calls", t("Máximo de llamadas por ciclo"), "number", c.max_calls);
+  add("adaptive_batching", bilingual("Ajustar lotes y espera al tiempo medido", "Adapt batches and waiting to measured time"), "checkbox", c.adaptive_batching);
+  add("target_batch_seconds", bilingual("Objetivo por llamada (segundos)", "Target per call (seconds)"), "number", c.target_batch_seconds);
+  add("cycle_budget_seconds", bilingual("Tiempo para despachar llamadas por ciclo (segundos)", "Call dispatch window per cycle (seconds)"), "number", c.cycle_budget_seconds);
+  add("triage_thinking", bilingual("Razonamiento prolongado en la primera revisión", "Extended thinking in the first review"), "checkbox", c.triage_thinking);
+  add("verification", bilingual("Verificar candidatos con originales", "Verify candidates against originals"), "select", c.verification, [
+    ["important", bilingual("Lotes con alertas altas o críticas", "Batches with high or critical alerts")],
+    ["all", bilingual("Todos los candidatos", "All candidates")],
+    ["manual", bilingual("Solo bajo petición", "Only on request")],
+  ]);
   add(
     "interval_seconds",
-    t("Intervalo entre ciclos (segundos)"),
+    bilingual("Espera máxima entre ciclos (segundos)", "Maximum wait between cycles (seconds)"),
     "number",
     c.interval_seconds,
   );
   add(
     "max_events",
-    t("Eventos admitidos por máquina/ciclo"),
+    bilingual("Originales candidatos por lote", "Candidate originals per batch"),
     "number",
     c.max_events,
   );

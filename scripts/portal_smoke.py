@@ -252,9 +252,20 @@ with tempfile.TemporaryDirectory(prefix="sentinel-browser-") as d:
                 "Cómo añadir Slack con token de bot", exact=True
             ).wait_for()
             page.get_by_label("Canal", exact=True).select_option("file")
+            # Provider changes intentionally discard inactive provider fields.
+            page.locator(
+                "[data-notification-channel='file'] [data-notification-field='path']"
+            ).fill("notifications.jsonl")
             page.get_by_role("button", name="Guardar", exact=True).click()
             page.get_by_text("Configuración guardada.", exact=True).wait_for()
-            page.get_by_role("button", name="Enviar prueba", exact=True).click()
+            with page.expect_response(
+                lambda response: "/api/destinations/" in response.url
+                and response.url.endswith("/test")
+            ) as delivered:
+                page.get_by_role("button", name="Enviar prueba", exact=True).click()
+            assert (
+                delivered.value.json()["status"] == "delivered"
+            ), delivered.value.json()
             page.get_by_text("delivered", exact=True).wait_for()
             assert app.state.store.objects("destination")[0]["token"] == ""
             page.get_by_role("button", name="Editar", exact=True).click()

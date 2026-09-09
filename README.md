@@ -20,7 +20,7 @@ python3 -m venv .venv
 .venv/bin/logsentinel portal
 ```
 
-Abre `http://127.0.0.1:8765` e introduce la clave que muestra la terminal. Los datos se guardan en `~/.local/share/logsentinel/portal`. Usa `--data-dir /ruta` para otra instancia. El portal escucha exclusivamente en loopback, requiere sesión y comprueba origen y CSRF.
+Abre `http://127.0.0.1:8765` e introduce la clave guardada en `~/.local/share/logsentinel/portal/access-key.txt` (solo accesible por su propietario). La terminal muestra la ruta, nunca la clave. Los datos se guardan en ese mismo directorio. Usa `--data-dir /ruta` para otra instancia. El portal escucha exclusivamente en loopback, requiere sesión y comprueba origen y CSRF.
 
 1. Abre **Configuración guiada**: primero guarda y prueba el LLM. El servicio del modelo se instala por separado.
 2. Crea o reutiliza una **Máquina** y conecta una **Fuente**: journal sin ruta, archivo/carpeta con ruta absoluta, o recepción remota con emisor. La prueba de lectura comprueba permisos; importar histórico puede incorporar todos los registros disponibles.
@@ -40,7 +40,9 @@ Los servidores LLM fuera de loopback requieren activar la autorización de enví
 - Máquinas, fuentes, histórico de originales, problemas con apariciones y revisiones; resolver, silenciar avisos y copiar contexto.
 - Archivo, carpeta, journal y receptor HTTP autenticado por fuente; importación de gzip, xz y bz2 estables. No modifica ni rota los archivos de otros programas.
 - Segmentos inmutables comprimidos dentro de SQLite: datos, índices y cursores se confirman juntos. La recepción no espera al LLM ni al cierre de una conexión SSH.
-- Revisión general sin depender de palabras clave, compactación de repeticiones y segunda pasada de evidencia con líneas vecinas. Referencias fuera del contexto se rechazan.
+- Cola persistente con varios lotes por máquina, recuperación del histórico y reintentos con la petición conservada. Las repeticiones reconocidas mantienen cantidad, fechas, frecuencia, ejemplos y referencias a originales; no se excluye todo INFO ni todo Python.
+- Primera revisión breve y verificación independiente de los candidatos importantes con originales. Referencias ajenas se rechazan; las verificaciones incompletas conservan los candidatos visibles y se reintentan.
+- Lotes ajustados al tiempo medido y espera máxima inicial de 60 segundos. Se registran por separado carga del modelo, evaluación de entrada y generación de salida. Para evaluar clasificación con datos sintéticos: `python scripts/evaluate_review.py --settings-db /ruta/sentinel.db --output /ruta/evaluation.json --variants pipeline --held-out`.
 - Presupuesto por ciclo, reparto entre máquinas/fuentes, reintentos acotados y aviso de cobertura reducida. **Sin revisar** nunca significa **sin problemas**.
 - Filtros regex con tiempo limitado, IP/CIDR y problema concreto; previsualización de una muestra antes de aplicar. Chat acotado al histórico de una máquina, con historial y propuestas de filtros que requieren guardar.
 - Sistema, archivo local, Telegram, Slack, Discord, Hermes, n8n y webhook genérico. Cola persistente, alcance por máquina/fuente, umbral, enfriamiento, reintentos y resultado desconocido ante interrupción.

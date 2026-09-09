@@ -107,8 +107,8 @@ const translations = {
   Entregado: "Delivered",
   Cancelado: "Cancelled",
   "Tu observatorio de logs.": "Your log observatory.",
-  "Accede con la clave que aparece al iniciar el portal en este equipo.":
-    "Use the access key printed when the portal starts on this machine.",
+  "Usa la clave del archivo access-key.txt del portal. La terminal muestra su ruta al iniciar.":
+    "Use the key in the portal access-key.txt file. The terminal shows its path at startup.",
   "Clave de acceso": "Access key",
   "Entrar al portal": "Sign in",
   "OBSERVATORIO LOCAL": "LOCAL OBSERVATORY",

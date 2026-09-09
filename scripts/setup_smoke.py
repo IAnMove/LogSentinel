@@ -120,6 +120,14 @@ with tempfile.TemporaryDirectory(prefix="sentinel-setup-") as tmp:
             )
             assert all(j["status"] == "done" for j in app.state.store.rows("jobs"))
             page.get_by_text("Continuous capture active", exact=True).wait_for()
+            assert (
+                page.locator(".monitor-coverage")
+                .get_by_text("Reviewed", exact=True)
+                .is_visible()
+            )
+            assert page.evaluate("monitorTime(1000, 1120)") == "2 min ago"
+            assert page.evaluate("monitorTime(1120, 1000)") == "in 2 min"
+            assert page.evaluate("monitorTime(1000, 100000) === stamp(1000)")
             assert app.state.store.settings().enabled
             assert len(app.state.store.objects("source")) == 1
             assert len(app.state.store.objects("machine")) == 1
@@ -143,6 +151,12 @@ with tempfile.TemporaryDirectory(prefix="sentinel-setup-") as tmp:
             page.reload()
             page.get_by_role("button", name="Resumen", exact=True).wait_for()
             page.get_by_text("Captura continua activa", exact=True).wait_for()
+            assert page.evaluate("monitorTime(1000, 1120)") == "hace 2 min"
+            assert (
+                page.locator(".monitor-coverage")
+                .get_by_text("Sin analizar", exact=True)
+                .is_visible()
+            )
             page.screenshot(path="/tmp/logsentinel-monitor.png", full_page=True)
             page.set_viewport_size({"width": 390, "height": 844})
             assert page.evaluate(

@@ -89,6 +89,9 @@ async def test_verification_failure_preserves_first_pass_and_explicit_partial_co
     analyzer.client.call = fake
     result = await analyzer.cycle()
     assert result["errors"] == 1
+    assert s.rows("jobs")[0]["status"] == "retry"
+    await analyzer.cycle()
+    await analyzer.cycle()
     assert s.rows("jobs")[0]["status"] == "partial"
     assert len(s.rows("problems")) == 1
     problem = s.problem(s.rows("problems")[0]["id"])
@@ -229,6 +232,6 @@ async def test_capacity_is_visible_and_preserves_original(data):
 
     a.client.call = healthy
     await a.cycle()
-    assert len(s.events(status="capacity")) >= 1
+    assert len(s.events(status="oversized")) >= 1
     assert any(p["data"].find("monitor.capacity") >= 0 for p in s.rows("problems"))
-    assert any(e["message"] == "x" * 3000 for e in s.events(status="capacity"))
+    assert any(e["message"] == "x" * 3000 for e in s.events(status="oversized"))

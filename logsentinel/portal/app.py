@@ -280,7 +280,9 @@ def create_app(directory, background=True):
     def index():
         return FileResponse(STATIC / "index.html")
 
-    app.mount("/static", StaticFiles(directory=STATIC), name="static")
+    from .public_static import PublicStaticFiles
+
+    app.mount("/static", PublicStaticFiles(directory=STATIC), name="static")
 
     @app.post("/login")
     async def login(request: Request):
@@ -910,11 +912,21 @@ def create_app(directory, background=True):
         source = store.get("source", body.get("source_id", ""))
         if not source:
             raise HTTPException(400, "Select a source")
-        rows = store.events(source_id=source["id"], limit=500)
-        ids = [e["id"] for e in rows if not excluded(store, e)]
-        store.mark(ids, "pending")
-        store.audit("reanalyze", source["id"], str(len(ids)))
-        return {"scheduled": len(ids), "limit": 500}
+        if not store.monitoring_active(source["machine_id"]):
+            raise HTTPException(409, "Machine monitoring is paused")
+        # Schedule the entire retained scope by state. The worker applies the
+        # current filters in bounded batches; active frozen jobs keep ownership.
+        with store.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            cursor = db.execute(
+                "UPDATE events SET status='pending' WHERE source_id=? AND status IN ('capacity','oversized','sampled','excluded','error') "
+                "AND id NOT IN (SELECT value FROM jobs j,json_each(j.event_ids) WHERE j.status IN ('pending','running','retry'))",
+                (source["id"],),
+            )
+            count = cursor.rowcount
+        store.audit("reanalyze", source["id"], str(count))
+        monitor.next_due = time.time()
+        return {"scheduled": count, "scope": "all_retained_unreviewed", "limit": None}
 
     @app.post("/api/destinations/{id}/test")
     async def test_destination(id: str):

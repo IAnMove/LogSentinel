@@ -38,6 +38,9 @@ function statusLabel(key) {
 }
 
 function coverageLabel(key) {
+  if (key === "queued") return bilingual("Lote en cola", "Batch queued");
+  if (key === "oversized") return bilingual("No cabe en el contexto", "Exceeds input budget");
+  if (key === "capacity") return bilingual("Histórico pendiente de recuperar", "Historical backlog to recover");
   return t(
     {
       pending: "Pendientes",
@@ -52,11 +55,32 @@ function coverageLabel(key) {
   );
 }
 
+function monitorTime(value, now) {
+  if (!value) return bilingual("Todavía no", "Not yet");
+  const delta = value - now, seconds = Math.abs(delta);
+  if (seconds >= 86400) return stamp(value);
+  if (seconds < 5) return bilingual("ahora", "now");
+  const amount = seconds < 60
+    ? Math.round(seconds) + " s"
+    : seconds < 3600
+      ? Math.floor(seconds / 60) + " min"
+      : Math.floor(seconds / 3600) + " h " + Math.floor(seconds % 3600 / 60) + " min";
+  return delta > 0
+    ? bilingual("dentro de ", "in ") + amount
+    : bilingual("hace ", "") + amount + bilingual("", " ago");
+}
+
 function drawMonitor(m) {
   if (!m) return;
   const root = $("#monitor-status"),
     details = el("div"),
     capture = el("strong");
+  const when = (value) => monitorTime(value, m.server_time || Date.now() / 1000);
+  const timed = (label, value, className = "subtle") => {
+    const line = el("div", label + when(value), className);
+    if (value) line.title = stamp(value);
+    return line;
+  };
   capture.textContent =
     m.capture === "active"
       ? t("Captura continua activa")
@@ -71,18 +95,22 @@ function drawMonitor(m) {
       bilingual("Logs · estado global", "Logs · global status"),
       "subtle",
     ),
-    el("div", t("Último evento recibido: ") + stamp(m.last_event), "subtle"),
+    timed(t("Último evento recibido: "), m.last_event),
   );
-  const failedSources = Object.values(m.source_health).filter(
+  const failedSources = Object.values(m.source_health || {}).filter(
     (h) => h.status !== "ok",
   ).length;
-  const unknownSources = Object.values(m.source_health).filter(
+  const unknownSources = Object.values(m.source_health || {}).filter(
     (h) => !h.checked,
   ).length;
   details.append(
     capture,
     el("span", " · " + m.enabled_sources + t(" fuentes habilitadas")),
   );
+  if (!m.enabled_sources) details.append(el("div", bilingual(
+    "No están entrando logs nuevos. El histórico retenido puede seguir analizándose.",
+    "No new logs are being captured. Retained history can still be reviewed.",
+  ), "subtle"));
   if (failedSources || unknownSources || m.collector_error)
     details.append(
       el(
@@ -91,64 +119,82 @@ function drawMonitor(m) {
         "monitor-warning",
       ),
     );
-  const line = m.analysis_running
-    ? t("El LLM está analizando ahora")
+  const line = m.active_call?.kind === "analysis" || m.active_call?.kind === "investigation"
+    ? bilingual("El modelo está revisando logs ahora", "The model is reviewing logs now")
     : !m.analysis_enabled
       ? t("Análisis pausado; la captura continúa en las fuentes activas")
       : !m.background
         ? t("Procesos automáticos desactivados en esta instancia")
         : m.model_busy
           ? t("LLM ocupado; el análisis espera su turno")
-          : t("Próximo análisis: ") + stamp(m.next_analysis);
-  details.append(
-    el("div", line),
-    el(
-      "div",
-      t("Intervalo: ") +
-        m.interval_seconds +
-        t(" segundos · Pendientes: ") +
-        m.pending,
-    ),
-  );
-  if (m.last_finished)
-    details.append(
-      el(
-        "div",
-        t("Último ciclo: ") +
-          stamp(m.last_finished) +
-          " · " +
-          t(
-            {
-              completed: "Completado",
-              no_events: "Sin nuevos eventos seleccionados",
-              errors: "Con errores",
-              interrupted: "Interrumpido",
-            }[m.last_outcome] || "—",
-          ),
-        "subtle",
-      ),
-    );
+          : m.next_analysis
+            ? t("Próximo análisis: ") + when(m.next_analysis)
+            : m.coverage?.queued
+              ? bilingual("La cola espera a que se reanude la monitorización de sus máquinas", "The queue is waiting for its machines to resume monitoring")
+              : bilingual("Sin trabajo en cola", "No work queued");
+  details.append(el("div", line));
+  const coverage = m.coverage;
+  if (coverage) {
+    const grid = el("div", undefined, "monitor-coverage");
+    for (const [key, label] of [
+      ["total", bilingual("Logs retenidos", "Retained logs")],
+      ["covered", bilingual("Analizados", "Reviewed")],
+      ["unreviewed", bilingual("Sin analizar", "Unreviewed")],
+      ["queued", bilingual("En cola de análisis", "Queued for analysis")],
+    ]) {
+      const item = el("div");
+      item.append(el("strong", Number(coverage[key] || 0).toLocaleString()), el("span", label));
+      grid.append(item);
+    }
+    details.append(grid, el("div",
+      coverage.represented + bilingual(" representados en grupos · ", " represented in groups · ") +
+      coverage.originals + bilingual(" originales citados en verificación", " originals cited in verification"), "subtle"));
+    if (coverage.history_remaining || coverage.history_recovered) details.append(el("div",
+      bilingual("Recuperación del histórico: ", "History recovery: ") +
+      coverage.history_recovered + bilingual(" analizados · ", " reviewed · ") +
+      coverage.history_remaining + bilingual(" pendientes", " remaining")));
+    const outside = coverage.excluded + coverage.policy + coverage.oversized + Math.max(0, coverage.errors - coverage.retrying);
+    if (outside) details.append(el("div",
+      bilingual("Sin analizar fuera de la cola: ", "Unreviewed outside the queue: ") +
+      coverage.excluded + bilingual(" excluidos por reglas · ", " excluded by rules · ") +
+      coverage.policy + bilingual(" por selección de fuente · ", " by source selection · ") +
+      coverage.oversized + bilingual(" demasiado grandes · ", " too large · ") +
+      Math.max(0, coverage.errors - coverage.retrying) + bilingual(" con reintentos agotados", " with exhausted retries"), "monitor-warning"));
+    if (coverage.queued) details.append(el("div", bilingual(
+      "La cola forma parte de los logs sin analizar; se procesa por lotes mientras el análisis esté activo.",
+      "Queued logs are part of the unreviewed total; batches run while analysis is enabled.",
+    ), "subtle"));
+  }
+  details.append(timed(bilingual("Última llamada al modelo: ", "Last model call: "), m.last_scan_finished));
+  if (m.last_scan_status === "error") details.append(el("div", bilingual(
+    "La última llamada falló; no cuenta como revisión completada.", "The last call failed; it does not count as a completed review.",
+  ), "monitor-warning"));
+  if (m.last_review?.finished) details.append(timed(
+    bilingual("Último lote analizado: ", "Last reviewed batch: "), m.last_review.finished));
+  if (m.next_check && !m.next_analysis) details.append(timed(
+    bilingual("Próxima comprobación de cola: ", "Next queue check: "), m.next_check));
+  if (m.last_finished && m.last_outcome === "no_events") details.append(timed(
+    bilingual("Última comprobación sin trabajo, sin llamar al modelo: ", "Last check with no work and no model call: "), m.last_finished));
+  const interval = m.interval_seconds < 60 ? m.interval_seconds + " s" : Math.round(m.interval_seconds / 60) + " min";
+  details.append(el("div", (m.adaptive_batching
+    ? bilingual("Espera máxima entre lotes: ", "Maximum wait between batches: ")
+    : t("Intervalo: ")) + interval, "subtle"));
   if (m.retry_after)
     details.append(
       el(
         "div",
         (locale === "es"
           ? "Reintento tras errores del modelo: "
-          : "Retry after model errors: ") + stamp(m.retry_after),
+          : "Retry after model errors: ") + when(m.retry_after),
         "monitor-warning",
       ),
     );
-  if (m.failed_jobs || m.capacity)
+  if (m.failed_jobs)
     details.append(
       el(
         "div",
         m.failed_jobs +
-          t(" análisis con errores · ") +
-          m.capacity +
-          t(" eventos sin revisar por capacidad") +
-          (locale === "es"
-            ? " (total histórico retenido)"
-            : " (retained historical total)"),
+          bilingual(" trabajos pendientes de reintento o verificación, o con errores", " jobs awaiting retry or verification, or with errors"),
         "monitor-warning",
       ),
     );
@@ -171,7 +217,7 @@ function drawMonitor(m) {
               " s"
             : m.last_model_error.error) +
           " · " +
-          stamp(m.last_model_error.updated),
+          when(m.last_model_error.updated),
         "subtle",
       ),
     );

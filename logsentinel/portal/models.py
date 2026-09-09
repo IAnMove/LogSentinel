@@ -64,11 +64,16 @@ class Settings(Model):
     enabled: bool = False
     language: Literal["en", "es"] = "en"
     llm: LLMConfig = Field(default_factory=LLMConfig)
-    interval_seconds: int = Field(default=300, ge=5, le=86400)
+    interval_seconds: int = Field(default=60, ge=5, le=86400)
     context_tokens: int = Field(default=8192, ge=2048, le=1_000_000)
     input_budget: int = Field(default=5000, ge=512, le=500_000)
     max_events: int = Field(default=500, ge=10, le=5000)
     max_calls: int = Field(default=3, ge=1, le=10)
+    adaptive_batching: bool = True
+    target_batch_seconds: int = Field(default=30, ge=5, le=240)
+    cycle_budget_seconds: int = Field(default=90, ge=5, le=3600)
+    triage_thinking: bool = False
+    verification: Literal["important", "all", "manual"] = "important"
     retention_days: int = Field(default=30, ge=1, le=3650)
     disk_limit_mb: int = Field(default=1024, ge=32, le=1_000_000)
     # Per sender, so one noisy or compromised machine cannot spend the shared

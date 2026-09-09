@@ -6,6 +6,7 @@ import pytest
 from test_portal_api import client, machine_source
 from logsentinel.portal.analysis import Analyzer, SYSTEM
 from logsentinel.portal.capacity import capacity_report
+from logsentinel.portal.batch_budget import input_ceiling
 
 
 def job(store, machine, id, created, cfg=None, status="done", attempts=1):
@@ -107,10 +108,7 @@ def test_current_model_planning_excludes_previous_model_and_collecting_tail(clie
         and not r["analysis"]["errors"]
     )
     assert r["limits"]["effective_input_bytes"] == 5000
-    assert (
-        r["limits"]["input_ceiling_bytes"]
-        == 16384 - cfg.llm.max_tokens - len(SYSTEM.encode()) - 1024
-    )
+    assert r["limits"]["input_ceiling_bytes"] == input_ceiling(cfg, s.get("machine", m))
     assert all(x["machine_id"] == m for x in r["services"])
     # A config change starts a new measurement, not a zero-capacity verdict.
     c.post("/api/settings", json={"input_budget": 6000}).raise_for_status()
@@ -189,6 +187,6 @@ async def test_old_capacity_history_does_not_create_a_new_overload_warning(clien
 
     a.client.call = healthy
     await a.cycle()
-    assert len(s.events(status="capacity")) == 1
-    assert len(s.events(status="compact")) == 1
+    assert not s.events(status="capacity")
+    assert len(s.events(status="compact")) == 2
     assert not s.rows("problems")

@@ -17,7 +17,9 @@ function coverageWindow(data, title) {
   const items = [
     ["reviewed", bilingual("Revisados por el LLM", "Reviewed by the LLM")],
     ["pending", bilingual("Pendientes de revisión", "Waiting for review")],
-    ["capacity", bilingual("Omitidos por capacidad", "Skipped for capacity")],
+    ["capacity", bilingual("Histórico en cola", "Historical backlog")],
+    ["queued", bilingual("En lote pendiente", "In a queued batch")],
+    ["oversized", bilingual("No caben en el contexto", "Exceed input budget")],
     [
       "policy",
       bilingual("No seleccionados por política", "Not selected by policy"),
@@ -103,7 +105,7 @@ async function mountCapacitySummary(root, machine = scope) {
           coverageNumber(r.pending) +
           bilingual(" pendientes · ", " waiting · ") +
           coverageNumber(r.capacity) +
-          bilingual(" omitidos por capacidad", " skipped for capacity"),
+          bilingual(" en la cola histórica", " in the historical queue"),
       ),
     );
     p.append(
@@ -383,8 +385,8 @@ async function capacityView(root) {
           ],
           [
             bilingual(
-              "Eventos candidatos por máquina y ciclo",
-              "Candidate events per machine per cycle",
+              "Originales candidatos por lote",
+              "Candidate originals per batch",
             ),
             l.max_events_per_machine,
           ],
@@ -402,8 +404,8 @@ async function capacityView(root) {
       el(
         "p",
         bilingual(
-          "El presupuesto usa bytes UTF-8 como cota conservadora, no tokens reales ni un número fijo de líneas. Las instrucciones y la salida ocupan espacio. El límite de eventos solo admite candidatos: no garantiza que quepan. Actualmente se prepara como máximo un lote nuevo por máquina y ciclo; las verificaciones también consumen llamadas.",
-          "The budget uses UTF-8 bytes as a conservative bound, not actual tokens or a fixed line count. Instructions and output take space. The event limit only admits candidates: it does not guarantee they fit. Currently at most one new batch is prepared per machine per cycle; verification also consumes calls.",
+          "El presupuesto limita el tamaño de la entrada. Las repeticiones comprobadas se agrupan conservando cantidad, fechas, variaciones de frecuencia, ejemplos y referencias. Una máquina puede procesar varios lotes por ciclo; las verificaciones comparten el límite de llamadas. Los excedentes quedan en cola y los reintentos conservan el lote enviado.",
+          "The budget bounds input size. Recognized repetitions are grouped with counts, times, frequency changes, examples and references. A machine can process multiple batches per cycle; verification shares the call limit. Overflow stays queued and retries preserve the submitted batch.",
         ),
         "subtle",
       ),

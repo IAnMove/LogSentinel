@@ -3,7 +3,7 @@
 import json
 import time
 
-from .analysis import SYSTEM
+from .batch_budget import input_ceiling as model_input_ceiling
 
 
 def review_signature(cfg):
@@ -23,6 +23,11 @@ def review_signature(cfg):
                 "max_events",
                 "max_calls",
                 "sensitivity",
+                "adaptive_batching",
+                "target_batch_seconds",
+                "cycle_budget_seconds",
+                "triage_thinking",
+                "verification",
             )
         ),
     )
@@ -46,6 +51,8 @@ def _window(db, start, end, machine_id):
         reviewed=statuses.get("compact", 0) + statuses.get("reviewed", 0),
         capacity=statuses.get("capacity", 0),
         pending=statuses.get("pending", 0),
+        queued=statuses.get("queued", 0),
+        oversized=statuses.get("oversized", 0),
         policy=statuses.get("sampled", 0),
         excluded=statuses.get("excluded", 0),
         error=statuses.get("error", 0),
@@ -146,8 +153,12 @@ def capacity_report(store, machine_id=""):
         if done
         else None
     )
-    input_ceiling = max(
-        0, cfg.context_tokens - cfg.llm.max_tokens - len(SYSTEM.encode()) - 1024
+    scoped_machines = [
+        m for m in store.objects("machine") if not machine_id or m["id"] == machine_id
+    ]
+    input_ceiling = min(
+        (model_input_ceiling(cfg, m) for m in scoped_machines),
+        default=model_input_ceiling(cfg),
     )
     journals = [s for s in sources if s["kind"] == "journald" and s["enabled"]]
     duplicate_journals = (

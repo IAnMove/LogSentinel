@@ -1,14 +1,24 @@
 """Deterministic, bounded filters and outgoing-data redaction."""
 
 import ipaddress
+import json
 import re
 import time
 import regex
 from logsentinel.memory.matcher import MemoryMatcher
 
 SECRET = re.compile(
-    r"(?i)(authorization\s*[:=]\s*(?:bearer\s+)?|(?:api[_-]?key|token|password|secret)\s*[:=]\s*)[\"\']?[^\s,;\"\']+"
+    r"(?i)(authorization\s*[:=]\s*(?:bearer\s+)?|(?:api[ _-]?key|access[ _-]?key|token|password|secret)\s*[:=]\s*)[\"\']?[^\s,;\"\']+"
 )
+TELEGRAM_TOKEN = re.compile(r"(?i)(https?://api\.telegram\.org/bot)\d+:[A-Za-z0-9_-]+")
+
+
+def protected_secrets(store):
+    return (
+        store.settings().llm.api_key,
+        store.meta("admin_token"),
+        *json.loads(store.meta("retired_admin_tokens") or "[]"),
+    )
 
 
 def redact(text, secrets=()):
@@ -16,6 +26,7 @@ def redact(text, secrets=()):
     for secret in secrets:
         if secret and len(secret) > 3:
             text = text.replace(secret, "[REDACTED]")
+    text = TELEGRAM_TOKEN.sub(lambda m: m[1] + "[REDACTED]", text)
     return SECRET.sub(lambda m: m[1] + "[REDACTED]", text)
 
 
@@ -49,8 +60,8 @@ def matches(rule, event, problem_id=""):
     )
 
 
-def excluded(store, event):
-    for rule in store.objects("rule"):
+def excluded(store, event, rules=None):
+    for rule in store.objects("rule") if rules is None else rules:
         if rule["action"] != "exclude":
             continue
         try:

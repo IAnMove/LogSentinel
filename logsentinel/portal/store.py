@@ -49,6 +49,8 @@ class Store:
             CREATE INDEX IF NOT EXISTS events_time ON events(source_id,julianday(event_time));
             CREATE INDEX IF NOT EXISTS events_received ON events(source_id,received);
             CREATE TABLE IF NOT EXISTS jobs(id TEXT PRIMARY KEY,machine_id TEXT,event_ids TEXT,status TEXT,created REAL,updated REAL,attempts INTEGER DEFAULT 0,config TEXT,error TEXT);
+            CREATE TABLE IF NOT EXISTS review_batches(job_id TEXT PRIMARY KEY REFERENCES jobs(id) ON DELETE CASCADE,data TEXT NOT NULL);
+            CREATE INDEX IF NOT EXISTS jobs_ready ON jobs(machine_id,status,created);
             CREATE TABLE IF NOT EXISTS problems(id TEXT PRIMARY KEY,machine_id TEXT,fingerprint TEXT,title TEXT,severity TEXT,status TEXT,first_seen REAL,last_seen REAL,count INTEGER,data TEXT,UNIQUE(machine_id,fingerprint));
             CREATE TABLE IF NOT EXISTS appearances(problem_id TEXT,event_id TEXT,PRIMARY KEY(problem_id,event_id));
             CREATE TABLE IF NOT EXISTS revisions(id TEXT PRIMARY KEY,problem_id TEXT,created REAL,data TEXT);
@@ -642,7 +644,7 @@ class Store:
     def recover(self):
         with self.connect() as db:
             db.execute(
-                "UPDATE jobs SET status='retry',attempts=max(0,attempts-1),error='Interrupted during analysis',updated=? WHERE status='running'",
+                "UPDATE jobs SET status='retry',attempts=max(0,attempts-CASE WHEN coalesce((SELECT json_extract(data,'$.phase') FROM review_batches WHERE job_id=jobs.id),'triage')='triage' THEN 1 ELSE 0 END),error='Interrupted during analysis',updated=? WHERE status='running'",
                 (time.time(),),
             )
             # Older versions could strand an interrupted third attempt in a
@@ -657,6 +659,26 @@ class Store:
     def prune(self):
         cutoff = time.time() - self.settings().retention_days * 86400
         with self.connect() as db:
+            # Frozen requests contain log excerpts and follow original retention.
+            db.execute(
+                "UPDATE jobs SET status='cancelled',error='Evidence retention expired' WHERE id IN (SELECT job_id FROM review_batches WHERE json_extract(data,'$.evidence_created')<?) AND status IN ('pending','running','retry')",
+                (cutoff,),
+            )
+            db.execute(
+                "UPDATE jobs SET status='cancelled',error='Evidence retention expired' WHERE id IN (SELECT j.id FROM jobs j JOIN review_batches b ON b.job_id=j.id, json_each(j.event_ids) ref JOIN events e ON e.id=ref.value JOIN segments s ON s.id=e.segment_id WHERE s.created<?) AND status IN ('pending','running','retry')",
+                (cutoff,),
+            )
+            db.execute(
+                "UPDATE events SET status='pending' WHERE status IN ('queued','error') AND id IN (SELECT ref.value FROM jobs j,json_each(j.event_ids) ref WHERE j.status='cancelled' AND j.error='Evidence retention expired')"
+            )
+            db.execute(
+                "DELETE FROM review_batches WHERE job_id IN (SELECT j.id FROM jobs j, json_each(j.event_ids) ref JOIN events e ON e.id=ref.value JOIN segments s ON s.id=e.segment_id WHERE s.created<?) OR job_id IN (SELECT id FROM jobs WHERE created<?)",
+                (cutoff, cutoff),
+            )
+            db.execute(
+                "DELETE FROM review_batches WHERE json_extract(data,'$.evidence_created')<?",
+                (cutoff,),
+            )
             ids = [
                 r[0]
                 for r in db.execute(
@@ -668,11 +690,14 @@ class Store:
                 db.execute("DELETE FROM segments WHERE id=?", (sid,))
             if ids:
                 self._metric(db, "", "segments_expired", len(ids))
-            db.execute("PRAGMA wal_checkpoint(PASSIVE)") if not ids else None
-        if ids:
-            with self.connect() as db:
+        # Checkpoint after the cleanup transaction commits, including a cleanup
+        # that deletes zero rows. SQLite rejects checkpointing our own writer.
+        with self.connect() as db:
+            if ids:
                 db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
                 db.execute("VACUUM")
+            else:
+                db.execute("PRAGMA wal_checkpoint(PASSIVE)")
         return len(ids)
 
     def discard_sent(self):

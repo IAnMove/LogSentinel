@@ -9,12 +9,14 @@ import time
 from typing import Literal
 
 from fastapi import HTTPException, Request
-from .analysis import Analyzer, compact, SYSTEM
+from .analysis import Analyzer, compact
+from .compaction import public_group
 from .capacity import review_signature
 from .model_timing import estimate_model_time, endpoint_id
 from .models import Model, Settings, Source
 from .rules import excluded
 from .store import dumps
+from .batch_budget import profile_key, input_ceiling
 
 
 def fingerprint(store):
@@ -32,7 +34,7 @@ def fingerprint(store):
 
 def measured_capacity(store, cfg, machine_id=""):
     """Use successful completed batches with the current model and budgets."""
-    durations, covered, calls = [], [], []
+    durations, covered, calls, shapes = [], [], [], []
     with store.connect() as db:
         changed = db.execute(
             "SELECT coalesce(max(created),0) FROM audit WHERE action IN ('settings','save:source','delete:source','save:rule','delete:rule')"
@@ -67,6 +69,19 @@ def measured_capacity(store, cfg, machine_id=""):
             durations.append(sum(r["duration"] for r in use))
             covered.append(n)
             calls.append(len(use))
+            triage = [json.loads(r["detail"]) for r in use if r["kind"] == "analysis"]
+            if (
+                len(triage) == 1
+                and triage[0].get("review_profile") == profile_key(cfg)
+                and triage[0].get("groups")
+            ):
+                shapes.append(
+                    (
+                        n / triage[0]["groups"],
+                        triage[0].get("group_bytes", triage[0].get("input_bytes", 0))
+                        / triage[0]["groups"],
+                    )
+                )
             if len(durations) == 12:
                 break
         recent = db.execute(
@@ -94,15 +109,19 @@ def measured_capacity(store, cfg, machine_id=""):
     hosts = max(1, len(active))
     seconds = median(durations) if durations else None
     batch_calls = median(calls) if calls else None
-    period = (
-        max(
-            cfg.interval_seconds
-            * math.ceil(hosts / max(1, cfg.max_calls / batch_calls)),
-            hosts * seconds,
+    period = None
+    if seconds:
+        call_seconds = seconds / batch_calls
+        dispatch = min(
+            cfg.max_calls, max(1, math.ceil(cfg.cycle_budget_seconds / call_seconds))
         )
-        if seconds
-        else None
-    )
+        work_seconds = dispatch * call_seconds
+        wait_seconds = (
+            min(cfg.interval_seconds, max(1, work_seconds / 3))
+            if cfg.adaptive_batching
+            else cfg.interval_seconds
+        )
+        period = hosts * batch_calls * (work_seconds + wait_seconds) / dispatch
     reliable = len(durations) >= 3 and error_rate is not None and error_rate < 0.25
     return dict(
         batches=len(durations),
@@ -115,6 +134,9 @@ def measured_capacity(store, cfg, machine_id=""):
         error_rate=error_rate,
         headroom_percent=25,
         reliable=reliable,
+        workload_samples=len(shapes),
+        originals_per_group=median(s[0] for s in shapes) if shapes else None,
+        bytes_per_group=median(s[1] for s in shapes) if shapes else None,
     )
 
 
@@ -152,9 +174,7 @@ def propose(store, machine_id):
     capacity = measured_capacity(store, cfg, machine_id)
     rate = total * 60 / window
     choices = []
-    ceiling = max(
-        0, cfg.context_tokens - cfg.llm.max_tokens - len(SYSTEM.encode()) - 1024
-    )
+    ceiling = input_ceiling(cfg, machine)
 
     def option(id, patches, global_patch=None):
         global_patch = global_patch or {}
@@ -172,6 +192,19 @@ def propose(store, machine_id):
             min(global_patch.get("input_budget", cfg.input_budget), ceiling),
         )
         prediction = capacity["events_per_minute"]
+        shape_matches = (
+            capacity["workload_samples"] >= 3
+            and groups
+            and 0.8
+            <= (len(packed) / len(groups)) / capacity["originals_per_group"]
+            <= 1.2
+            and 0.8
+            <= (sum(len(dumps(public_group(g)).encode()) for g in groups) / len(groups))
+            / max(1, capacity["bytes_per_group"])
+            <= 1.2
+        )
+        # Even similar repeat ratios cannot prove a new severity filter will
+        # run like routine historical traffic. Do not certify those proposals.
         # Workload changes and omitted context cannot be certified against old timing.
         contexts = any(
             dict(s, **patches.get(s["id"], {})).get("context_minutes", 5) > 0
@@ -180,7 +213,12 @@ def propose(store, machine_id):
         )
         fits = (
             target <= prediction
-            if prediction is not None and events and not global_patch and not contexts
+            if prediction is not None
+            and events
+            and shape_matches
+            and not patches
+            and not global_patch
+            and not contexts
             else None
         )
         choices.append(
@@ -193,6 +231,7 @@ def propose(store, machine_id):
                 retained_fraction=fraction,
                 selected_per_minute=target,
                 fits_estimate=fits,
+                estimate_note="Comparable workload required; changed filters need new measurements",
                 context_extra=contexts,
                 groups_in_trial=len(groups),
                 events_in_trial=len(packed),
