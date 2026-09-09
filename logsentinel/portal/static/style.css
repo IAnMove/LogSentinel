@@ -1099,3 +1099,38 @@ main > * {
     stroke-dasharray: none;
   }
 }
+
+/* --- Status banner ------------------------------------------------------ */
+/* The banner says a lot on purpose. What it lacked was a reading order: the
+   capture headline now leads, the stat band is fenced off, and every aside
+   settles to the same quiet size instead of five competing ones. */
+.monitor-status {
+  line-height: 1.5;
+}
+/* The text column carries the rules that fence the stat band, so let it take
+   the width the action button leaves rather than stopping mid-panel. */
+.monitor-status > div:first-child {
+  flex: 1;
+  min-width: 320px;
+}
+.monitor-status strong {
+  font-size: 1.05rem;
+  letter-spacing: -0.2px;
+}
+.monitor-status .subtle {
+  font-size: 11.5px;
+  line-height: 1.6;
+}
+.monitor-coverage {
+  border-top: 1px solid var(--soft-border);
+  border-bottom: 1px solid var(--soft-border);
+  padding: 12px 0;
+  margin: 14px 0 12px;
+}
+.monitor-coverage strong {
+  font-size: 1.55rem;
+  letter-spacing: -0.5px;
+}
+.monitor-coverage span {
+  color: var(--muted);
+}

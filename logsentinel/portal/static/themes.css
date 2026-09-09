@@ -304,20 +304,41 @@ input[type="checkbox"] {
   align-items: center;
   z-index: 2;
 }
+/* Appearance and language are chrome, not content: they sit above the page
+   title, so they must not outweigh it. Quiet by default, present on hover. */
 .display-controls label {
   position: static;
   display: flex;
   flex-direction: row;
   align-items: center;
-  gap: 8px;
-  background: var(--surface);
-  padding: 0 6px;
+  gap: 7px;
+  background: transparent;
+  padding: 0;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  color: var(--muted);
+  text-transform: uppercase;
 }
 .display-controls select {
   width: auto;
-  min-height: 34px;
-  padding: 4px;
+  min-height: 30px;
+  padding: 3px 6px;
   max-width: 150px;
+  font-size: 12px;
+  background: transparent;
+  border-color: transparent;
+  color: var(--muted);
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease,
+    color 0.15s ease;
+}
+.display-controls select:hover,
+.display-controls select:focus {
+  background: var(--surface);
+  border-color: var(--control-border);
+  color: var(--ink);
 }
 .badge.degraded,
 .badge.stale {
