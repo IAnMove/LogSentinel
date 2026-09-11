@@ -21,22 +21,33 @@ def pair(tmp_path):
             json={"name": "remote", "machine_id": machine, "kind": "push", "enabled": True},
         ).json()["id"]
         token = panel.post("/api/sources/" + source + "/token").json()["token"]
-        reception = TestClient(create_ingest_app(app.state.store), base_url="https://sentinel.invalid")
-        yield panel, reception, source, token
+        reception = TestClient(
+            create_ingest_app(app.state.store, app.state.telemetry),
+            base_url="https://sentinel.invalid",
+        )
+        yield panel, reception, source, token, machine
 
 
-ADMIN_PATHS = ["/", "/api/state", "/api/stats", "/api/settings", "/login", "/api/backup"]
+ADMIN_PATHS = [
+    "/",
+    "/api/state",
+    "/api/stats",
+    "/api/settings",
+    "/login",
+    "/api/backup",
+    "/api/telemetry",
+]
 
 
 @pytest.mark.parametrize("path", ADMIN_PATHS)
 def test_reception_listener_exposes_no_administration(pair, path):
-    _, reception, _, _ = pair
+    _, reception, *_ = pair
     assert reception.get(path).status_code == 404
     assert reception.post(path, json={}).status_code == 404
 
 
 def test_reception_accepts_a_token_holder_from_any_host(pair):
-    _, reception, source, token = pair
+    _, reception, source, token, _ = pair
     headers = {"Authorization": "Bearer " + token}
     body = {"events": [{"id": "e1", "raw": "synthetic reception line"}]}
     result = reception.post("/ingest/" + source, json=body, headers=headers)
@@ -48,7 +59,7 @@ def test_reception_accepts_a_token_holder_from_any_host(pair):
 
 
 def test_reception_still_requires_the_source_token(pair):
-    _, reception, source, _ = pair
+    _, reception, source, _, _ = pair
     body = {"events": [{"id": "e1", "raw": "synthetic reception line"}]}
     assert reception.post("/ingest/" + source, json=body).status_code == 401
     assert reception.post(
@@ -57,7 +68,7 @@ def test_reception_still_requires_the_source_token(pair):
 
 
 def test_portal_keeps_serving_reception_for_existing_tunnels(pair):
-    panel, _, source, token = pair
+    panel, _, source, token, _ = pair
     body = {"events": [{"id": "e1", "raw": "synthetic tunnel line"}]}
     result = panel.post(
         "/ingest/" + source, json=body, headers={"Authorization": "Bearer " + token}
@@ -66,7 +77,7 @@ def test_portal_keeps_serving_reception_for_existing_tunnels(pair):
 
 
 def test_reception_rejects_an_oversized_request(pair):
-    _, reception, source, token = pair
+    _, reception, source, token, _ = pair
     oversized = "x" * 5_000_000
     result = reception.post(
         "/ingest/" + source,
@@ -93,7 +104,7 @@ def test_portal_refuses_an_unprotected_or_incomplete_reception_listener(tmp_path
 
 
 def test_one_sender_cannot_spend_more_than_its_hourly_allowance(pair):
-    panel, reception, source, token = pair
+    panel, reception, source, token, _ = pair
     store = panel.app.state.store
     settings = store.settings()
     settings.sender_events_per_hour = 100
@@ -123,7 +134,7 @@ def test_one_sender_cannot_spend_more_than_its_hourly_allowance(pair):
 
 
 def test_a_refused_sender_does_not_block_another(pair):
-    panel, reception, source, token = pair
+    panel, reception, source, token, _ = pair
     store = panel.app.state.store
     settings = store.settings()
     settings.sender_events_per_hour = 100
@@ -151,7 +162,7 @@ def test_a_refused_sender_does_not_block_another(pair):
 
 
 def test_accepted_delivery_reports_what_is_left(pair):
-    _, reception, source, token = pair
+    _, reception, source, token, _ = pair
     result = reception.post(
         "/ingest/" + source,
         json={"events": [{"id": "e1", "raw": "synthetic line"}]},
@@ -159,3 +170,23 @@ def test_accepted_delivery_reports_what_is_left(pair):
     ).json()
     assert result["quota"]["events_remaining"] > 0
     assert 0 < result["quota"]["resets_in"] <= 3600
+
+
+def test_reception_accepts_machine_metrics_without_exposing_configuration(pair):
+    panel, reception, _, _, machine = pair
+    cfg = panel.post(
+        f"/api/telemetry/{machine}/config",
+        json={"enabled": True, "mode": "remote"},
+    )
+    assert cfg.status_code == 200, cfg.text
+    token = panel.post(f"/api/telemetry/{machine}/token").json()["token"]
+    body = {"samples": [{"values": {"cpu_pct": 12, "ram_pct": 34}}]}
+    headers = {"Authorization": "Bearer " + token}
+    result = reception.post("/ingest-metrics/" + machine, json=body, headers=headers)
+    assert result.status_code == 200, result.text
+    assert result.json()["accepted"] == 1
+    assert reception.get("/api/telemetry").status_code == 404
+    assert reception.get("/api/telemetry/" + machine).status_code == 404
+    assert reception.post("/ingest-metrics/" + machine, json=body).status_code == 401
+    latest = panel.get("/api/telemetry/" + machine).json()["latest"]
+    assert latest["values"]["cpu_pct"] == 12

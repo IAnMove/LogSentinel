@@ -32,8 +32,9 @@ CA certificate, which is public.
       --tls-key /etc/logsentinel/server.key
 
 The panel keeps listening on `127.0.0.1:8766` and still requires the access key,
-origin and CSRF checks. The listener on `8767` carries only `/ingest`, `/heartbeat`
-and `/enroll`; it exposes nothing that reads or changes the portal's contents.
+origin and CSRF checks. The listener on `8767` carries `/ingest`, `/heartbeat`,
+`/enroll` and `/ingest-metrics`; it exposes nothing that reads or changes the
+portal's contents. Remote CPU/RAM senders use that same listener, not the panel.
 
 A listener outside loopback is refused without TLS. Keeping `--ingest-listen` on
 `127.0.0.1` is allowed and is how the SSH tunnel path behaves today.

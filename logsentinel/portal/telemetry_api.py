@@ -81,6 +81,13 @@ def register_telemetry(app, telemetry):
         store.audit("rotate_telemetry_token", id)
         return {"token": value, "machine_id": id}
 
+    register_metrics_ingest(app, telemetry)
+
+
+def register_metrics_ingest(app, telemetry):
+    """Sender-facing metrics reception; safe to mount beside log ingest."""
+    store = telemetry.store
+
     @app.post("/ingest-metrics/{id}")
     async def ingest(id: str, request: Request):
         token = request.headers.get("authorization", "").removeprefix("Bearer ")

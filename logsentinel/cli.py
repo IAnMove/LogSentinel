@@ -684,7 +684,9 @@ def portal(data_dir: str = typer.Option("~/.local/share/logsentinel/portal", "--
         ),
         uvicorn.Server(
             uvicorn.Config(
-                create_ingest_app(application.state.store),
+                create_ingest_app(
+                    application.state.store, application.state.telemetry
+                ),
                 host=ingest_host,
                 port=ingest_port,
                 proxy_headers=False,

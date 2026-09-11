@@ -1,4 +1,4 @@
-"""Log reception, mountable beside the portal or served alone on its own listener.
+"""Log and metrics reception, mountable beside the portal or served alone.
 
 Administration and reception are different trust boundaries: the portal answers an
 operator on loopback, this answers unattended senders that may reach it over the
@@ -115,7 +115,7 @@ def register_ingest(app, store):
             "quota": store.sender_quota(source["id"], store.settings()),
         }
 
-def create_ingest_app(store):
+def create_ingest_app(store, telemetry=None):
     """Build a listener carrying reception and nothing else."""
     app = FastAPI(
         title="LogSentinel reception",
@@ -152,4 +152,8 @@ def create_ingest_app(store):
 
     register_ingest(app, store)
     register_enrollment(app, store)
+    if telemetry is not None:
+        from .telemetry_api import register_metrics_ingest
+
+        register_metrics_ingest(app, telemetry)
     return app

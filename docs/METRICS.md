@@ -32,13 +32,24 @@ Automatic trend analysis is optional, defaults off and has a separate configurab
 
 ## Another machine through SSH
 
-On the portal create/select that machine, enable remote metrics and generate its dedicated metrics token. Log-source tokens are separate. Keep the token out of command-line arguments and shell history. For a portal listening on port 8766, run on the remote sender:
+On the portal create/select that machine, enable remote metrics and generate its dedicated metrics token. Log-source tokens are separate. Keep the token out of command-line arguments and shell history.
+
+If the portal serves reception on its own TLS listener (`--ingest-listen`), send
+metrics there — the same host and port as log ingest, path `/ingest-metrics/MACHINE_ID`.
+The panel on loopback is not required for the sender:
+
+```bash
+read -rsp 'Metrics token: ' LOGSENTINEL_METRICS_TOKEN
+export LOGSENTINEL_METRICS_TOKEN
+logsentinel metrics-forward --receiver https://portal-server:8767 \
+  --machine-id MACHINE_ID --interval 60 --disk / --disk /srv
+```
+
+Without a reception listener, keep using an SSH tunnel to the panel as before:
 
 ```bash
 ssh -NT -L 18766:127.0.0.1:8766 user@portal-server
 ```
-
-In another terminal on the sender, with LogSentinel installed:
 
 ```bash
 read -rsp 'Metrics token: ' LOGSENTINEL_METRICS_TOKEN
