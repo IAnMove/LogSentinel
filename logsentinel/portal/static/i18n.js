@@ -198,6 +198,23 @@ const translations = {
     "Direct alerts and external services. Saving does not send a message.",
   "No notificar mantiene el análisis. Excluir evita enviar esas coincidencias al modelo.":
     "Muting keeps analysis enabled. Excluding prevents matching events from being sent to the model.",
+  "No notificar mantiene el análisis. Excluir evita enviar esas coincidencias al modelo. Los presets de ruido se previsualizan y se aplican a mano.":
+    "Muting keeps analysis enabled. Excluding prevents matching events from being sent to the model. Noise presets are previewed and applied by hand.",
+  "Presets de ruido rutinario": "Routine noise presets",
+  "No se activan solos. Previsualiza sobre una muestra y añade la exclusión si el recorte te parece correcto. Los fallos reales siguen en otras líneas.":
+    "They are not enabled on their own. Preview a sample and add the exclusion if the cut looks right. Real failures still appear on other lines.",
+  "Servicio / unidad": "Service / unit",
+  "Temporizadores systemd correctos": "Successful systemd timers",
+  "Unidades oneshot correctas": "Successful oneshot units",
+  "Arranque y parada de watchdog": "Watchdog start and stop",
+  "Quita arranques, paradas y éxitos limpios de timers. Un timer fallido sigue generando otras líneas.":
+    "Drops clean timer start/stop/success lines. A failed timer still produces other messages.",
+  "Oculta unidades que salieron bien. Fallos, timeouts y códigos distintos de cero siguen visibles.":
+    "Hides units that exited cleanly. Failures, timeouts and non-zero results stay visible.",
+  "Ciclo rutinario del watchdog, no un timeout ni un kill.":
+    "Routine watchdog lifecycle, not a watchdog timeout or kill.",
+  "Añadir exclusión": "Add exclusion",
+  "Preset añadido como regla de exclusión.": "Preset added as an exclusion rule.",
   Añadir: "Add",
   Nombre: "Name",
   Tipo: "Type",

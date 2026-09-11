@@ -35,7 +35,15 @@ from .notify import Outbox
 from .health import HealthMonitor
 from .widget_api import register_widget
 from .capacity import capacity_report
-from .rules import validate_rule, matches, excluded, redact, sanitize, protected_secrets
+from .rules import (
+    validate_rule,
+    matches,
+    excluded,
+    redact,
+    sanitize,
+    protected_secrets,
+    NOISE_PRESETS,
+)
 from .ingest import register_ingest
 from .enroll import register_enrollment
 
@@ -927,6 +935,37 @@ def create_app(directory, background=True):
             "matches": sanitize(yes[:5], protected_secrets(store)),
             "nonmatches": sanitize(no[:5], protected_secrets(store)),
         }
+
+    @app.get("/api/rule-presets")
+    def rule_presets():
+        return list(NOISE_PRESETS)
+
+    @app.post("/api/rule-presets/{id}")
+    async def apply_rule_preset(id: str, request: Request):
+        preset = next((p for p in NOISE_PRESETS if p["id"] == id), None)
+        if not preset:
+            raise HTTPException(404, "Unknown preset")
+        body = await request.json() if await request.body() else {}
+        machine_id = body.get("machine_id") or ""
+        if machine_id and not store.get("machine", machine_id):
+            raise HTTPException(400, "Unknown machine")
+        name = preset["name"]
+        if any(
+            r["name"] == name and r.get("machine_id", "") == machine_id
+            for r in store.objects("rule")
+        ):
+            raise HTTPException(409, "This preset is already present")
+        data = Rule(
+            name=name,
+            action=preset["action"],
+            kind=preset["kind"],
+            pattern=preset["pattern"],
+            machine_id=machine_id,
+            enabled=True,
+        ).model_dump()
+        rid = store.put("rule", data)
+        store.audit("apply_rule_preset", id)
+        return public("rule", dict(data, id=rid))
 
     @app.post("/api/reanalyze")
     async def reanalyze(request: Request):

@@ -50,6 +50,34 @@ def redact(text, secrets=()):
     return SECRET.sub(lambda m: m[1] + "[REDACTED]", text)
 
 
+NOISE_PRESETS = (
+    {
+        "id": "systemd_timer_success",
+        "name": "Temporizadores systemd correctos",
+        "action": "exclude",
+        "kind": "regex",
+        "pattern": r"(?i)(?:Started |Stopped |Finished ).+\.timer\.?$|.+\.timer: (?:Succeeded|Deactivated successfully)\.?$",
+        "note": "Quita arranques, paradas y éxitos limpios de timers. Un timer fallido sigue generando otras líneas.",
+    },
+    {
+        "id": "systemd_oneshot_success",
+        "name": "Unidades oneshot correctas",
+        "action": "exclude",
+        "kind": "regex",
+        "pattern": r"(?i).+\.service: Deactivated successfully\.?$",
+        "note": "Oculta unidades que salieron bien. Fallos, timeouts y códigos distintos de cero siguen visibles.",
+    },
+    {
+        "id": "watchdog_lifecycle",
+        "name": "Arranque y parada de watchdog",
+        "action": "exclude",
+        "kind": "regex",
+        "pattern": r"(?i)(?:Started |Stopped |Starting |Stopping ).*(watchdog|llm-ram-watchdog)",
+        "note": "Ciclo rutinario del watchdog, no un timeout ni un kill.",
+    },
+)
+
+
 def validate_rule(rule):
     if rule.kind == "regex":
         regex.compile(rule.pattern, regex.IGNORECASE)
@@ -68,6 +96,14 @@ def matches(rule, event, problem_id=""):
             return False
     if rule["kind"] == "problem":
         return rule["pattern"] == problem_id
+    if rule["kind"] == "service":
+        wanted = rule["pattern"].casefold()
+        metadata = event.get("metadata") or {}
+        return wanted in {
+            str(event.get("service") or "").casefold(),
+            str(metadata.get("systemd_unit") or "").casefold(),
+            str(metadata.get("systemd_user_unit") or "").casefold(),
+        }
     if rule["kind"] == "ip":
         return MemoryMatcher._matches_ip(event.get("message", ""), rule["pattern"])
     return bool(

@@ -188,6 +188,60 @@ def test_disabled_destination_cancels_queue(client):
     assert s.rows("deliveries")[0]["status"] == "cancelled"
 
 
+def test_service_rules_and_noise_presets_are_opt_in(client):
+    from logsentinel.portal.rules import matches, NOISE_PRESETS
+
+    c, s = client
+    m, source = machine_source(c)
+    s.ingest(
+        s.get("source", source),
+        [
+            {
+                "origin": "t1",
+                "message": "Started daily-backup.timer.",
+                "service": "systemd",
+            },
+            {
+                "origin": "w1",
+                "message": "Started llm-ram-watchdog.service.",
+                "service": "llm-ram-watchdog",
+            },
+            {
+                "origin": "ssh",
+                "message": "Failed password for root",
+                "service": "sshd",
+            },
+        ],
+    )
+    timer = next(p for p in NOISE_PRESETS if p["id"] == "systemd_timer_success")
+    assert matches(timer, {"message": "Started daily-backup.timer."})
+    assert not matches(timer, {"message": "Failed password for root"})
+    assert matches(
+        {"kind": "service", "pattern": "sshd", "action": "mute", "enabled": True},
+        {"message": "x", "service": "sshd"},
+    )
+    listed = c.get("/api/rule-presets")
+    assert listed.status_code == 200 and {p["id"] for p in listed.json()} >= {
+        "systemd_timer_success",
+        "watchdog_lifecycle",
+    }
+    added = c.post("/api/rule-presets/systemd_timer_success", json={"machine_id": m})
+    assert added.status_code == 200, added.text
+    assert added.json()["action"] == "exclude"
+    assert c.post("/api/rule-presets/systemd_timer_success", json={"machine_id": m}).status_code == 409
+    preview = c.post(
+        "/api/rules/preview",
+        json={
+            "name": "svc",
+            "action": "mute",
+            "kind": "service",
+            "pattern": "sshd",
+        },
+    )
+    assert preview.status_code == 200
+    assert preview.json()["matched"] >= 1
+
+
 def test_regex_preview_does_not_save_rule(client):
     c, s = client
     m, source = machine_source(c)

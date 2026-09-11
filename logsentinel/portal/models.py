@@ -229,7 +229,7 @@ def merge_destination(old, patch, clear):
 class Rule(Model):
     name: str = Field(min_length=1, max_length=120)
     action: Literal["mute", "exclude"] = "mute"
-    kind: Literal["problem", "regex", "ip"] = "regex"
+    kind: Literal["problem", "regex", "ip", "service"] = "regex"
     pattern: str = Field(min_length=1, max_length=1000)
     machine_id: str = ""
     source_id: str = ""

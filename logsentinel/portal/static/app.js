@@ -542,7 +542,7 @@ function objectView(root) {
           "Avisos directos y servicios externos. Guardar no envía mensajes.",
         ),
         rule: t(
-          "No notificar mantiene el análisis. Excluir evita enviar esas coincidencias al modelo.",
+          "No notificar mantiene el análisis. Excluir evita enviar esas coincidencias al modelo. Los presets de ruido se previsualizan y se aplican a mano.",
         ),
       }[kind],
     ),
@@ -556,6 +556,7 @@ function objectView(root) {
     ),
   );
   root.append(bar);
+  if (kind === "rule") root.append(rulePresetPanel());
   root.append(
     table(
       kind === "machine"
@@ -819,6 +820,7 @@ function objectForm(kind, o) {
     add("kind", t("Coincidencia"), "select", o.kind || "regex", [
       ["regex", t("Expresión regular")],
       ["ip", t("IP exacta / CIDR")],
+      ["service", t("Servicio / unidad")],
       ["problem", t("ID de problema")],
     ]);
     add("pattern", t("Expresión / IP / ID"), "textarea", o.pattern);
@@ -1329,6 +1331,58 @@ function activity(root) {
       ]),
     ),
   );
+}
+function rulePresetPanel() {
+  const box = panel(t("Presets de ruido rutinario"));
+  box.append(
+    el(
+      "p",
+      t(
+        "No se activan solos. Previsualiza sobre una muestra y añade la exclusión si el recorte te parece correcto. Los fallos reales siguen en otras líneas.",
+      ),
+    ),
+  );
+  const list = el("div");
+  box.append(list);
+  api("/api/rule-presets").then((presets) => {
+    for (const preset of presets) {
+      const row = el("section", undefined, "card");
+      row.append(
+        el("strong", t(preset.name)),
+        el("p", t(preset.note), "subtle"),
+        el("pre", preset.pattern),
+        actions(
+          button(t("Vista previa de coincidencias"), async () => {
+            const r = await api("/api/rules/preview", {
+              name: preset.name,
+              action: preset.action,
+              kind: preset.kind,
+              pattern: preset.pattern,
+              machine_id: scope,
+              enabled: true,
+            });
+            modal(
+              t("Vista previa · muestra de ") +
+                r.tested +
+                t(" eventos, ") +
+                r.matched +
+                t(" coincidencias"),
+              el("pre", JSON.stringify(r, null, 2)),
+            );
+          }),
+          button(t("Añadir exclusión"), async () => {
+            await api("/api/rule-presets/" + preset.id, {
+              machine_id: scope,
+            });
+            await refresh();
+            notice(t("Preset añadido como regla de exclusión."));
+          }),
+        ),
+      );
+      list.append(row);
+    }
+  });
+  return box;
 }
 function backupView(root) {
   const p = panel(t("Copia coherente del observatorio"));
