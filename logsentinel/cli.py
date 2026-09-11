@@ -85,7 +85,11 @@ def print_alert_card(alert: Alert) -> None:
 def run(
     config_file: Optional[str] = typer.Option(None, "--config", "-c", help="Path to config.yaml"),
 ) -> None:
-    """Start real-time monitoring of Linux logs."""
+    """Legacy monitor. Prefer `logsentinel portal` for the current product."""
+    console.print(
+        "[yellow]The 'run' command is the legacy engine with a separate database. "
+        "Use `logsentinel portal` for the current observatory.[/yellow]"
+    )
     cfg = Config.load(config_file)
     console.print(Panel.fit(
         f"[bold cyan]LogSentinel v{__version__}[/bold cyan] [green]ONLINE[/green]\n"
@@ -556,8 +560,9 @@ def service_install(
     system: bool = typer.Option(False, "--system", help="Install system-wide service (/etc/systemd/system)"),
     run_as: Optional[str] = typer.Option(None, "--run-as", help="Account for a system service (default: current user)"),
     allow_root: bool = typer.Option(False, "--allow-root", help="Permit a system service running as root"),
+    legacy: bool = typer.Option(False, "--legacy", help="Install the old CLI monitor instead of the portal"),
 ) -> None:
-    """Generate and install systemd service unit."""
+    """Generate and install a systemd user or system unit for the portal."""
     import getpass
 
     account = ""
@@ -578,15 +583,25 @@ def service_install(
     # The daemon resolves its data directory from the running account's home, so only
     # grant write access when this install knows that path: the account is ours.
     own_account = not account or account == getpass.getuser()
-    writable = f"ReadWritePaths={get_default_data_dir()}\n" if own_account else ""
+    data_root = get_default_data_dir() if legacy else Path.home() / ".local/share/logsentinel"
+    writable = f"ReadWritePaths={data_root}\n" if own_account else ""
+    if legacy:
+        start = f"{sys.executable} -m logsentinel.cli run"
+        description = "LogSentinel legacy log monitor"
+    else:
+        start = (
+            f"{sys.executable} -m logsentinel.cli portal "
+            f"--data-dir {Path(data_root) / 'portal'} --port 8765"
+        )
+        description = "LogSentinel local log review portal"
     unit_content = f"""[Unit]
-Description=LogSentinel AI Log Monitoring Daemon
+Description={description}
 After=network.target
 
 [Service]
 Type=simple
-{identity}ExecStart={sys.executable} -m logsentinel.cli run
-Restart=always
+{identity}ExecStart={start}
+Restart=on-failure
 RestartSec=5s
 Environment=PYTHONUNBUFFERED=1
 {writable}{SERVICE_HARDENING}

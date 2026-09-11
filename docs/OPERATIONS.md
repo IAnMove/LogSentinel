@@ -53,7 +53,7 @@ logsentinel portal --data-dir /ruta/nueva
 
 La restauración exige destino inexistente, integridad SQLite y esquema compatible. Un trabajo interrumpido se reanuda; una entrega en curso pasa a resultado desconocido. Solo una instancia puede usar un directorio. Copiar únicamente `sentinel.db` mientras está activo no sustituye la API de backup por la posible existencia de WAL.
 
-`systemd/logsentinel-portal.service` es una plantilla para `systemctl --user`: adapta `ExecStart` a tu instalación y copia la unidad a `~/.config/systemd/user/`. No se instala ni activa por ejecutar las pruebas. El token de acceso se imprime al arrancar; protege también el journal del servicio y el directorio de datos. Ejecuta como usuario con permiso de lectura sobre los logs necesarios; no hace falta ejecutar el portal como root.
+`logsentinel service install` escribe una unidad de usuario que arranca el portal (`~/.config/systemd/user/logsentinel.service`). `systemd/logsentinel-portal.service` es la misma plantilla. No se instala ni activa por ejecutar las pruebas. El token de acceso se guarda en `access-key.txt`; protege también el journal del servicio y el directorio de datos. Ejecuta como usuario con permiso de lectura sobre los logs necesarios; no hace falta ejecutar el portal como root. `logsentinel run` es el motor legado.
 
 El esquema actual es v1. Se rechazan versiones incompatibles. La base legacy se conserva separada; esta versión no transforma automáticamente alertas y supresiones antiguas en eventos nuevos.
 

@@ -4,7 +4,7 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=%h/security-agent/.venv/bin/logsentinel portal --data-dir %h/.local/share/logsentinel/portal --port 8766
+ExecStart=/usr/bin/env logsentinel portal --data-dir %h/.local/share/logsentinel/portal --port 8765
 Restart=on-failure
 RestartSec=5
 ReadWritePaths=%h/.local/share/logsentinel

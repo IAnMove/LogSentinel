@@ -110,6 +110,7 @@ def test_run_surfaces_collector_failure_and_stops(isolated_cli, monkeypatch):
     monkeypatch.setattr(asyncio, "sleep", tick)
     result = CliRunner().invoke(cli.app, ["run"])
     assert result.exit_code != 0
+    assert "legacy" in result.output.lower()
     assert str(result.exception) == "synthetic collector failed"
     engine.raise_if_failed.assert_called_once()
     engine.stop.assert_awaited_once()
@@ -155,6 +156,7 @@ def test_installed_unit_names_an_account_and_drops_privileges(tmp_path, monkeypa
     assert result.exit_code == 0, result.exception
     unit = (tmp_path / "units" / "logsentinel.service").read_text()
     assert "User=logsentinel-agent" in unit and "Group=logsentinel-agent" in unit
+    assert "portal" in unit
     for directive in ["NoNewPrivileges=yes", "CapabilityBoundingSet=", "ProtectSystem=strict"]:
         assert directive in unit
     # The account is not ours, so the unit must not guess a writable path for it.
@@ -167,7 +169,8 @@ def test_user_unit_keeps_write_access_to_its_own_data_directory(tmp_path, monkey
     result = CliRunner().invoke(cli.app, ["service", "install"])
     assert result.exit_code == 0, result.exception
     unit = (tmp_path / ".config" / "systemd" / "user" / "logsentinel.service").read_text()
-    assert f"ReadWritePaths={tmp_path / 'data'}" in unit
+    assert f"ReadWritePaths={tmp_path / '.local/share/logsentinel'}" in unit
+    assert "portal --data-dir" in unit
     assert "NoNewPrivileges=yes" in unit
     # User= is rejected by systemd in user units.
     assert "User=" not in unit
