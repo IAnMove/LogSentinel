@@ -188,6 +188,63 @@ def test_disabled_destination_cancels_queue(client):
     assert s.rows("deliveries")[0]["status"] == "cancelled"
 
 
+def test_sensitive_files_cannot_be_log_sources(client, tmp_path):
+    c, _ = client
+    machine = c.post("/api/objects/machine", json={"name": "A"}).json()["id"]
+    denied = c.post(
+        "/api/objects/source",
+        json={
+            "name": "shadow",
+            "machine_id": machine,
+            "kind": "file",
+            "path": "/etc/shadow",
+        },
+    )
+    assert denied.status_code == 400
+    unusual = tmp_path / "not-a-log"
+    unusual.write_text("x\n")
+    # /tmp is not /etc; create under a fake /etc by using the real unusual flag via /etc
+    warned = c.post(
+        "/api/objects/source",
+        json={
+            "name": "hosts",
+            "machine_id": machine,
+            "kind": "file",
+            "path": "/etc/hosts",
+            "enabled": False,
+        },
+    )
+    assert warned.status_code == 200, warned.text
+    assert "warning" in warned.json()
+
+
+def test_discovery_lists_reachable_local_llm(client, monkeypatch):
+    class FakeResponse:
+        is_success = True
+        headers = {"content-type": "application/json"}
+
+    class FakeClient:
+        def __init__(self, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def get(self, url):
+            assert "127.0.0.1" in url
+            return FakeResponse()
+
+    monkeypatch.setattr("logsentinel.portal.collect.httpx.Client", FakeClient)
+    found = client[0].get("/api/discovery").json()["llm"]
+    assert {item["base_url"] for item in found} >= {
+        "http://127.0.0.1:11434",
+        "http://127.0.0.1:8081",
+    }
+
+
 def test_service_rules_and_noise_presets_are_opt_in(client):
     from logsentinel.portal.rules import matches, NOISE_PRESETS
 

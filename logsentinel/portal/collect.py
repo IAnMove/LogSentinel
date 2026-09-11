@@ -13,6 +13,7 @@ import time
 import threading
 from contextlib import nullcontext
 from pathlib import Path
+import httpx
 from logsentinel.collectors.file_tailer import FileTailerCollector
 from logsentinel.collectors.journald import JournaldCollector
 from logsentinel.config import JournaldSourceConfig
@@ -48,9 +49,28 @@ def discovery():
         "/var/log/messages",
         "/var/log/kern.log",
     ]
+    llm = []
+    for provider, url, path in (
+        ("ollama", "http://127.0.0.1:11434", "/api/tags"),
+        ("llama.cpp", "http://127.0.0.1:8081", "/v1/models"),
+        ("llama.cpp", "http://127.0.0.1:8080", "/v1/models"),
+    ):
+        try:
+            with httpx.Client(
+                timeout=0.4, trust_env=False, follow_redirects=False
+            ) as client:
+                response = client.get(url + path)
+            if (
+                response.is_success
+                and "json" in response.headers.get("content-type", "").lower()
+            ):
+                llm.append({"provider": provider, "base_url": url, "reachable": True})
+        except httpx.HTTPError:
+            continue
     return {
         "hostname": os.uname().nodename,
         "os": info.get("PRETTY_NAME", "Linux"),
+        "llm": llm,
         "journalctl": bool(shutil.which("journalctl")),
         "files": [
             {"path": p, "readable": os.access(p, os.R_OK)}

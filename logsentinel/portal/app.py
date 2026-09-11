@@ -393,6 +393,7 @@ def create_app(directory, background=True):
             obj = store.get("source", source)
             if not obj or (machine and obj["machine_id"] != machine):
                 raise HTTPException(400, "Source does not belong to machine")
+        warning = ""
         if kind == "rule":
             validate_rule(Rule(**data))
         if kind == "source" and data["kind"] in ("file", "folder"):
@@ -401,8 +402,25 @@ def create_app(directory, background=True):
                 raise HTTPException(
                     400, "The application data directory cannot be a log source"
                 )
+            names = {"id_rsa", "id_ed25519", "id_ecdsa", "id_dsa", "shadow", "gshadow", "sudoers"}
+            blocked = (
+                "/etc/shadow",
+                "/etc/gshadow",
+                "/etc/sudoers",
+                "/etc/passwd",
+            )
+            if path.name in names or str(path) in blocked:
+                raise HTTPException(
+                    400, "Refusing to ingest this path as a log source"
+                )
+            unusual = any(
+                path == Path(root) or path.is_relative_to(root)
+                for root in ("/etc", "/root", "/proc", "/sys", "/dev")
+            )
+            if unusual:
+                warning = "Esta ruta no es un sitio típico de logs. El proceso leerá lo que pueda abrir."
             data["path"] = str(path)
-        return data
+        return data, warning
 
     @app.post("/api/objects/{kind}")
     async def save_object(kind: str, request: Request):
@@ -441,7 +459,7 @@ def create_app(directory, background=True):
             or (old and old["kind"] in ("metrics", "health"))
         ):
             raise HTTPException(400, "Manage this source in Metrics or Health")
-        scoped(kind, data)
+        data, warning = scoped(kind, data)
         if kind == "source" and data["kind"] == "journald" and data["enabled"]:
             if any(
                 s["kind"] == "journald" and s["enabled"] and s["id"] != id
@@ -465,7 +483,10 @@ def create_app(directory, background=True):
         id = store.put(kind, data, id)
         if kind == "source" and (not old or not old["enabled"] and data["enabled"]):
             store.set_meta("health_since:source:" + id, str(time.time()))
-        return public(kind, dict(data, id=id))
+        result = public(kind, dict(data, id=id))
+        if warning:
+            result["warning"] = warning
+        return result
 
     @app.delete("/api/objects/{kind}/{id}")
     def remove(kind: str, id: str):

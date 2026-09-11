@@ -466,6 +466,13 @@ const translations = {
     "Future analyses are paused. The current cycle may finish.",
   "Sin conexión con el portal. No se puede confirmar el estado del monitor.":
     "Disconnected from the portal. Monitor status cannot be confirmed.",
+  "Buscando servidores LLM en este equipo…": "Looking for LLM servers on this host…",
+  "No se ha detectado un servidor LLM JSON en 11434, 8081 ni 8080. Configúralo abajo.":
+    "No JSON LLM server was found on 11434, 8081 or 8080. Configure it below.",
+  "Detectado en este equipo: ": "Detected on this host: ",
+  "Esta ruta no es un sitio típico de logs. El proceso leerá lo que pueda abrir.":
+    "This path is not a typical log location. The process will read whatever it can open.",
+  "Configuración guardada. ": "Saved. ",
   "Conectar el LLM": "Connect the LLM",
   "Elegir máquina": "Choose a machine",
   "Conectar logs": "Connect logs",

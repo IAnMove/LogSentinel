@@ -868,10 +868,14 @@ function objectForm(kind, o) {
       const data =
         kind === "destination" ? notificationFormData(f) : formData(f);
       if (o.id) data.id = o.id;
-      await api("/api/objects/" + kind, data);
+      const saved = await api("/api/objects/" + kind, data);
       edit = null;
       await refresh();
-      notice(t("Configuración guardada."));
+      notice(
+        saved.warning
+          ? t("Configuración guardada. ") + t(saved.warning)
+          : t("Configuración guardada."),
+      );
     } catch (e) {
       notice(e.message, true);
     } finally {

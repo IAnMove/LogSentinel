@@ -323,6 +323,24 @@ async function setupView(root) {
         ),
       ),
     );
+    const found = el("p", t("Buscando servidores LLM en este equipo…"), "subtle");
+    p.append(found);
+    api("/api/discovery")
+      .then((d) => {
+        if (!found.isConnected) return;
+        if (!d.llm?.length) {
+          found.textContent = t(
+            "No se ha detectado un servidor LLM JSON en 11434, 8081 ni 8080. Configúralo abajo.",
+          );
+          return;
+        }
+        found.textContent =
+          t("Detectado en este equipo: ") +
+          d.llm.map((s) => s.provider + " " + s.base_url).join(", ");
+      })
+      .catch(() => {
+        found.textContent = "";
+      });
     llmServerFields(f, c);
     add(
       "context_tokens",

@@ -20,6 +20,8 @@ python3 -m venv .venv
 .venv/bin/logsentinel portal
 ```
 
+Para dejarlo como servicio de usuario: `.venv/bin/logsentinel service install` y `systemctl --user enable --now logsentinel`.
+
 Abre `http://127.0.0.1:8765` e introduce la clave guardada en `~/.local/share/logsentinel/portal/access-key.txt` (solo accesible por su propietario). La terminal muestra la ruta, nunca la clave. Los datos se guardan en ese mismo directorio. Usa `--data-dir /ruta` para otra instancia. El portal escucha exclusivamente en loopback, requiere sesión y comprueba origen y CSRF.
 
 1. Abre **Configuración guiada**: primero guarda y prueba el LLM. El servicio del modelo se instala por separado.
