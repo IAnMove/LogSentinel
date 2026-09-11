@@ -13,8 +13,8 @@ def pair(tmp_path):
     """A portal and a reception listener over one store, plus a live source token."""
     app = create_app(tmp_path, background=False)
     with TestClient(app, base_url="http://localhost") as panel:
-        panel.post("/login", json={"token": app.state.store.meta("admin_token")})
         panel.headers["X-LogSentinel"] = "portal"
+        panel.post("/login", json={"token": app.state.store.meta("admin_token")})
         machine = panel.post("/api/objects/machine", json={"name": "A"}).json()["id"]
         source = panel.post(
             "/api/objects/source",

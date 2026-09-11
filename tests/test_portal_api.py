@@ -10,13 +10,13 @@ from logsentinel.portal.analysis import ReviewClient
 def client(tmp_path):
     app = create_app(tmp_path, background=False)
     with TestClient(app, base_url="http://localhost") as c:
+        c.headers["X-LogSentinel"] = "portal"
         assert (
             c.post(
                 "/login", json={"token": app.state.store.meta("admin_token")}
             ).status_code
             == 200
         )
-        c.headers["X-LogSentinel"] = "portal"
         yield c, app.state.store
 
 
@@ -34,8 +34,20 @@ def test_auth_csrf_and_host_are_required(tmp_path):
     app = create_app(tmp_path, background=False)
     with TestClient(app, base_url="http://localhost") as c:
         assert c.get("/api/state").status_code == 401
-        assert c.post("/login", json={"token": "wrong"}).status_code == 401
-        c.post("/login", json={"token": app.state.store.meta("admin_token")})
+        assert c.post("/login", json={"token": "wrong"}).status_code == 403
+        assert (
+            c.post(
+                "/login",
+                json={"token": "wrong"},
+                headers={"X-LogSentinel": "portal"},
+            ).status_code
+            == 401
+        )
+        c.post(
+            "/login",
+            json={"token": app.state.store.meta("admin_token")},
+            headers={"X-LogSentinel": "portal"},
+        )
         assert c.post("/api/objects/machine", json={"name": "A"}).status_code == 403
         assert c.get("/", headers={"host": "attacker.example"}).status_code == 400
         assert (
@@ -48,6 +60,16 @@ def test_auth_csrf_and_host_are_required(tmp_path):
             ).status_code
             == 403
         )
+
+
+def test_expired_sessions_are_dropped(tmp_path):
+    import time
+
+    app = create_app(tmp_path, background=False)
+    with TestClient(app, base_url="http://localhost") as c:
+        app.state.sessions["dead"] = time.time() - 1
+        assert c.get("/healthz").status_code in (200, 503)
+        assert "dead" not in app.state.sessions
 
 
 def test_destinations_write_only_secrets_and_save_does_not_send(client):

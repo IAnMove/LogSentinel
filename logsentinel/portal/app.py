@@ -195,6 +195,7 @@ def create_app(directory, background=True):
     app.state.monitor = monitor
     app.state.outbox = outbox
     app.state.health = health_monitor
+    app.state.sessions = sessions
     register_telemetry(app, telemetry)
     register_disk_info(app, disk_scans)
     register_widget(app, store, monitor, telemetry, health_monitor)
@@ -238,10 +239,22 @@ def create_app(directory, background=True):
                 parts.append(chunk)
             request._body = b"".join(parts)
         path = request.url.path
-        if path.startswith("/api/"):
-            token = request.cookies.get("sentinel_session", "")
-            if sessions.get(token, 0) < time.time():
-                return JSONResponse({"detail": "Login required"}, status_code=401)
+        now = time.time()
+        for token, exp in list(sessions.items()):
+            if exp < now:
+                sessions.pop(token, None)
+        for ip, stamps in list(attempts.items()):
+            recent = [x for x in stamps if x > now - 60]
+            if recent:
+                attempts[ip] = recent
+            else:
+                attempts.pop(ip, None)
+        login_post = path == "/login" and request.method == "POST"
+        if login_post or path.startswith("/api/"):
+            if path.startswith("/api/"):
+                token = request.cookies.get("sentinel_session", "")
+                if sessions.get(token, 0) < now:
+                    return JSONResponse({"detail": "Login required"}, status_code=401)
             if request.method not in ("GET", "HEAD"):
                 origin = request.headers.get("origin")
                 if origin and origin.rstrip("/") != str(request.base_url).rstrip("/"):

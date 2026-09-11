@@ -29,8 +29,8 @@ def certificate(tmp_path_factory):
 def central(tmp_path):
     app = create_app(tmp_path, background=False)
     with TestClient(app, base_url="http://localhost") as panel:
-        panel.post("/login", json={"token": app.state.store.meta("admin_token")})
         panel.headers["X-LogSentinel"] = "portal"
+        panel.post("/login", json={"token": app.state.store.meta("admin_token")})
         machine = panel.post("/api/objects/machine", json={"name": "A"}).json()["id"]
         source = panel.post(
             "/api/objects/source",
