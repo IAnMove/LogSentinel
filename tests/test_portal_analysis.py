@@ -83,6 +83,9 @@ def test_findings_group_by_shape_not_category_or_digits(data):
     assert grouping_key(first) == grouping_key(
         dict(first, message="connection pool exhausted 99")
     )
+    assert grouping_key({"source_id": "s", "service": "app", "message": "line-1"}) != grouping_key(
+        {"source_id": "s", "service": "app", "message": "line-6"}
+    )
 
 
 def test_context_is_shared_with_quiet_services_without_losing_events():

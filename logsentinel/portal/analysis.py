@@ -266,12 +266,13 @@ def interleave_services(events, offset=0):
 
 
 def grouping_key(event):
-    """Group repeats of the same event even when PIDs, counters or LLM category differ."""
+    """Group repeats of the same event even when PIDs, IPs or LLM category differ."""
     text = event.get("message") or ""
     text = regex.sub(r"\b(?:\d{1,3}\.){3}\d{1,3}\b", "#ip", text)
-    text = regex.sub(r"\d+", "#", text)
+    text = regex.sub(r"\[\d+\]", "[#]", text)
+    text = regex.sub(r"\bpid[=:]?\s*\d+", "pid=#", text, flags=regex.I)
+    text = regex.sub(r"(?:\s+\d+)+\s*$", "", text)
     text = regex.sub(r"\s+", " ", text).strip()
-    text = regex.sub(r"(?:\s*#)+$", "", text).strip()
     return (event.get("source_id") or "", event.get("service") or "", text[:400])
 
 
