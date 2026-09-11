@@ -41,15 +41,38 @@ def test_segment_cursor_and_dedup_survive_restart(setup):
     assert store.stats()["segments"]["compressed"] > 0
 
 
-def test_gzip_stability_and_import_idempotency(setup):
+def test_gzip_stability_and_import_idempotency(setup, monkeypatch):
     store, source, path = setup
     path = path.with_suffix(".log.gz")
     path.write_bytes(gzip.compress(b"one\ntwo\n"))
+
+    def refuse_slurp(*_args, **_kwargs):
+        raise AssertionError("compressed sources must be hashed in chunks")
+
+    monkeypatch.setattr(type(path), "read_bytes", refuse_slurp)
     c = Collector(store)
     assert c.file(source, path) == 0
     assert c.file(source, path) == 2
     assert c.file(source, path) == 0
     assert len(store.events()) == 2
+    assert store.cursor("s", str(path))["digest"]
+
+
+def test_gzip_expanded_limit_stops_without_stalling(setup, monkeypatch):
+    import logsentinel.portal.collect as collect
+
+    store, source, path = setup
+    path = path.with_suffix(".log.gz")
+    path.write_bytes(gzip.compress(b"one\ntwo\nthree\n"))
+    monkeypatch.setattr(collect, "MAX_EXPANDED_BYTES", 8)
+    c = Collector(store)
+    assert c.file(source, path) == 0
+    first = c.file(source, path)
+    assert first >= 1
+    cursor = store.cursor("s", str(path))
+    assert cursor["done"] is True
+    assert c.file(source, path) == 0
+    assert len(store.events()) == first
 
 
 def test_transaction_failure_does_not_advance_cursor(setup, monkeypatch):
