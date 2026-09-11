@@ -369,7 +369,9 @@ class Analyzer:
 
     async def _cycle(self):
         from .review_queue import ReviewQueue
+        from .signals import apply_signals
 
+        apply_signals(self)
         return await ReviewQueue(self).run()
 
     @staticmethod

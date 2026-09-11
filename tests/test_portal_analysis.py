@@ -26,6 +26,35 @@ def data(tmp_path):
     return s, m
 
 
+def test_deterministic_signals_fire_without_the_model(data):
+    from logsentinel.portal.signals import apply_signals
+
+    s, m = data
+    s.ingest(
+        {"id": "s", "machine_id": m},
+        [
+            {"origin": "oom", "message": "Out of memory: Kill process 12", "service": "kernel"},
+            {"origin": "disk", "message": "write failed: No space left on device", "service": "app"},
+            {"origin": "sudo", "message": "user NOT in sudoers ; TTY=pts/0", "service": "sudo"},
+        ]
+        + [
+            {
+                "origin": "ssh" + str(i),
+                "message": "Failed password for root from 192.0.2.10",
+                "service": "sshd",
+            }
+            for i in range(5)
+        ],
+    )
+    a = Analyzer(s)
+    assert apply_signals(a) >= 4
+    titles = {p["title"] for p in s.rows("problems")}
+    assert any("memory" in t.lower() or "memoria" in t.lower() for t in titles)
+    assert any("ssh" in t.lower() for t in titles)
+    assert apply_signals(a) >= 4
+    assert len(s.rows("problems")) >= 4
+
+
 def test_findings_group_by_shape_not_category_or_digits(data):
     s, m = data
     a = Analyzer(s)
