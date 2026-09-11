@@ -318,16 +318,31 @@ class Collector:
         collector = JournaldCollector(JournaldSourceConfig())
         entries = []
         last = None
+        skipped = 0
         for line in raw.splitlines(keepends=True):
             if not line.endswith(b"\n"):
                 break
-            data = json.loads(line)
-            last = data.get("__CURSOR")
-            e = collector._parse_json_line(line.decode(errors="replace"))
-            if e and last:
+            text = line.decode("utf-8", errors="replace")
+            try:
+                data = json.loads(text)
+            except (json.JSONDecodeError, TypeError, ValueError):
+                skipped += 1
+                continue
+            if not isinstance(data, dict):
+                skipped += 1
+                continue
+            mark = data.get("__CURSOR")
+            if not isinstance(mark, str) or not mark:
+                skipped += 1
+                continue
+            last = mark
+            e = collector._parse_json_line(text)
+            if e:
                 entries.append(
                     dict(e.model_dump(mode="json"), origin="journal:" + last)
                 )
+        if skipped:
+            self.store.metric(source["id"], "journal_skipped", skipped)
         if last:
             if not cursor and not source.get("history"):
                 entries = []
