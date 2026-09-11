@@ -265,6 +265,16 @@ def interleave_services(events, offset=0):
     return result
 
 
+def grouping_key(event):
+    """Group repeats of the same event even when PIDs, counters or LLM category differ."""
+    text = event.get("message") or ""
+    text = regex.sub(r"\b(?:\d{1,3}\.){3}\d{1,3}\b", "#ip", text)
+    text = regex.sub(r"\d+", "#", text)
+    text = regex.sub(r"\s+", " ", text).strip()
+    text = regex.sub(r"(?:\s*#)+$", "", text).strip()
+    return (event.get("source_id") or "", event.get("service") or "", text[:400])
+
+
 class Analyzer:
     def __init__(self, store):
         self.store = store
@@ -371,8 +381,8 @@ class Analyzer:
     def save_finding(self, machine, finding, ids, *, status="open", notify=True):
         events = self.store.events(ids=ids, limit=5000)
         # Deterministic origin signatures, not LLM prose, decide grouping.
-        keys = sorted({(e["source_id"], e["service"], e["message"]) for e in events})
-        fp = hashlib.sha256(dumps([finding["category"], keys]).encode()).hexdigest()
+        keys = sorted({grouping_key(e) for e in events})
+        fp = hashlib.sha256(dumps(keys).encode()).hexdigest()
         now = time.time()
         finding = sanitize(finding, protected_secrets(self.store))
         with self.store.connect() as db:

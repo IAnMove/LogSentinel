@@ -2,7 +2,12 @@ import asyncio
 import pytest
 from logsentinel.portal.store import Store
 from logsentinel.portal.models import Machine
-from logsentinel.portal.analysis import Analyzer, compact, interleave_services
+from logsentinel.portal.analysis import (
+    Analyzer,
+    compact,
+    interleave_services,
+    grouping_key,
+)
 from logsentinel.portal.rules import redact
 
 
@@ -19,6 +24,36 @@ def data(tmp_path):
         ],
     )
     return s, m
+
+
+def test_findings_group_by_shape_not_category_or_digits(data):
+    s, m = data
+    a = Analyzer(s)
+    events = s.events()
+    first = events[0]
+    finding = {
+        "title": "Pool exhausted",
+        "summary": "check evidence",
+        "severity": "HIGH",
+        "category": "reliability",
+        "evidence_ids": [first["id"]],
+        "reasoning": "",
+        "next_steps": "",
+    }
+    first_id = a.save_finding(m, finding, [first["id"]], notify=False)
+    s.ingest(
+        {"id": "s", "machine_id": m},
+        [{"origin": "repeat", "message": "connection pool exhausted 12", "service": "app"}],
+    )
+    other = [e for e in s.events() if e["origin"] == "repeat"][0]
+    finding["category"] = "application"
+    finding["evidence_ids"] = [other["id"]]
+    second_id = a.save_finding(m, finding, [other["id"]], notify=False)
+    assert first_id == second_id
+    assert s.problem(first_id)["count"] == 2
+    assert grouping_key(first) == grouping_key(
+        dict(first, message="connection pool exhausted 99")
+    )
 
 
 def test_context_is_shared_with_quiet_services_without_losing_events():
