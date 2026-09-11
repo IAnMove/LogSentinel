@@ -1,11 +1,25 @@
 """Validated portal contracts. Secrets never belong to public representations."""
 
 from __future__ import annotations
+import ipaddress
 from typing import Literal
 from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
 from pydantic import BaseModel, Field, ConfigDict, field_validator, model_validator
 from logsentinel.config import LLMConfig
+
+METADATA_HOSTS = {
+    "metadata.google.internal",
+    "metadata.goog",
+    "instance-data",
+}
+METADATA_NETWORKS = (
+    ipaddress.ip_network("169.254.0.0/16"),
+    ipaddress.ip_network("fe80::/10"),
+    ipaddress.ip_network("0.0.0.0/8"),
+    ipaddress.ip_network("255.255.255.255/32"),
+    ipaddress.ip_network("100.100.100.200/32"),
+)
 
 
 class Model(BaseModel):
@@ -96,16 +110,33 @@ class Settings(Model):
         return self
 
 
+def _blocked_ip(address):
+    ip = ipaddress.ip_address(address)
+    mapped = getattr(ip, "ipv4_mapped", None)
+    if mapped is not None:
+        ip = mapped
+    return any(ip in network for network in METADATA_NETWORKS)
+
+
 def check_url(value):
     p = urlsplit(value)
+    host = (p.hostname or "").rstrip(".").lower()
     if (
         p.scheme not in ("http", "https")
-        or not p.hostname
+        or not host
         or p.username
         or p.password
         or p.fragment
     ):
         raise ValueError("Use an HTTP(S) URL without embedded credentials or fragment")
+    if host in METADATA_HOSTS:
+        raise ValueError("This URL points at a cloud metadata service")
+    try:
+        blocked = _blocked_ip(host)
+    except ValueError:
+        blocked = False
+    if blocked:
+        raise ValueError("This URL points at a link-local or metadata address")
     return value
 
 

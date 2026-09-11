@@ -11,14 +11,28 @@ SECRET = re.compile(
     r"(?i)(authorization\s*[:=]\s*(?:bearer\s+)?|(?:api[ _-]?key|access[ _-]?key|token|password|secret)\s*[:=]\s*)[\"\']?[^\s,;\"\']+"
 )
 TELEGRAM_TOKEN = re.compile(r"(?i)(https?://api\.telegram\.org/bot)\d+:[A-Za-z0-9_-]+")
+DISCORD_WEBHOOK = re.compile(
+    r"(https://(?:[\w-]+\.)?discord(?:app)?\.com/api/webhooks/\d+/)[\w-]+",
+    re.I,
+)
+SLACK_WEBHOOK = re.compile(r"(https://hooks\.slack\.com/services/)[A-Za-z0-9/]+", re.I)
+AWS_KEY = re.compile(r"\bAKIA[0-9A-Z]{16}\b")
+SLACK_BOT = re.compile(r"\bxox[baprs]-[A-Za-z0-9-]{10,}\b")
+JWT = re.compile(r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b")
+PEM = re.compile(
+    r"-----BEGIN [A-Z0-9 ]{0,40}PRIVATE KEY-----[\s\S]{8,8000}?-----END [A-Z0-9 ]{0,40}PRIVATE KEY-----"
+)
 
 
 def protected_secrets(store):
-    return (
+    secrets = [
         store.settings().llm.api_key,
         store.meta("admin_token"),
         *json.loads(store.meta("retired_admin_tokens") or "[]"),
-    )
+    ]
+    for dest in store.objects("destination"):
+        secrets.extend((dest.get("token"), dest.get("secret"), dest.get("url")))
+    return tuple(value for value in secrets if value)
 
 
 def redact(text, secrets=()):
@@ -27,6 +41,12 @@ def redact(text, secrets=()):
         if secret and len(secret) > 3:
             text = text.replace(secret, "[REDACTED]")
     text = TELEGRAM_TOKEN.sub(lambda m: m[1] + "[REDACTED]", text)
+    text = DISCORD_WEBHOOK.sub(lambda m: m[1] + "[REDACTED]", text)
+    text = SLACK_WEBHOOK.sub(lambda m: m[1] + "[REDACTED]", text)
+    text = AWS_KEY.sub("[REDACTED]", text)
+    text = SLACK_BOT.sub("[REDACTED]", text)
+    text = JWT.sub("[REDACTED]", text)
+    text = PEM.sub("[REDACTED PRIVATE KEY]", text)
     return SECRET.sub(lambda m: m[1] + "[REDACTED]", text)
 
 

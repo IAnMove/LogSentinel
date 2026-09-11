@@ -161,6 +161,15 @@ def test_compaction_preserves_count_and_ids():
 def test_redaction():
     assert "abc123" not in redact("Authorization: Bearer abc123")
     assert "hunter2" not in redact("password=hunter2")
+    assert "AKIAAAAAAAAAAAAAAAAA" not in redact("aws AKIAAAAAAAAAAAAAAAAA used")
+    assert "xoxb-1234567890-token" not in redact("Slack xoxb-1234567890-token")
+    jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0In0.abcdeffake"
+    assert jwt not in redact("auth " + jwt)
+    pem = "-----BEGIN PRIVATE KEY-----\nabcDEF1234567890\n-----END PRIVATE KEY-----"
+    assert "abcDEF1234567890" not in redact(pem)
+    assert "secret-hook" not in redact(
+        "https://discord.com/api/webhooks/1/secret-hook"
+    )
 
 
 def test_source_filter_uses_priority_and_case_insensitive_terms():

@@ -89,6 +89,43 @@ def test_expired_sessions_are_dropped(tmp_path):
         assert "dead" not in app.state.sessions
 
 
+def test_events_api_redacts_access_key(client):
+    c, s = client
+    m, source = machine_source(c)
+    secret = s.meta("admin_token")
+    s.ingest(
+        s.get("source", source),
+        [{"origin": "leak", "message": "token was " + secret}],
+    )
+    body = c.get("/api/events").text
+    assert secret not in body
+    assert "[REDACTED]" in body
+
+
+def test_destinations_reject_metadata_urls(client):
+    c, _ = client
+    for url in (
+        "http://169.254.169.254/latest/meta-data",
+        "http://metadata.google.internal/",
+        "http://[fe80::1]/",
+    ):
+        result = c.post(
+            "/api/objects/destination",
+            json={"name": "hook", "kind": "webhook", "url": url, "enabled": False},
+        )
+        assert result.status_code in (400, 422), (url, result.text)
+    ok = c.post(
+        "/api/objects/destination",
+        json={
+            "name": "local",
+            "kind": "webhook",
+            "url": "http://127.0.0.1:5678/hook",
+            "enabled": False,
+        },
+    )
+    assert ok.status_code == 200, ok.text
+
+
 def test_destinations_write_only_secrets_and_save_does_not_send(client):
     c, s = client
     body = {

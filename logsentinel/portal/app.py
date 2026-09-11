@@ -35,7 +35,7 @@ from .notify import Outbox
 from .health import HealthMonitor
 from .widget_api import register_widget
 from .capacity import capacity_report
-from .rules import validate_rule, matches, excluded, redact, sanitize
+from .rules import validate_rule, matches, excluded, redact, sanitize, protected_secrets
 from .ingest import register_ingest
 from .enroll import register_enrollment
 
@@ -799,7 +799,7 @@ def create_app(directory, background=True):
                 if not q or q.casefold() in e.get("message", "").casefold()
             )
         return {
-            "events": sanitize(rows, (store.settings().llm.api_key,)),
+            "events": sanitize(rows, protected_secrets(store)),
             "search_scope": "retained events",
             "offset": offset,
             "next_offset": cursor,
@@ -819,7 +819,7 @@ def create_app(directory, background=True):
             args.extend([min(max(limit, 1), 100), max(0, offset)])
             return sanitize(
                 [dict(r) for r in db.execute(query, args)],
-                (store.settings().llm.api_key,),
+                protected_secrets(store),
             )
 
     @app.get("/api/problems/{id}")
@@ -833,7 +833,7 @@ def create_app(directory, background=True):
         p["investigations"] = [
             j for j in store.objects("investigation") if j["problem_id"] == id
         ][-10:]
-        return sanitize(p, (store.settings().llm.api_key,))
+        return sanitize(p, protected_secrets(store))
 
     @app.get("/api/problems/{id}/investigations")
     def investigations(id: str):
@@ -841,7 +841,7 @@ def create_app(directory, background=True):
             raise HTTPException(404)
         return sanitize(
             [j for j in store.objects("investigation") if j["problem_id"] == id][-10:],
-            (store.settings().llm.api_key,),
+            protected_secrets(store),
         )
 
     @app.post("/api/problems/{id}/investigations")
@@ -850,7 +850,7 @@ def create_app(directory, background=True):
             raise HTTPException(404)
         options = InvestigationRequest(**(await request.json()))
         return sanitize(
-            researcher.enqueue(id, options), (store.settings().llm.api_key,)
+            researcher.enqueue(id, options), protected_secrets(store)
         )
 
     @app.post("/api/problems/{id}/resolve")
@@ -924,8 +924,8 @@ def create_app(directory, background=True):
             "tested": len(rows),
             "matched": len(yes),
             "sample": True,
-            "matches": sanitize(yes[:5], (store.settings().llm.api_key,)),
-            "nonmatches": sanitize(no[:5], (store.settings().llm.api_key,)),
+            "matches": sanitize(yes[:5], protected_secrets(store)),
+            "nonmatches": sanitize(no[:5], protected_secrets(store)),
         }
 
     @app.post("/api/reanalyze")
@@ -980,7 +980,7 @@ def create_app(directory, background=True):
     @app.get("/api/chat/history")
     def chat_history(machine_id: str = "", problem_id: str = ""):
         return [
-            sanitize(c, (store.settings().llm.api_key,))
+            sanitize(c, protected_secrets(store))
             for c in store.objects("chat")
             if (not machine_id or c["machine_id"] == machine_id)
             and c.get("problem_id", "") == problem_id
