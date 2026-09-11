@@ -5,7 +5,7 @@ import pytest
 
 from test_portal_api import client, machine_source
 from logsentinel.portal.analysis import Analyzer, SYSTEM
-from logsentinel.portal.capacity import capacity_report
+from logsentinel.portal.capacity import capacity_report, coverage_signal, recent_coverage
 from logsentinel.portal.batch_budget import input_ceiling
 
 
@@ -172,6 +172,48 @@ def test_duplicate_local_journal_is_blocked_across_machine_cards(client):
         == 200
     )
     assert capacity_report(s)["duplicate_journals"] == []
+
+
+def test_coverage_signal_flags_a_model_that_cannot_keep_up():
+    quiet = coverage_signal(
+        dict(
+            events=5,
+            capacity=0,
+            pending=1,
+            queued=0,
+            incoming_per_minute=1,
+            covered_per_minute=1,
+        )
+    )
+    assert quiet["level"] == "ok"
+    behind = coverage_signal(
+        dict(
+            events=100,
+            capacity=80,
+            pending=10,
+            queued=0,
+            incoming_per_minute=50,
+            covered_per_minute=5,
+        )
+    )
+    assert behind["level"] == "critical"
+    assert behind["reason"] == "model_behind"
+
+
+def test_coverage_gap_is_visible_without_failing_readiness(client):
+    c, s = client
+    m, source = machine_source(c)
+    now = time.time()
+    for i in range(40):
+        event(s, source, f"cap{i}", now - 60, "capacity")
+    report = capacity_report(s)
+    assert report["signal"]["level"] in ("warn", "critical")
+    assert recent_coverage(s)["level"] == report["signal"]["level"]
+    health = c.app.state.health.tick()
+    coverage = next(x for x in health["checks"] if x["key"] == "coverage")
+    assert coverage["bad"] is True
+    assert coverage["liveness"] is False
+    assert c.get("/healthz").json()["status"] == "ok"
 
 
 @pytest.mark.asyncio

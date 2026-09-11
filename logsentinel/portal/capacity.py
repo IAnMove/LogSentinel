@@ -33,6 +33,44 @@ def review_signature(cfg):
     )
 
 
+def coverage_signal(hour):
+    """Last-hour backlog vs review rate. Unreviewed is never a clean result."""
+    events = hour.get("events") or 0
+    backlog = (
+        (hour.get("capacity") or 0)
+        + (hour.get("pending") or 0)
+        + (hour.get("queued") or 0)
+    )
+    incoming = hour.get("incoming_per_minute") or 0
+    covered = hour.get("covered_per_minute") or 0
+    ratio = backlog / events if events else 0
+    behind = events >= 20 and (
+        ratio >= 0.2
+        or (incoming > 0 and covered * 2 < incoming and backlog >= 20)
+    )
+    if not behind:
+        level, reason = "ok", "low_volume" if events < 20 else "keeping_up"
+    elif ratio >= 0.5 or (incoming > 0 and covered * 5 < incoming):
+        level, reason = "critical", "model_behind"
+    else:
+        level, reason = "warn", "model_behind"
+    return dict(
+        level=level,
+        reason=reason,
+        events=events,
+        backlog=backlog,
+        ratio=round(ratio, 3),
+        incoming_per_minute=incoming,
+        covered_per_minute=covered,
+    )
+
+
+def recent_coverage(store, machine_id=""):
+    now = time.time()
+    with store.connect() as db:
+        return coverage_signal(_window(db, now - 3600, now, machine_id))
+
+
 def _window(db, start, end, machine_id):
     where = "received>=? AND received<? AND status!='measured'"
     args = [start, end]
@@ -170,6 +208,7 @@ def capacity_report(store, machine_id=""):
     return dict(
         generated=now,
         **hour,
+        signal=coverage_signal(hour),
         services=services,
         analysis=usage,
         retained_capacity=retained_gap,

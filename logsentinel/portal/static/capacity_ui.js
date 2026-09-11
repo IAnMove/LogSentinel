@@ -94,6 +94,26 @@ async function mountCapacitySummary(root, machine = scope) {
     );
     if (!root.isConnected) return;
     const p = panel(t("Cobertura y capacidad"));
+    const signal = r.signal || {};
+    const banner = el(
+      "p",
+      signal.level === "critical"
+        ? bilingual(
+            "La revisión va muy por detrás de lo que entra. Lo no revisado no es un resultado limpio.",
+            "Review is far behind incoming logs. Unreviewed is not a clean result.",
+          )
+        : signal.level === "warn"
+          ? bilingual(
+              "El modelo no cubre todo el volumen de la última hora. Revisa filtros o capacidad.",
+              "The model is not covering last hour's volume. Check filters or capacity.",
+            )
+          : bilingual(
+              "La última hora está al ritmo del modelo, o el volumen es bajo. Sigue sin ser una prueba de seguridad.",
+              "Last hour is keeping up with the model, or volume is low. That is still not a security proof.",
+            ),
+      "coverage-signal " + (signal.level || "ok"),
+    );
+    p.append(banner);
     p.append(
       el(
         "p",

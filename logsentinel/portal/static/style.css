@@ -846,6 +846,23 @@ details > div {
 .coverage-stat.policy {
   border-color: #bc9851;
 }
+.coverage-signal {
+  font-weight: 600;
+  padding: 0.6rem 0.75rem;
+  border-radius: 0.4rem;
+  border: 1px solid var(--border);
+}
+.coverage-signal.ok {
+  color: var(--ink);
+}
+.coverage-signal.warn {
+  color: var(--warn-ink);
+  background: var(--warn-bg);
+}
+.coverage-signal.critical {
+  color: var(--error-ink);
+  background: var(--error-bg);
+}
 .panel li {
   margin-block: 0.6rem;
 }

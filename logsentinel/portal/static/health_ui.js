@@ -58,6 +58,10 @@ async function healthView(root) {
             "Consultas al modelo",
             "Model requests",
           ),
+          "Log review is behind incoming volume": bilingual(
+            "Cobertura del análisis",
+            "Analysis coverage",
+          ),
         }[check.title] || check.title;
       const item = panel(title);
       item.append(

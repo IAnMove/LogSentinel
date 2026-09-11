@@ -36,7 +36,17 @@ class HealthMonitor:
         local = next((m["id"] for m in machines if m["kind"] == "local"), "")
         checks = []
 
-        def add(key, machine, bad, title, detail, severity="HIGH", enabled=True):
+        def add(
+            key,
+            machine,
+            bad,
+            title,
+            detail,
+            severity="HIGH",
+            enabled=True,
+            liveness=True,
+            alert=True,
+        ):
             checks.append(
                 dict(
                     key=key,
@@ -46,6 +56,8 @@ class HealthMonitor:
                     detail=detail,
                     severity=severity,
                     enabled=enabled,
+                    liveness=liveness,
+                    alert=alert,
                 )
             )
 
@@ -157,6 +169,22 @@ class HealthMonitor:
                 meaning="Failures may be connectivity or response-format errors; inspect Activity",
             ),
         )
+        from .capacity import recent_coverage
+
+        signal = recent_coverage(self.store)
+        add(
+            "coverage",
+            local,
+            signal["level"] != "ok",
+            "Log review is behind incoming volume",
+            dict(
+                signal,
+                meaning="Unreviewed events are not a clean security result. Capture can still be healthy.",
+            ),
+            "CRITICAL" if signal["level"] == "critical" else "MEDIUM",
+            liveness=False,
+            alert=False,
+        )
         return checks
 
     def report(self, check, recovered=False, notify=True):
@@ -211,6 +239,7 @@ class HealthMonitor:
                 "Observer storage is approaching capacity": "El almacenamiento del observador se acerca al límite",
                 "Observer worker needs attention": "Un proceso del observador necesita atención",
                 "Recent model requests failed": "Han fallado las últimas consultas al modelo",
+                "Log review is behind incoming volume": "La revisión de logs va por detrás del volumen recibido",
             }.get(check["title"], check["title"])
             if es
             else check["title"]
@@ -258,6 +287,7 @@ class HealthMonitor:
             try:
                 if (
                     cfg.health_alerts
+                    and check.get("alert", True)
                     and active
                     and (
                         not state.get("active")
@@ -301,7 +331,11 @@ class HealthMonitor:
         self.last_tick = now
         self.snapshot = dict(
             checked=now,
-            state="degraded" if any(c["bad"] for c in checks) else "ok",
+            state=(
+                "degraded"
+                if any(c["bad"] and c.get("liveness", True) for c in checks)
+                else "ok"
+            ),
             checks=checks,
         )
         return self.snapshot
