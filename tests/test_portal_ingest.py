@@ -36,6 +36,7 @@ ADMIN_PATHS = [
     "/login",
     "/api/backup",
     "/api/telemetry",
+    "/api/access-key/rotate",
 ]
 
 

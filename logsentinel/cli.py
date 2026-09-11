@@ -662,11 +662,7 @@ def portal(data_dir: str = typer.Option("~/.local/share/logsentinel/portal", "--
     console.print(f"Portal: http://127.0.0.1:{port}")
     # stdout is often captured by journald and then read back as log evidence.
     # Keep the bootstrap credential in an owner-only local file instead.
-    key_path = application.state.store.directory / "access-key.txt"
-    fd = os.open(key_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    os.fchmod(fd, 0o600)
-    with os.fdopen(fd, "w") as key_file:
-        key_file.write(application.state.store.meta("admin_token") + "\n")
+    key_path = application.state.store.write_access_key()
     console.print("Read the access key for local login from:", key_path, markup=False)
     if not ingest_listen:
         uvicorn.run(application, host="127.0.0.1", port=port, proxy_headers=False)
@@ -872,7 +868,16 @@ def restore_backup(backup: str, data_dir: str = typer.Option(..., "--data-dir"))
     target.mkdir(mode=0o700, parents=True)
     shutil.copyfile(source, target / "sentinel.db")
     os.chmod(target / "sentinel.db", 0o600)
-    console.print(f"Restored to {target}. The backup includes secrets; rotate sender/admin tokens if needed.", markup=False)
+    from logsentinel.portal.store import Store
+
+    restored = Store(target)
+    restored.write_access_key()
+    console.print(
+        f"Restored to {target}. The backup includes secrets and the previous "
+        "access key; rotate the access key, sender tokens and notification "
+        "credentials before using this copy.",
+        markup=False,
+    )
 
 
 def main() -> None:

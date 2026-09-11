@@ -80,6 +80,33 @@ class Store:
             )
         os.chmod(self.path, 0o600)
 
+    def write_access_key(self):
+        """Owner-only file the portal process may reread; never print the value."""
+        path = self.directory / "access-key.txt"
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "w") as handle:
+            handle.write(self.meta("admin_token") + "\n")
+        return path
+
+    def rotate_admin_token(self):
+        previous = self.meta("admin_token") or ""
+        retired = json.loads(self.meta("retired_admin_tokens") or "[]")
+        if previous:
+            retired = [previous, *[t for t in retired if t != previous]][:20]
+        token = secrets.token_urlsafe(32)
+        with self.connect() as db:
+            db.execute(
+                "INSERT OR REPLACE INTO meta VALUES('admin_token',?)", (token,)
+            )
+            db.execute(
+                "INSERT OR REPLACE INTO meta VALUES('retired_admin_tokens',?)",
+                (dumps(retired),),
+            )
+        self.write_access_key()
+        self.audit("rotate_access_key")
+        return token
+
     @contextmanager
     def connect(self):
         db = sqlite3.connect(self.path, timeout=15)

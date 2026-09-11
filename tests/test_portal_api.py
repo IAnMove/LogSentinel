@@ -62,6 +62,23 @@ def test_auth_csrf_and_host_are_required(tmp_path):
         )
 
 
+def test_access_key_rotation_invalidates_sessions_and_rewrites_file(client):
+    c, s = client
+    old = s.meta("admin_token")
+    result = c.post("/api/access-key/rotate")
+    assert result.status_code == 200, result.text
+    token = result.json()["token"]
+    assert token != old
+    assert s.meta("admin_token") == token
+    assert old in json.loads(s.meta("retired_admin_tokens"))
+    assert (s.directory / "access-key.txt").read_text().strip() == token
+    assert token not in c.get("/healthz").text
+    assert c.get("/api/state").status_code == 401
+    assert c.post("/login", json={"token": old}).status_code == 401
+    assert c.post("/login", json={"token": token}).status_code == 200
+    assert c.get("/api/state").status_code == 200
+
+
 def test_expired_sessions_are_dropped(tmp_path):
     import time
 

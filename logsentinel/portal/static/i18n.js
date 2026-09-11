@@ -404,6 +404,16 @@ const translations = {
   "Crear copia local": "Create local backup",
   "Copia guardada: backups/": "Backup saved: backups/",
   "Restaurar en una carpeta nueva": "Restore into a new folder",
+  "Tras restaurar, rota la clave de acceso, los tokens de emisor y las credenciales de notificación: la copia las incluye.":
+    "After restoring, rotate the access key, sender tokens and notification credentials: the copy includes them.",
+  "Clave de acceso del panel": "Panel access key",
+  "La clave vive en access-key.txt del directorio de datos. Rotarla cierra las sesiones y deja de aceptar la clave anterior.":
+    "The key lives in access-key.txt in the data directory. Rotating it signs everyone out and rejects the previous key.",
+  "Rotar clave de acceso": "Rotate access key",
+  "Las sesiones abiertas se cerrarán. La clave anterior deja de funcionar.":
+    "Open sessions will be signed out. The previous key will stop working.",
+  "Nueva clave (cópiala ahora; no se volverá a mostrar): ":
+    "New key (copy it now; it will not be shown again): ",
   Pendientes: "Pending",
   "Sin revisar por política": "Unreviewed: selection policy",
   "Excluidos del LLM": "Excluded from the LLM",

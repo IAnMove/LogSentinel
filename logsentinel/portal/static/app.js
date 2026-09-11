@@ -1349,6 +1349,33 @@ function backupView(root) {
     ),
     el("h3", t("Restaurar en una carpeta nueva")),
     el("pre", "logsentinel restore /ruta/backup.db --data-dir /ruta/nueva"),
+    el(
+      "p",
+      t(
+        "Tras restaurar, rota la clave de acceso, los tokens de emisor y las credenciales de notificación: la copia las incluye.",
+      ),
+    ),
+    el("h3", t("Clave de acceso del panel")),
+    el(
+      "p",
+      t(
+        "La clave vive en access-key.txt del directorio de datos. Rotarla cierra las sesiones y deja de aceptar la clave anterior.",
+      ),
+    ),
+    button(t("Rotar clave de acceso"), async () => {
+      if (
+        !confirm(
+          t(
+            "Las sesiones abiertas se cerrarán. La clave anterior deja de funcionar.",
+          ),
+        )
+      )
+        return;
+      const r = await api("/api/access-key/rotate", {});
+      notice(
+        t("Nueva clave (cópiala ahora; no se volverá a mostrar): ") + r.token,
+      );
+    }),
   );
   root.append(p);
 }

@@ -335,6 +335,15 @@ def create_app(directory, background=True):
         result.delete_cookie("sentinel_session")
         return result
 
+    @app.post("/api/access-key/rotate")
+    def rotate_access_key():
+        token = store.rotate_admin_token()
+        sessions.clear()
+        return {
+            "token": token,
+            "message": "Shown once. Previous access key is now invalid and open sessions were signed out.",
+        }
+
     @app.get("/api/state")
     def state():
         objects = {
@@ -1249,7 +1258,7 @@ def create_app(directory, background=True):
         store.audit("backup", path.name)
         return {
             "filename": path.name,
-            "message": "Backup contains original logs and configuration secrets. Stored locally with owner-only permissions.",
+            "message": "Backup contains original logs, the access key and configuration secrets. Stored locally with owner-only permissions. Rotate credentials after restore.",
         }
 
     @app.get("/api/templates/{kind}")
