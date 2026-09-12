@@ -9,13 +9,13 @@ import math
 from .rules import redact
 from .store import dumps
 
-VERSION = "routine-dates-v1"
+VERSION = "routine-dates-v2"
 DATE = re.compile(
     r"\b\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:[.,]\d+)?" r"(?:Z|[+-]\d{2}:?\d{2})?\b"
 )
 LOGGING = re.compile(
-    r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}[,.]\d+ "
-    r"\[INFO\] (?P<logger>apscheduler\.executors\.default|httpx): (?P<body>[^\n]+)$"
+    r"^" + DATE.pattern + r" (?:\[INFO\]|INFO) "
+    r"(?P<logger>apscheduler\.executors\.default|httpx): (?P<body>[^\n]+)$"
 )
 
 
@@ -92,10 +92,11 @@ def compact(events, budget):
                 first=event.get("timestamp"),
                 last=event.get("timestamp"),
                 event_ids=[],
+                _times=[],
                 identity=hashlib.sha256(dumps(key).encode()).hexdigest(),
             )
             if normalizer != "exact-v1":
-                group.update(normalizer=normalizer, unit=unit, examples=[], _times=[])
+                group.update(normalizer=normalizer, unit=unit, examples=[])
             elif unit:
                 group["unit"] = unit
             grouped[key] = group
@@ -103,15 +104,15 @@ def compact(events, budget):
         group["count"] += 1
         group["last"] = event.get("timestamp")
         group["event_ids"].append(event["id"])
+        try:
+            instant = datetime.fromisoformat(
+                event.get("timestamp", "").replace("Z", "+00:00")
+            )
+            if instant.tzinfo is not None:
+                group["_times"].append(instant.timestamp())
+        except (ValueError, TypeError):
+            pass
         if "examples" in group:
-            try:
-                instant = datetime.fromisoformat(
-                    event.get("timestamp", "").replace("Z", "+00:00")
-                )
-                if instant.tzinfo is not None:
-                    group["_times"].append(instant.timestamp())
-            except (ValueError, TypeError):
-                pass
             example = dict(id=event["id"], message=redact(event.get("message", "")))
             if len(group["examples"]) < 2:
                 group["examples"].append(example)
@@ -123,7 +124,7 @@ def compact(events, budget):
     used = 2
     for group in grouped.values():
         times = group.pop("_times", [])
-        if times:
+        if times and group["count"] > 1:
             # Keep bursts visible instead of flattening the whole window into
             # one average. At most 60 bins; zeros preserve quiet periods.
             width = max(60, math.ceil((max(times) - min(times) + 1) / 59 / 60) * 60)

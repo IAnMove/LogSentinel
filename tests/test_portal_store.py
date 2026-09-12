@@ -328,3 +328,27 @@ def test_concurrent_rotations_keep_file_database_and_retirements_consistent(tmp_
     assert active in tokens
     assert (tmp_path / "access-key.txt").read_text().strip() == active
     assert set(json.loads(stores[0].meta("retired_admin_tokens"))) == {previous, *tokens} - {active}
+
+
+def test_segment_cache_reuses_verified_data_without_hiding_corruption(tmp_path, monkeypatch):
+    import gzip
+    import json
+    import pytest
+    from logsentinel.portal.store import Store
+    store = Store(tmp_path)
+    store.ingest(dict(id="s", machine_id="m"), [dict(origin="1", message="message", metadata=dict(x=1))])
+    actual = gzip.decompress
+    calls = []
+    def decompress(data):
+        calls.append(1)
+        return actual(data)
+    monkeypatch.setattr(gzip, "decompress", decompress)
+    first = store.events()[0]
+    first["metadata"]["x"] = 99
+    assert store.events()[0]["metadata"]["x"] == 1
+    assert len(calls) == 1
+    with store.connect() as db:
+        db.execute("UPDATE segments SET data=?", (gzip.compress(json.dumps([dict(message="tampered")]).encode()),))
+    with pytest.raises(ValueError, match="checksum"):
+        store.events()
+    assert len(calls) == 2

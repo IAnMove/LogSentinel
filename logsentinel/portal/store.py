@@ -14,6 +14,9 @@ import os
 import secrets
 import sqlite3
 import time
+import threading
+from collections import OrderedDict
+from copy import deepcopy
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -36,6 +39,9 @@ class Store:
         self.directory = Path(directory).expanduser().resolve()
         self.directory.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.path = self.directory / "sentinel.db"
+        self._segment_cache = OrderedDict()
+        self._segment_cache_bytes = 0
+        self._segment_cache_lock = threading.RLock()
         with self.connect() as db:
             db.executescript(
                 """
@@ -411,6 +417,28 @@ class Store:
                 )
         return len(unique)
 
+    def _decode_segment(self, segment):
+        # Recheck the compressed identity too: a corrupted/replaced blob must
+        # not be hidden behind a previously validated decompression.
+        key = (segment["sha"], hashlib.sha256(segment["data"]).digest())
+        with self._segment_cache_lock:
+            cached = self._segment_cache.get(key)
+            if cached is not None:
+                self._segment_cache.move_to_end(key)
+                return cached[0]
+            raw = gzip.decompress(segment["data"])
+            if hashlib.sha256(raw).hexdigest() != segment["sha"]:
+                raise ValueError("Segment checksum mismatch")
+            decoded = json.loads(raw)
+            size = len(raw)
+            if size <= 8 * 1024 * 1024:
+                while self._segment_cache and (self._segment_cache_bytes + size > 8 * 1024 * 1024 or len(self._segment_cache) >= 32):
+                    _, removed = self._segment_cache.popitem(last=False)
+                    self._segment_cache_bytes -= removed[1]
+                self._segment_cache[key] = (decoded, size)
+                self._segment_cache_bytes += size
+            return decoded
+
     def events(
         self,
         machine_id="",
@@ -454,11 +482,8 @@ class Store:
                     ).fetchone()
                     if segment is None:
                         continue
-                    raw = gzip.decompress(segment["data"])
-                    if hashlib.sha256(raw).hexdigest() != segment["sha"]:
-                        raise ValueError("Segment checksum mismatch")
-                    cache[sid] = json.loads(raw)
-                out.append(dict(cache[sid][row["ordinal"]], **dict(row)))
+                    cache[sid] = self._decode_segment(segment)
+                out.append(dict(deepcopy(cache[sid][row["ordinal"]]), **dict(row)))
             return out
 
     def neighbors(self, ids, radius=2):
@@ -781,6 +806,10 @@ class Store:
                 db.execute("VACUUM")
             else:
                 db.execute("PRAGMA wal_checkpoint(PASSIVE)")
+        if ids:
+            with self._segment_cache_lock:
+                self._segment_cache.clear()
+                self._segment_cache_bytes = 0
         return len(ids)
 
     def discard_sent(self):

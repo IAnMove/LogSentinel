@@ -246,7 +246,7 @@ def test_retained_journald_events_recover_unit_from_original():
     ]
     groups, selected, _ = compact(events, 5000)
     assert len(groups) == 1 and len(selected) == 2
-    assert groups[0]["normalizer"] == "routine-dates-v1"
+    assert groups[0]["normalizer"] == "routine-dates-v2"
 
 
 @pytest.mark.asyncio
@@ -641,3 +641,18 @@ async def test_bad_job_does_not_back_off_other_machines(queue):
     with store.connect() as db:
         batch = json.loads(db.execute("SELECT b.data FROM review_batches b JOIN jobs j ON j.id=b.job_id WHERE j.machine_id=?", (machine["id"],)).fetchone()[0])
     assert batch["retry_at"] > time.time()
+
+
+def test_known_iso_routine_template_keeps_resources_and_burst_shape():
+    events = []
+    for i, second in enumerate((0, 1, 180)):
+        event = routine(i)
+        timestamp = "2026-09-12T10:" + ("03:00" if second == 180 else "00:0" + str(second)) + "Z"
+        event.update(timestamp=timestamp, message=timestamp + ' INFO httpx: HTTP Request: GET https://example.invalid/health "HTTP/1.1 200 OK"')
+        events.append(event)
+    different = dict(events[-1], id="different", message=events[-1]["message"].replace("/health", "/invoices"))
+    groups, selected, omitted = compact(events + [different], 5000)
+    assert len(groups) == 2 and len(selected) == 4 and not omitted
+    repeated = next(g for g in groups if g["count"] == 3)
+    assert repeated["frequency"]["counts"] == [2, 0, 0, 1]
+    assert len(repeated["examples"]) == 2
