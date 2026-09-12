@@ -7,8 +7,9 @@ from statistics import median
 from .store import dumps
 
 
-def input_ceiling(cfg, machine=None):
+def input_ceiling(cfg, machine=None, store=None):
     from .analysis import TRIAGE_SYSTEM
+    from .context_budget import input_bytes
 
     machine = machine or {}
     envelope = dumps(
@@ -22,8 +23,7 @@ def input_ceiling(cfg, machine=None):
     )
     return max(
         0,
-        cfg.context_tokens
-        - cfg.llm.max_tokens
+        input_bytes(store, cfg)
         - len((TRIAGE_SYSTEM + envelope).encode())
         - 128,
     )
@@ -94,7 +94,10 @@ def batch_budget(store, cfg, ceiling):
                 chosen, reason = previous, "within_target"
         else:
             chosen = previous
+    from .context_budget import token_policy
+
     return dict(
+        token_estimate=token_policy(store, cfg),
         review_profile=profile_key(cfg),
         input_bytes=max(0, min(chosen, maximum)),
         maximum_bytes=maximum,

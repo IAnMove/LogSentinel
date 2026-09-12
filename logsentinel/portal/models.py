@@ -103,9 +103,9 @@ class Settings(Model):
 
     @model_validator(mode="after")
     def budgets(self):
-        if self.input_budget + self.llm.max_tokens + 1024 > self.context_tokens:
+        if self.llm.max_tokens + 1024 >= self.context_tokens:
             raise ValueError(
-                "Context must reserve input, output and 1024 tokens for instructions"
+                "Context must leave room for logs after output and 1024 instruction tokens"
             )
         check_url(self.llm.base_url)
         return self

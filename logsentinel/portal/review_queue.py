@@ -9,7 +9,7 @@ import httpx
 import time
 
 from .batch_budget import batch_budget, input_ceiling
-from .compaction import compact, public_group
+from .compaction import compact, public_group, representation
 from .models import Settings, Verdict
 from .injection import looks_like_instruction
 from .rules import excluded, redact, sanitize, protected_secrets
@@ -230,7 +230,7 @@ class ReviewQueue:
             progressed = True
         if not candidates:
             return None, progressed
-        ceiling = input_ceiling(cfg, machine)
+        ceiling = input_ceiling(cfg, machine, self.store)
         tuning = batch_budget(self.store, cfg, ceiling)
         self.store.set_meta("batch_tuning", dumps(tuning))
         budget = tuning["input_bytes"]
@@ -239,11 +239,17 @@ class ReviewQueue:
         if not groups and tuning["maximum_bytes"] > budget:
             budget = tuning["maximum_bytes"]
             groups, selected, omitted = compact(candidates, budget)
-        impossible = [
-            e
-            for e in candidates
-            if e["id"] in set(omitted) and not compact([e], tuning["maximum_bytes"])[0]
-        ]
+        omitted_ids = set(omitted)
+        fits = {}
+        impossible = []
+        for event in candidates:
+            if event["id"] not in omitted_ids:
+                continue
+            key = representation(event)[0]
+            if key not in fits:
+                fits[key] = bool(compact([event], tuning["maximum_bytes"])[0])
+            if not fits[key]:
+                impossible.append(event)
         fragment_work = None
         if impossible:
             from .fragments import fragment_groups
@@ -414,11 +420,12 @@ class ReviewQueue:
             batch["evidence_created"] = min(
                 batch.get("evidence_created", oldest), oldest
             )
+        from .context_budget import input_bytes
         packed, references = [], {}
+        secrets = (cfg.llm.api_key, *protected_secrets(self.store))
         budget = min(
             cfg.input_budget,
-            cfg.context_tokens
-            - cfg.llm.max_tokens
+            input_bytes(self.store, cfg)
             - len(VERIFY_SYSTEM.encode())
             - 2500,
         )
@@ -431,7 +438,7 @@ class ReviewQueue:
                     k: event.get(k)
                     for k in ("timestamp", "service", "message", "source_id")
                 },
-                (cfg.llm.api_key, *protected_secrets(self.store)),
+                secrets,
             )
             fragment = next((g for g in batch["groups"] if "fragment" in g and event["id"] in g["event_ids"]), None)
             if fragment:
@@ -462,7 +469,7 @@ class ReviewQueue:
         # Candidate descriptions also consume context. Drop neighbours first;
         # never start an unverifiable call whose envelope already exceeds it.
         ceiling = (
-            cfg.context_tokens - cfg.llm.max_tokens - len(VERIFY_SYSTEM.encode()) - 128
+            input_bytes(self.store, cfg) - len(VERIFY_SYSTEM.encode()) - 128
         )
         required = {r for c in public_candidates for r in c["evidence_ids"]}
         while len(dumps(payload).encode()) > ceiling:
@@ -696,7 +703,7 @@ class ReviewQueue:
         )
 
     async def execute(self, machine, work):
-        from .analysis import TRIAGE_SYSTEM, IncompleteModelResponse, safe_error
+        from .analysis import TRIAGE_SYSTEM, IncompleteModelResponse, ContextBudgetExceeded, safe_error
 
         job, batch, cfg = work
         phase = batch["phase"]
@@ -805,21 +812,24 @@ class ReviewQueue:
                 )
             raise
         except Exception as exc:
-            if (
-                isinstance(exc, IncompleteModelResponse)
-                and phase == "triage"
-                and len(batch["groups"]) > 1
-            ):
-                # Split the already frozen groups; no evidence is substituted.
-                halfway = len(batch["groups"]) // 2
+            slices = []
+            if isinstance(exc, IncompleteModelResponse) and phase == "triage":
+                if len(batch["groups"]) > 1:
+                    halfway = len(batch["groups"]) // 2
+                    slices = [batch["groups"][:halfway], batch["groups"][halfway:]]
+                elif "fragment" in batch["groups"][0] and len(batch["groups"][0]["message"]) > 128:
+                    group = batch["groups"][0]
+                    middle = len(group["message"]) // 2
+                    for start, end in ((0, middle), (middle, len(group["message"]))):
+                        part = dict(group, message=group["message"][start:end], fragment=dict(group["fragment"], start=group["fragment"]["start"] + start, end=group["fragment"]["start"] + end))
+                        slices.append([part])
+            if slices:
+                # Split only the frozen representation, including its slice offsets.
                 with self.store.connect() as db:
                     db.execute("BEGIN IMMEDIATE")
-                    for groups in (
-                        batch["groups"][:halfway],
-                        batch["groups"][halfway:],
-                    ):
+                    for groups in slices:
                         ids = {i for g in groups for i in g["event_ids"]}
-                        self.create(
+                        child = self.create(
                             machine,
                             cfg,
                             groups,
@@ -830,6 +840,10 @@ class ReviewQueue:
                             connection=db,
                             live_ids=[i for i in batch.get("live_ids", []) if i in ids],
                         )
+                        if "fragment" in groups[0]:
+                            fragment = groups[0]["fragment"]
+                            db.execute("INSERT INTO review_parts VALUES(?,?,?,?,0)", (child[0], groups[0]["event_ids"][0], fragment["start"], fragment["end"]))
+                    db.execute("DELETE FROM review_parts WHERE job_id=?", (job,))
                     self.save(
                         job,
                         batch,
@@ -837,6 +851,11 @@ class ReviewQueue:
                         "Incomplete response; original groups split into smaller jobs",
                         connection=db,
                     )
+                return int(called), 0
+            if isinstance(exc, ContextBudgetExceeded) and phase == "triage" and "fragment" not in batch["groups"][0]:
+                from .batch_budget import profile_key
+                self.store.set_meta("context_conservative:" + profile_key(cfg), str(time.time() + 300))
+                self.cancel(job, batch, "Context rejected; originals rescheduled with a conservative bound")
                 return int(called), 0
             shared = isinstance(exc, (httpx.RequestError, TimeoutError)) or (
                 isinstance(exc, httpx.HTTPStatusError) and (exc.response.status_code in (401, 403, 429) or exc.response.status_code >= 500)

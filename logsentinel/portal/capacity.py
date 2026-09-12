@@ -202,7 +202,7 @@ def capacity_report(store, machine_id=""):
     ]
     input_ceiling = min(
         (model_input_ceiling(cfg, m) for m in scoped_machines),
-        default=model_input_ceiling(cfg),
+        default=model_input_ceiling(cfg, store=store),
     )
     journals = [s for s in sources if s["kind"] == "journald" and s["enabled"]]
     duplicate_journals = (
