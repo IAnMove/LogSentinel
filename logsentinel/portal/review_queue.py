@@ -640,6 +640,21 @@ class ReviewQueue:
         phase = batch["phase"]
         called = False
         try:
+            if not batch.get("signals_checked"):
+                from .signals import apply_signals
+                from .injection import apply_injection_signals
+
+                originals = self.store.events(
+                    machine_id=machine["id"], ids=batch["selected"],
+                    limit=len(batch["selected"]),
+                )
+                if {e["id"] for e in originals} != set(batch["selected"]):
+                    raise ValueError("Frozen signal evidence is unavailable")
+                apply_signals(self.analyzer, machine_id=machine["id"], events=originals)
+                apply_injection_signals(self.analyzer, machine_id=machine["id"], events=originals)
+                # Persist only after both floors succeed, also for recovered replies.
+                batch["signals_checked"] = True
+                self.save(job, batch)
             if phase in ("triage", "verification"):
                 with self.store.connect() as db:
                     db.execute(

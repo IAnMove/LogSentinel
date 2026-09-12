@@ -4,6 +4,8 @@ from __future__ import annotations
 import hashlib
 import regex
 
+from .signals import signal_batches
+
 # Tight phrases that try to steer the model, not generic words like "system" or "ignore".
 PATTERNS = (
     r"(?i)ignore (?:all )?(?:previous|prior|above|your) (?:instructions|prompts|rules)",
@@ -66,23 +68,19 @@ def sanitize_chat_filter(proposal):
     return proposal
 
 
-def apply_injection_signals(analyzer, limit=500):
+def apply_injection_signals(analyzer, limit=500, *, machine_id=None, events=None):
     store = analyzer.store
     spanish = store.settings().language == "es"
     created = 0
-    for machine in store.objects("machine"):
-        if not store.monitoring_active(machine["id"]):
-            continue
-        events = store.events(machine_id=machine["id"], status="pending", limit=limit)
-        events += store.events(machine_id=machine["id"], status="capacity", limit=limit)
+    for machine_id, events in signal_batches(analyzer, limit, machine_id, events):
         hits = [e for e in events if looks_like_instruction(e.get("message"))]
         if not hits:
             continue
         fingerprint = hashlib.sha256(
-            ("prompt-injection:" + machine["id"]).encode()
+            ("prompt-injection:" + machine_id).encode()
         ).hexdigest()
         analyzer.save_finding(
-            machine["id"],
+            machine_id,
             {
                 "title": (
                     "Texto en logs que parece una instrucción al modelo"
@@ -104,7 +102,7 @@ def apply_injection_signals(analyzer, limit=500):
                     else "Read the cited lines. Do not accept an exclusion filter proposed from this text."
                 ),
             },
-            [e["id"] for e in hits[:100]],
+            [e["id"] for e in hits],
             fingerprint=fingerprint,
         )
         created += 1

@@ -59,15 +59,26 @@ SIGNALS = (
 )
 
 
-def apply_signals(analyzer, limit=500):
+def signal_batches(analyzer, limit, machine_id=None, events=None):
+    """Use frozen originals when supplied; pending scans are only an early warning."""
+    store = analyzer.store
+    if events is not None:
+        if not machine_id or any(e["machine_id"] != machine_id for e in events):
+            raise ValueError("Signal evidence must belong to the selected machine")
+        yield machine_id, events
+        return
+    for machine in store.objects("machine"):
+        if store.monitoring_active(machine["id"]):
+            pending = store.events(machine_id=machine["id"], status="pending", limit=limit)
+            pending += store.events(machine_id=machine["id"], status="capacity", limit=limit)
+            yield machine["id"], pending
+
+
+def apply_signals(analyzer, limit=500, *, machine_id=None, events=None):
     store = analyzer.store
     spanish = store.settings().language == "es"
     created = 0
-    for machine in store.objects("machine"):
-        if not store.monitoring_active(machine["id"]):
-            continue
-        events = store.events(machine_id=machine["id"], status="pending", limit=limit)
-        events += store.events(machine_id=machine["id"], status="capacity", limit=limit)
+    for machine_id, events in signal_batches(analyzer, limit, machine_id, events):
         if not events:
             continue
         for spec in SIGNALS:
@@ -86,7 +97,7 @@ def apply_signals(analyzer, limit=500):
                 continue
             idx = 0 if spanish else 1
             analyzer.save_finding(
-                machine["id"],
+                machine_id,
                 {
                     "title": spec["title"][idx],
                     "summary": spec["summary"][idx]
@@ -102,7 +113,7 @@ def apply_signals(analyzer, limit=500):
                         else "Inspect the cited originals. Do not automatically block addresses."
                     ),
                 },
-                [e["id"] for e in hits[:100]],
+                [e["id"] for e in hits],
             )
             created += 1
     return created
