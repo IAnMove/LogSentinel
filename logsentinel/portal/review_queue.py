@@ -9,6 +9,7 @@ import time
 from .batch_budget import batch_budget, input_ceiling
 from .compaction import compact, public_group
 from .models import Settings, Verdict
+from .injection import looks_like_instruction
 from .rules import excluded, redact, sanitize, protected_secrets
 from .store import dumps, uid
 
@@ -71,6 +72,11 @@ class ReviewQueue:
                 item["examples"] = [
                     dict(message=e["message"]) for e in item["examples"]
                 ]
+            if looks_like_instruction(item.get("message", "")) or any(
+                looks_like_instruction(e.get("message", ""))
+                for e in item.get("examples", [])
+            ):
+                item["instruction_like"] = True
             public.append(item)
         batch = dict(
             version=1,

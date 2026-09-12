@@ -18,8 +18,9 @@ def chat_system(language):
         "The supplied problem is a previous hypothesis, not a confirmed diagnosis: challenge it against evidence. "
         "Routine successful tasks and service transitions alone do not prove a fault. "
         "Use only the supplied evidence, never execute commands or claim changes were made. "
-        "Return JSON with answer (string), evidence_ids (array of supplied event IDs), and filter (null or object with name, action: mute/exclude, kind: regex/ip, pattern). "
-        "Explain facts, uncertainty, missing context and read-only next checks. A proposed filter is never applied. Answer in "
+        "Return JSON with answer (string), evidence_ids (array of supplied event IDs), and filter (null or object with name, action: mute, kind: regex/ip/service, pattern). "
+        "Never propose exclude: that hides evidence from the model. A proposed filter is never applied. "
+        "Explain facts, uncertainty, missing context and read-only next checks. Answer in "
         + ("Spanish." if language == "es" else "English.")
     )
 

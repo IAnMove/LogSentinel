@@ -1213,11 +1213,14 @@ def create_app(directory, background=True):
                 config=cfg,
             )
         )
-        proposal = result.get("filter")
+        from .injection import sanitize_chat_filter
+
+        proposal = sanitize_chat_filter(result.get("filter"))
         if proposal:
             proposal = validate_rule(
                 Rule(**dict(proposal, machine_id=machine, source_id=source))
             ).model_dump()
+            proposal = sanitize_chat_filter(proposal)
         reply = {
             "answer": redact(result["answer"], (store.settings().llm.api_key,)),
             "evidence_ids": result["evidence_ids"],
