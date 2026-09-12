@@ -304,10 +304,18 @@ class Outbox:
                         )
                     try:
                         status = await self.send(dest, json.loads(row["payload"]))
-                    except (asyncio.CancelledError, httpx.TimeoutException) as exc:
+                    except (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout):
+                        # No request body reached the destination. Retrying cannot
+                        # duplicate an accepted notification.
+                        status = "retry" if row["attempts"] < 2 else "failed"
+                        error = "Connection failed before sending; retry scheduled" if status == "retry" else "Connection failed before sending; retries exhausted"
+                    except (
+                        asyncio.CancelledError, httpx.TimeoutException,
+                        httpx.ReadError, httpx.WriteError, httpx.RemoteProtocolError,
+                    ) as exc:
                         cancelled = isinstance(exc, asyncio.CancelledError)
                         status = "unknown"
-                        error = "Delivery interrupted or timed out; remote acceptance unknown"
+                        error = "Delivery interrupted after sending may have started; remote acceptance unknown"
                     except Exception as exc:
                         status = (
                             "retry"

@@ -195,3 +195,46 @@ async def test_file_destination_rotation_compresses_and_bounds_archives(tmp_path
     assert gzip.decompress((folder / "alerts.jsonl.1.gz").read_bytes()).startswith(b"2")
     assert gzip.decompress((folder / "alerts.jsonl.2.gz").read_bytes()).startswith(b"1")
     assert not (folder / "alerts.jsonl.3.gz").exists()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure, expected", [
+    (httpx.ConnectError, "retry"),
+    (httpx.ConnectTimeout, "retry"),
+    (httpx.PoolTimeout, "retry"),
+    (httpx.ReadTimeout, "unknown"),
+    (httpx.ReadError, "unknown"),
+    (httpx.WriteError, "unknown"),
+    (httpx.RemoteProtocolError, "unknown"),
+    (ValueError, "failed"),
+])
+async def test_delivery_failure_classification_and_bounded_recovery(tmp_path, failure, expected):
+    from logsentinel.portal.store import dumps
+
+    store = Store(tmp_path)
+    dest = store.put("destination", Destination(
+        name="Synthetic", kind="webhook", url="https://example.invalid/", enabled=True,
+    ).model_dump())
+    payload = dumps({"delivery_id": "same-id"})
+    with store.connect() as db:
+        db.execute("INSERT INTO deliveries VALUES(?,?,?,?,?,?,?,?,?,?)",
+                   ("d", dest, "test", payload, "pending", 0, 0, 0, 0, None))
+    outbox = Outbox(store)
+
+    async def failed(*args):
+        raise failure("synthetic")
+
+    outbox.send = failed
+    await outbox.drain()
+    row = store.rows("deliveries")[0]
+    assert row["status"] == expected
+    assert row["attempts"] == 1
+    if expected == "retry":
+        store.recover()
+        for _ in range(2):
+            with store.connect() as db:
+                db.execute("UPDATE deliveries SET next_try=0")
+            await outbox.drain()
+        row = store.rows("deliveries")[0]
+        assert row["status"] == "failed" and row["attempts"] == 3
+    assert row["payload"] == payload
