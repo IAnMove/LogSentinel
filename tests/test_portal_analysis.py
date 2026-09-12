@@ -330,3 +330,24 @@ def test_long_tracebacks_group_by_full_normalized_message(data):
     assert problems["long-a"] != problems["long-b"]
     assert problems["long-repeat"] == problems["long-a"]
     assert store.problem(problems["long-a"])["count"] == 2
+
+
+def test_signal_rules_are_loaded_once_per_scan(data, monkeypatch):
+    from logsentinel.portal.signals import apply_signals
+
+    store, machine = data
+    store.ingest({"id": "s", "machine_id": machine}, [
+        dict(origin=f"bulk-{i}", message="routine heartbeat", service="app")
+        for i in range(2000)
+    ])
+    reads = []
+    original = store.objects
+
+    def counted(kind):
+        if kind == "rule":
+            reads.append(kind)
+        return original(kind)
+
+    monkeypatch.setattr(store, "objects", counted)
+    apply_signals(Analyzer(store), machine_id=machine, events=store.events(limit=5000))
+    assert reads == ["rule"]

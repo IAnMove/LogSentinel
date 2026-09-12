@@ -90,15 +90,16 @@ def apply_signals(analyzer, limit=500, *, machine_id=None, events=None):
     store = analyzer.store
     spanish = store.settings().language == "es"
     created = 0
+    rules = store.objects("rule")
     for machine_id, events in signal_batches(analyzer, limit, machine_id, events):
         if not events:
             continue
+        eligible = [e for e in events if not excluded(store, e, rules)]
         for spec in SIGNALS:
             hits = [
                 e
-                for e in events
-                if not excluded(store, e)
-                and regex.search(spec["pattern"], e.get("message") or "", timeout=0.02)
+                for e in eligible
+                if regex.search(spec["pattern"], e.get("message") or "", timeout=0.02)
                 and (
                     not spec.get("service")
                     or (e.get("service") or "").casefold()
