@@ -573,3 +573,40 @@ async def test_failed_signal_scan_does_not_cover_frozen_evidence(queue, monkeypa
     assert not store.events(status="compact")
     assert not work[1].get("signals_checked")
     assert store.rows("jobs")[0]["status"] == "retry"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("legacy", [False, True])
+async def test_model_cannot_downgrade_or_resolve_deterministic_finding(queue, legacy):
+    from logsentinel.portal.signals import apply_signals
+    from logsentinel.portal.analysis import grouping_key
+    import hashlib
+
+    store, machine, source = queue
+    configure(store, max_calls=2, verification="all")
+    store.ingest(source, [dict(origin="oom", message="Out of memory: killed process 123", service="kernel")])
+    analyzer = Analyzer(store)
+    apply_signals(analyzer)
+    original = store.rows("problems")[0]
+    if legacy:
+        data = json.loads(original["data"])
+        data.pop("detector")
+        fingerprint = hashlib.sha256(dumps(sorted({grouping_key(e) for e in store.events()})).encode()).hexdigest()
+        with store.connect() as db:
+            db.execute("UPDATE problems SET fingerprint=?,data=? WHERE id=?", (fingerprint, dumps(data), original["id"]))
+
+    async def model(payload, **kwargs):
+        if "groups" in payload:
+            return {"findings": [dict(title="Memory speculation", summary="Model candidate", severity="MEDIUM", category="application", evidence_ids=[payload["groups"][0]["id"]])]}
+        return {"assessments": [dict(candidate_id=c["candidate_id"], status="unsupported", reason="Model denies this", evidence_ids=c["evidence_ids"]) for c in payload["candidates"]]}
+
+    analyzer.client.call = model
+    assert await analyzer.cycle() == {"calls": 2, "errors": 0}
+    problems = {p["id"]: p for p in store.rows("problems")}
+    assert len(problems) == 2
+    assert problems[original["id"]]["severity"] == "HIGH"
+    assert problems[original["id"]]["status"] == "open"
+    assert next(p for p in problems.values() if p["id"] != original["id"])["status"] == "resolved"
+    # Rechecking the exact evidence must not create a second deterministic issue.
+    apply_signals(analyzer, machine_id=machine["id"], events=store.events())
+    assert len(store.rows("problems")) == 2

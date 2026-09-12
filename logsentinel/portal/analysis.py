@@ -390,15 +390,36 @@ class Analyzer:
                 raise ValueError("Model cited unavailable evidence")
 
     def save_finding(
-        self, machine, finding, ids, *, status="open", notify=True, fingerprint=None
+        self, machine, finding, ids, *, status="open", notify=True, fingerprint=None, detector=None
     ):
         events = self.store.events(ids=ids, limit=5000)
         # Deterministic origin signatures, not LLM prose, decide grouping.
         keys = sorted({grouping_key(e) for e in events})
         fp = fingerprint or hashlib.sha256(dumps(keys).encode()).hexdigest()
+        evidence_fp = fp
+        if detector:
+            fp = "signal:" + detector + ":" + evidence_fp
+            finding = dict(finding, detector=detector)
         now = time.time()
         finding = sanitize(finding, protected_secrets(self.store))
         with self.store.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            legacy = db.execute(
+                "SELECT id,data FROM problems WHERE machine_id=? AND fingerprint=?",
+                (machine, evidence_fp),
+            ).fetchone()
+            if legacy and fingerprint is None:
+                from .signals import deterministic_signal
+
+                signal = deterministic_signal(json.loads(legacy["data"]))
+                if signal:
+                    target = "signal:" + signal + ":" + evidence_fp
+                    if db.execute(
+                        "SELECT 1 FROM problems WHERE machine_id=? AND fingerprint=?",
+                        (machine, target),
+                    ).fetchone():
+                        target += ":legacy:" + legacy["id"]
+                    db.execute("UPDATE problems SET fingerprint=? WHERE id=?", (target, legacy["id"]))
             old = db.execute(
                 "SELECT * FROM problems WHERE machine_id=? AND fingerprint=?",
                 (machine, fp),

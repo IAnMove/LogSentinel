@@ -571,6 +571,15 @@ class ReviewQueue:
         for assessment in result["assessments"]:
             index = int(assessment["candidate_id"][1:])
             problem = batch["problems"][index]
+            # A pre-upgrade queued candidate may still reference a detector's row.
+            from .signals import deterministic_signal
+
+            with self.store.connect() as db:
+                saved = db.execute("SELECT machine_id,data FROM problems WHERE id=?", (problem["id"],)).fetchone()
+            if saved and deterministic_signal(json.loads(saved["data"])):
+                problem["id"] = self.analyzer.save_finding(
+                    saved["machine_id"], problem["finding"], problem["evidence"], notify=False,
+                )
             assessed.add(index)
             data = dict(
                 problem["finding"],

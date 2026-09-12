@@ -59,6 +59,18 @@ SIGNALS = (
 )
 
 
+def deterministic_signal(finding):
+    if finding.get("detector"):
+        return finding["detector"]
+    # Recognise findings saved before detector identities were separated.
+    for spec in SIGNALS:
+        if finding.get("reasoning") == spec["id"] and finding.get("title") in spec["title"]:
+            return spec["id"]
+    if finding.get("reasoning") == "prompt-injection":
+        return "prompt-injection"
+    return None
+
+
 def signal_batches(analyzer, limit, machine_id=None, events=None):
     """Use frozen originals when supplied; pending scans are only an early warning."""
     store = analyzer.store
@@ -114,6 +126,7 @@ def apply_signals(analyzer, limit=500, *, machine_id=None, events=None):
                     ),
                 },
                 [e["id"] for e in hits],
+                detector=spec["id"],
             )
             created += 1
     return created
