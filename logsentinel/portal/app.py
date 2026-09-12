@@ -351,8 +351,11 @@ def create_app(directory, background=True):
 
     @app.post("/api/access-key/rotate")
     def rotate_access_key():
-        token = store.rotate_admin_token()
-        sessions.clear()
+        try:
+            token = store.rotate_admin_token()
+        finally:
+            # Also revoke sessions if the storage operation fails partway through.
+            sessions.clear()
         return {
             "token": token,
             "message": "Shown once. Previous access key is now invalid and open sessions were signed out.",

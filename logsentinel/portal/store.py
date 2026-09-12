@@ -5,6 +5,8 @@ Keeping blobs in SQLite makes backup and recovery atomic across their references
 """
 
 from __future__ import annotations
+import fcntl
+import tempfile
 import gzip
 import hashlib
 import json
@@ -80,31 +82,62 @@ class Store:
             )
         os.chmod(self.path, 0o600)
 
-    def write_access_key(self):
-        """Owner-only file the portal process may reread; never print the value."""
+    @contextmanager
+    def _access_key_lock(self):
+        fd = os.open(self.directory / ".access-key.lock", os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+        with os.fdopen(fd, "w") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            yield
+
+    def _replace_key_file(self, token):
         path = self.directory / "access-key.txt"
-        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        os.fchmod(fd, 0o600)
-        with os.fdopen(fd, "w") as handle:
-            handle.write(self.meta("admin_token") + "\n")
+        fd, name = tempfile.mkstemp(prefix=".access-key-", dir=self.directory)
+        try:
+            with os.fdopen(fd, "w") as handle:
+                handle.write(token + "\n")
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(name, path)
+            directory_fd = os.open(self.directory, os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                os.fsync(directory_fd)
+            finally:
+                os.close(directory_fd)
+        finally:
+            Path(name).unlink(missing_ok=True)
         return path
 
+    def write_access_key(self):
+        """Atomically reconcile the owner-only file with the authoritative database."""
+        with self._access_key_lock():
+            return self._replace_key_file(self.meta("admin_token"))
+
     def rotate_admin_token(self):
-        previous = self.meta("admin_token") or ""
-        retired = json.loads(self.meta("retired_admin_tokens") or "[]")
-        if previous:
-            retired = [previous, *[t for t in retired if t != previous]][:20]
-        token = secrets.token_urlsafe(32)
-        with self.connect() as db:
-            db.execute(
-                "INSERT OR REPLACE INTO meta VALUES('admin_token',?)", (token,)
-            )
-            db.execute(
-                "INSERT OR REPLACE INTO meta VALUES('retired_admin_tokens',?)",
-                (dumps(retired),),
-            )
-        self.write_access_key()
-        self.audit("rotate_access_key")
+        with self._access_key_lock():
+            previous = None
+            try:
+                with self.connect() as db:
+                    db.execute("BEGIN IMMEDIATE")
+                    previous = db.execute("SELECT value FROM meta WHERE key='admin_token'").fetchone()[0]
+                    row = db.execute("SELECT value FROM meta WHERE key='retired_admin_tokens'").fetchone()
+                    retired = json.loads(row[0]) if row else []
+                    retired = [previous, *[t for t in retired if t != previous]][:20]
+                    token = secrets.token_urlsafe(32)
+                    db.execute("INSERT OR REPLACE INTO meta VALUES('admin_token',?)", (token,))
+                    db.execute("INSERT OR REPLACE INTO meta VALUES('retired_admin_tokens',?)", (dumps(retired),))
+                    db.execute(
+                        "INSERT INTO audit(created,action,object_id,detail) VALUES(?,?,?,?)",
+                        (time.time(), "rotate_access_key", "", ""),
+                    )
+                    # A failed replacement rolls back both the key and retirement.
+                    self._replace_key_file(token)
+            except BaseException:
+                if previous is not None:
+                    path = self.directory / "access-key.txt"
+                    if not path.exists() or path.read_text().strip() != previous:
+                        # A failed DB commit may follow a successful replacement.
+                        self._replace_key_file(previous)
+                raise
         return token
 
     @contextmanager

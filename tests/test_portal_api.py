@@ -527,3 +527,26 @@ def test_changing_provider_drops_connection_and_pending_deliveries(client, targe
     assert current["url"] == patch.get("url", "")
     assert current["chat_id"] == patch.get("chat_id", "")
     assert store.rows("deliveries")[0]["status"] == "cancelled"
+
+
+def test_failed_key_rotation_leaves_old_key_consistent_and_revokes_sessions(client, monkeypatch):
+    import os
+
+    c, store = client
+    previous = store.meta("admin_token")
+    store.write_access_key()
+    retired = store.meta("retired_admin_tokens")
+    c.app.state.sessions["another-session"] = 10**12
+
+    def denied(*args, **kwargs):
+        raise PermissionError("synthetic replace failure")
+
+    monkeypatch.setattr(os, "replace", denied)
+    with pytest.raises(PermissionError):
+        c.post("/api/access-key/rotate")
+    assert store.meta("admin_token") == previous
+    assert store.meta("retired_admin_tokens") == retired
+    assert (store.directory / "access-key.txt").read_text().strip() == previous
+    assert not c.app.state.sessions
+    assert c.get("/api/state").status_code == 401
+    assert c.post("/login", json={"token": previous}).status_code == 200

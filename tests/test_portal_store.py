@@ -276,3 +276,55 @@ def test_runtime_guard_rejects_data_directory_alias(setup):
     with pytest.raises(UnsafeSourcePath):
         Collector(store).file(source, path)
     assert not store.events()
+
+
+def test_key_file_is_restored_when_database_commit_fails(tmp_path, monkeypatch):
+    from contextlib import contextmanager
+    import sqlite3
+
+    store = Store(tmp_path)
+    store.write_access_key()
+    previous = store.meta("admin_token")
+    connect = store.connect
+
+    @contextmanager
+    def failed_commit():
+        with connect() as db:
+            yield db
+            raise sqlite3.OperationalError("synthetic commit failure")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(store, "connect", failed_commit)
+        with pytest.raises(sqlite3.OperationalError):
+            store.rotate_admin_token()
+    assert store.meta("admin_token") == previous
+    assert store.meta("retired_admin_tokens") is None
+    assert (tmp_path / "access-key.txt").read_text().strip() == previous
+    assert not list(tmp_path.glob(".access-key-*"))
+    assert not store.rows("audit")
+
+
+def test_access_key_write_replaces_symlink_without_touching_target(tmp_path):
+    store = Store(tmp_path / "data")
+    target = tmp_path / "unrelated"
+    target.write_text("unchanged")
+    key = store.directory / "access-key.txt"
+    key.symlink_to(target)
+    store.write_access_key()
+    assert not key.is_symlink()
+    assert key.stat().st_mode & 0o777 == 0o600
+    assert target.read_text() == "unchanged"
+
+
+def test_concurrent_rotations_keep_file_database_and_retirements_consistent(tmp_path):
+    import json
+    from concurrent.futures import ThreadPoolExecutor
+
+    stores = [Store(tmp_path), Store(tmp_path)]
+    previous = stores[0].meta("admin_token")
+    with ThreadPoolExecutor(max_workers=2) as workers:
+        tokens = list(workers.map(lambda store: store.rotate_admin_token(), stores))
+    active = stores[0].meta("admin_token")
+    assert active in tokens
+    assert (tmp_path / "access-key.txt").read_text().strip() == active
+    assert set(json.loads(stores[0].meta("retired_admin_tokens"))) == {previous, *tokens} - {active}
