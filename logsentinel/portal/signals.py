@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 import regex
+import hashlib
+from datetime import datetime
+
+from .store import dumps
 
 from .rules import excluded
 
@@ -46,14 +50,15 @@ SIGNALS = (
     {
         "id": "ssh_auth_failures",
         "min": 5,
+        "window_seconds": 300,
         "severity": "HIGH",
         "category": "authentication",
         "pattern": r"(?i)failed password|authentication failure|invalid user|disconnected by authenticating user",
         "service": "sshd",
         "title": ("Varios rechazos de autenticación SSH", "Repeated SSH authentication rejections"),
         "summary": (
-            "Hay varios fallos de SSH en el lote retenido. No prueba un compromiso.",
-            "Several SSH failures are in the retained batch. That does not prove compromise.",
+            "Hay varios fallos de SSH en una ventana de cinco minutos. No prueba un compromiso.",
+            "Several SSH failures occurred within five minutes. That does not prove compromise.",
         ),
     },
 )
@@ -86,6 +91,56 @@ def signal_batches(analyzer, limit, machine_id=None, events=None):
             yield machine["id"], pending
 
 
+def event_instant(event):
+    try:
+        value = datetime.fromisoformat(str(event.get("timestamp") or "").replace("Z", "+00:00"))
+        if value.tzinfo is not None:
+            return value.timestamp()
+    except (ValueError, OverflowError):
+        pass
+    return event["received"]
+
+
+def window_evidence(store, machine_id, spec, hits, rules):
+    """Retain hit identities so model batches and restarts cannot reset a burst."""
+    policy = hashlib.sha256(dumps([r for r in rules if r["action"] == "exclude"]).encode()).hexdigest()
+    by_source = {}
+    for event in hits:
+        by_source.setdefault(event["source_id"], []).append(event)
+    for source, incoming in by_source.items():
+        instants = [event_instant(e) for e in incoming]
+        width = spec["window_seconds"]
+        with store.connect() as db:
+            db.executemany(
+                "INSERT OR REPLACE INTO signal_hits VALUES(?,?,?,?,?,?)",
+                [(spec["id"], e["id"], machine_id, source, at, policy) for e, at in zip(incoming, instants)],
+            )
+            rows = db.execute(
+                "SELECT event_id,instant FROM signal_hits WHERE signal=? AND machine_id=? AND source_id=? AND policy=? AND instant BETWEEN ? AND ? ORDER BY instant,event_id",
+                (spec["id"], machine_id, source, policy, min(instants) - width, max(instants) + width),
+            ).fetchall()
+        incoming_ids = {e["id"] for e in incoming}
+        left, new_in_window = 0, 0
+        spans = []
+        for right, row in enumerate(rows):
+            new_in_window += row["event_id"] in incoming_ids
+            while rows[left]["instant"] < row["instant"] - width:
+                new_in_window -= rows[left]["event_id"] in incoming_ids
+                left += 1
+            if right - left + 1 >= spec["min"] and new_in_window:
+                if spans and left <= spans[-1][1] + 1:
+                    spans[-1] = (spans[-1][0], right)
+                else:
+                    spans.append((left, right))
+        evidence = [rows[i]["event_id"] for start, end in spans for i in range(start, end + 1)]
+        if evidence:
+            originals = []
+            for offset in range(0, len(evidence), 5000):
+                originals.extend(store.events(ids=evidence[offset:offset + 5000], limit=5000))
+            yield source, originals
+
+
+
 def apply_signals(analyzer, limit=500, *, machine_id=None, events=None):
     store = analyzer.store
     spanish = store.settings().language == "es"
@@ -106,28 +161,42 @@ def apply_signals(analyzer, limit=500, *, machine_id=None, events=None):
                     == spec["service"].casefold()
                 )
             ]
-            if len(hits) < spec["min"]:
-                continue
-            idx = 0 if spanish else 1
-            analyzer.save_finding(
-                machine_id,
-                {
-                    "title": spec["title"][idx],
-                    "summary": spec["summary"][idx]
-                    + " "
-                    + ("Señal determinista; el modelo no la ha interpretado." if spanish else "Deterministic signal; the model has not interpreted it."),
-                    "severity": spec["severity"],
-                    "category": spec["category"],
-                    "evidence_ids": [e["id"] for e in hits[:100]],
-                    "reasoning": spec["id"],
-                    "next_steps": (
-                        "Comprueba los originales citados. No bloquees direcciones automáticamente."
-                        if spanish
-                        else "Inspect the cited originals. Do not automatically block addresses."
-                    ),
-                },
-                [e["id"] for e in hits],
-                detector=spec["id"],
+            batches = (
+                window_evidence(store, machine_id, spec, hits, rules)
+                if spec.get("window_seconds") and hits
+                else [("", hits)]
             )
-            created += 1
+            for source_id, evidence in batches:
+                if len(evidence) < spec["min"]:
+                    continue
+                save_signal(analyzer, machine_id, spec, evidence, spanish, source_id)
+                created += 1
     return created
+
+
+def save_signal(analyzer, machine_id, spec, hits, spanish, source_id=""):
+    idx = 0 if spanish else 1
+    analyzer.save_finding(
+        machine_id,
+        {
+            "title": spec["title"][idx],
+            "summary": spec["summary"][idx]
+            + " "
+            + ("Señal determinista; el modelo no la ha interpretado." if spanish else "Deterministic signal; the model has not interpreted it."),
+            "severity": spec["severity"],
+            "category": spec["category"],
+            "evidence_ids": [e["id"] for e in hits[:100]],
+            "reasoning": spec["id"],
+            "next_steps": (
+                "Comprueba los originales citados. No bloquees direcciones automáticamente."
+                if spanish
+                else "Inspect the cited originals. Do not automatically block addresses."
+            ),
+        },
+        [e["id"] for e in hits],
+        detector=spec["id"],
+        fingerprint=(
+            hashlib.sha256(dumps([machine_id, source_id, spec["id"]]).encode()).hexdigest()
+            if spec.get("window_seconds") else None
+        ),
+    )

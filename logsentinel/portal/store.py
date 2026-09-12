@@ -50,6 +50,8 @@ class Store:
             CREATE INDEX IF NOT EXISTS events_scope ON events(machine_id,source_id,received);
             CREATE INDEX IF NOT EXISTS events_time ON events(source_id,julianday(event_time));
             CREATE INDEX IF NOT EXISTS events_received ON events(source_id,received);
+            CREATE TABLE IF NOT EXISTS signal_hits(signal TEXT,event_id TEXT REFERENCES events(id) ON DELETE CASCADE,machine_id TEXT,source_id TEXT,instant REAL,policy TEXT,PRIMARY KEY(signal,event_id));
+            CREATE INDEX IF NOT EXISTS signal_window ON signal_hits(signal,machine_id,source_id,policy,instant);
             CREATE TABLE IF NOT EXISTS jobs(id TEXT PRIMARY KEY,machine_id TEXT,event_ids TEXT,status TEXT,created REAL,updated REAL,attempts INTEGER DEFAULT 0,config TEXT,error TEXT);
             CREATE TABLE IF NOT EXISTS review_batches(job_id TEXT PRIMARY KEY REFERENCES jobs(id) ON DELETE CASCADE,data TEXT NOT NULL);
             CREATE INDEX IF NOT EXISTS jobs_ready ON jobs(machine_id,status,created);

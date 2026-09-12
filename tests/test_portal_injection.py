@@ -146,3 +146,44 @@ def test_chat_cannot_propose_exclude_or_a_universal_regex():
     assert sanitize_chat_filter({"name": "all", "action": "mute", "kind": "regex", "pattern": ".*"}) is None
     assert overbroad_pattern({"kind": "regex", "pattern": "^"}) is True
     assert overbroad_pattern({"kind": "regex", "pattern": "Failed password"}) is False
+
+
+async def empty_model(*args, **kwargs):
+    return {"findings": []}
+
+
+async def run_ssh_chunks(tmp_path, gap):
+    from datetime import datetime, timezone
+    from logsentinel.portal.models import Source
+
+    store = Store(tmp_path)
+    machine = store.put("machine", Machine(name="box").model_dump())
+    sid = store.put("source", Source(name="ssh", machine_id=machine, kind="push").model_dump())
+    for cycle in range(2):
+        store.ingest(store.get("source", sid), [
+            dict(origin=f"{cycle}-{i}", message="Failed password for root from 192.0.2.1", service="sshd",
+                 timestamp=datetime.fromtimestamp(1800000000 + cycle * gap + i, timezone.utc).isoformat())
+            for i in range(3)
+        ])
+        analyzer = Analyzer(Store(tmp_path))
+        analyzer.client.call = empty_model
+        await analyzer.cycle()
+    return store
+
+
+def test_ssh_window_survives_batches_and_restarts(tmp_path):
+    import asyncio
+
+    store = asyncio.run(run_ssh_chunks(tmp_path, 60))
+    problems = store.rows("problems")
+    assert len(problems) == 1
+    assert problems[0]["count"] == 6
+    assert problems[0]["severity"] == "HIGH"
+    assert len(store.events(status="compact")) == 6
+
+
+def test_ssh_failures_outside_window_are_not_a_burst(tmp_path):
+    import asyncio
+
+    store = asyncio.run(run_ssh_chunks(tmp_path, 600))
+    assert not store.rows("problems")
