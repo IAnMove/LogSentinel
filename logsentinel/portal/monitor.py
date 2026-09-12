@@ -11,6 +11,7 @@ class Monitor:
         self.next_due = time.time()
         self.capture_heartbeat = None
         self.signature = None
+        self.idle = True
 
     def reschedule(self):
         cfg = self.store.settings()
@@ -28,6 +29,13 @@ class Monitor:
     async def tick(self):
         self.reschedule()
         cfg = self.store.settings()
+        if cfg.enabled and cfg.adaptive_batching and self.idle and time.time() < self.next_due:
+            with self.store.connect() as db:
+                available = db.execute(
+                    "SELECT 1 FROM events e JOIN objects m ON m.id=e.machine_id WHERE m.kind='machine' AND e.status IN ('pending','capacity') AND NOT coalesce(json_extract(m.data,'$.monitoring_paused'),0) AND NOT coalesce(json_extract(m.data,'$.deletion_pending'),0) LIMIT 1"
+                ).fetchone()
+            if available:
+                self.next_due = time.time()
         if (
             cfg.enabled
             and time.time() >= self.next_due
@@ -57,6 +65,7 @@ class Monitor:
                         "SELECT 1 FROM jobs j JOIN objects m ON m.id=j.machine_id AND m.kind='machine' WHERE j.status IN ('pending','retry') AND NOT coalesce(json_extract(m.data,'$.monitoring_paused'),0) AND NOT coalesce(json_extract(m.data,'$.deletion_pending'),0) LIMIT 1"
                     ).fetchone()
                 )
+            self.idle = not bool(more)
             # Under load, use roughly 75% of wall time for work. The configured
             # interval is the upper wait bound, not a forced idle period.
             delay = cfg.interval_seconds

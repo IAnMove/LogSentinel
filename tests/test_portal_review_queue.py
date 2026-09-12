@@ -710,3 +710,21 @@ def test_delayed_jobs_do_not_hide_ready_work_beyond_query_limit(queue):
             item[1]["retry_at"] = time.time() + 1000
             worker.save(item[0], item[1], "retry")
     assert worker.ready(machine, cfg, set())[0] == work[-1][0]
+
+
+@pytest.mark.asyncio
+async def test_adaptive_scheduler_dispatches_new_work_after_idle_without_waiting_full_interval(queue):
+    store, machine, source = queue
+    configure(store, enabled=True, interval_seconds=60, adaptive_batching=True)
+    analyzer = Analyzer(store)
+    calls = []
+    async def clean(payload, **kw):
+        calls.append(payload)
+        return {"findings": []}
+    analyzer.client.call = clean
+    monitor = Monitor(store, analyzer, True)
+    await monitor.tick()
+    assert not calls and monitor.next_due > time.time() + 30
+    ingest(store, source, 1)
+    await monitor.tick()
+    assert len(calls) == 1 and store.events()[0]["status"] == "compact"
