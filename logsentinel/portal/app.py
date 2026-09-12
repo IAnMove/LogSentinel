@@ -19,6 +19,7 @@ from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from pydantic import ValidationError
 
 from .store import Store, dumps, uid
+from .auth import SessionAuth
 from .models import Machine, Source, Destination, Rule, Settings, merge_destination
 from .collect import Collector, discovery
 from .analysis import Analyzer, ReviewClient, safe_error
@@ -80,7 +81,8 @@ def create_app(directory, background=True):
     disk_scans = DiskScans(store, telemetry)
     outbox = Outbox(store)
     health_monitor = HealthMonitor(store, analyzer, monitor, telemetry, background)
-    sessions = {}
+    auth = SessionAuth(store)
+    sessions = auth.sessions
     attempts = {}
 
     async def collecting():
@@ -250,9 +252,7 @@ def create_app(directory, background=True):
             request._body = b"".join(parts)
         path = request.url.path
         now = time.time()
-        for token, exp in list(sessions.items()):
-            if exp < now:
-                sessions.pop(token, None)
+        await asyncio.to_thread(auth.prune)
         for ip, stamps in list(attempts.items()):
             recent = [x for x in stamps if x > now - 60]
             if recent:
@@ -263,7 +263,7 @@ def create_app(directory, background=True):
         if login_post or path.startswith("/api/"):
             if path.startswith("/api/"):
                 token = request.cookies.get("sentinel_session", "")
-                if sessions.get(token, 0) < now:
+                if not await asyncio.to_thread(auth.valid, token):
                     return JSONResponse({"detail": "Login required"}, status_code=401)
             if request.method not in ("GET", "HEAD"):
                 origin = request.headers.get("origin")
@@ -316,21 +316,20 @@ def create_app(directory, background=True):
         origin = request.headers.get("origin")
         if origin and origin.rstrip("/") != str(request.base_url).rstrip("/"):
             raise HTTPException(403, "Origin mismatch")
+        body = await request.json()
+        if not isinstance(body, dict):
+            raise HTTPException(400, "Send an access key object")
         ip = request.client.host
         now = time.time()
         old = attempts.get(ip, [])
         old = [x for x in old if x > now - 60]
         if len(old) >= 10:
             raise HTTPException(429, "Try again later")
-        body = await request.json()
         token = body.get("token", "")
         attempts[ip] = old + [now]
-        if not isinstance(token, str) or not hmac.compare_digest(
-            token, store.meta("admin_token")
-        ):
+        session = await asyncio.to_thread(auth.login, token)
+        if session is None:
             raise HTTPException(401, "Invalid access key")
-        session = secrets.token_urlsafe(32)
-        sessions[session] = now + 86400
         result = JSONResponse({"ok": True})
         result.set_cookie(
             "sentinel_session",
@@ -344,18 +343,14 @@ def create_app(directory, background=True):
 
     @app.post("/api/logout")
     def logout(request: Request):
-        sessions.pop(request.cookies.get("sentinel_session", ""), None)
+        auth.logout(request.cookies.get("sentinel_session", ""))
         result = JSONResponse({"ok": True})
         result.delete_cookie("sentinel_session")
         return result
 
     @app.post("/api/access-key/rotate")
     def rotate_access_key():
-        try:
-            token = store.rotate_admin_token()
-        finally:
-            # Also revoke sessions if the storage operation fails partway through.
-            sessions.clear()
+        token = auth.rotate()
         return {
             "token": token,
             "message": "Shown once. Previous access key is now invalid and open sessions were signed out.",
