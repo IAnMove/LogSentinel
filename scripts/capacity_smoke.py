@@ -95,7 +95,7 @@ with tempfile.TemporaryDirectory(prefix="sentinel-capacity-") as directory:
             page.get_by_role(
                 "heading", name="Cobertura y capacidad", exact=True
             ).wait_for()
-            page.get_by_text("No están en la cola automática", exact=False).wait_for()
+            page.get_by_text("Se recuperan automáticamente por lotes", exact=False).wait_for()
             page.get_by_label("Language / Idioma").select_option("en")
             page.get_by_role("button", name="Prepare larger input budget").click()
             draft = int(page.locator("[name=input_budget]").input_value())

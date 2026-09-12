@@ -311,7 +311,7 @@ async function render() {
   if (entering) root.className = "view-enter";
   entering = false;
   $("#content").replaceChildren(root);
-  $("#monitor-status").hidden = view === "about";
+  $("#monitor-status").hidden = ["about", "setup"].includes(view);
   $(".scope").hidden = view === "about";
   $("#page-title").textContent =
     view === "problem_detail" ? t("Detalles del problema") : t(names[view]);
@@ -945,24 +945,74 @@ function settingsView(root) {
     ],
   );
   add("max_calls", t("Máximo de llamadas por ciclo"), "number", c.max_calls);
-  add("adaptive_batching", bilingual("Ajustar lotes y espera al tiempo medido", "Adapt batches and waiting to measured time"), "checkbox", c.adaptive_batching);
-  add("target_batch_seconds", bilingual("Objetivo por llamada (segundos)", "Target per call (seconds)"), "number", c.target_batch_seconds);
-  add("cycle_budget_seconds", bilingual("Tiempo para despachar llamadas por ciclo (segundos)", "Call dispatch window per cycle (seconds)"), "number", c.cycle_budget_seconds);
-  add("triage_thinking", bilingual("Razonamiento prolongado en la primera revisión", "Extended thinking in the first review"), "checkbox", c.triage_thinking);
-  add("verification", bilingual("Verificar candidatos con originales", "Verify candidates against originals"), "select", c.verification, [
-    ["important", bilingual("Lotes con alertas altas o críticas", "Batches with high or critical alerts")],
-    ["all", bilingual("Todos los candidatos", "All candidates")],
-    ["manual", bilingual("Solo bajo petición", "Only on request")],
-  ]);
+  add(
+    "adaptive_batching",
+    bilingual(
+      "Ajustar lotes y espera al tiempo medido",
+      "Adapt batches and waiting to measured time",
+    ),
+    "checkbox",
+    c.adaptive_batching,
+  );
+  add(
+    "target_batch_seconds",
+    bilingual("Objetivo por llamada (segundos)", "Target per call (seconds)"),
+    "number",
+    c.target_batch_seconds,
+  );
+  add(
+    "cycle_budget_seconds",
+    bilingual(
+      "Tiempo para despachar llamadas por ciclo (segundos)",
+      "Call dispatch window per cycle (seconds)",
+    ),
+    "number",
+    c.cycle_budget_seconds,
+  );
+  add(
+    "triage_thinking",
+    bilingual(
+      "Razonamiento prolongado en la primera revisión",
+      "Extended thinking in the first review",
+    ),
+    "checkbox",
+    c.triage_thinking,
+  );
+  add(
+    "verification",
+    bilingual(
+      "Verificar candidatos con originales",
+      "Verify candidates against originals",
+    ),
+    "select",
+    c.verification,
+    [
+      [
+        "important",
+        bilingual(
+          "Lotes con alertas altas o críticas",
+          "Batches with high or critical alerts",
+        ),
+      ],
+      ["all", bilingual("Todos los candidatos", "All candidates")],
+      ["manual", bilingual("Solo bajo petición", "Only on request")],
+    ],
+  );
   add(
     "interval_seconds",
-    bilingual("Espera máxima entre ciclos (segundos)", "Maximum wait between cycles (seconds)"),
+    bilingual(
+      "Espera máxima entre ciclos (segundos)",
+      "Maximum wait between cycles (seconds)",
+    ),
     "number",
     c.interval_seconds,
   );
   add(
     "max_events",
-    bilingual("Originales candidatos por lote", "Candidate originals per batch"),
+    bilingual(
+      "Originales candidatos por lote",
+      "Candidate originals per batch",
+    ),
     "number",
     c.max_events,
   );
@@ -1016,6 +1066,11 @@ function settingsView(root) {
             f.elements.namedItem("context_tokens").value = r.suggested_context;
             f.elements.namedItem("input_budget").value =
               r.suggested_input_budget;
+            f.elements.namedItem("context_tokens").closest("details").open =
+              true;
+            f.elements
+              .namedItem("input_budget")
+              .dispatchEvent(new Event("input", { bubbles: true }));
             $("#modal").close();
             notice(t("Revisa y guarda los ajustes para aplicarlos."));
           }),
@@ -1023,14 +1078,101 @@ function settingsView(root) {
       modal(t("Capacidad del modelo"), box);
     }),
   );
+  fieldHelp(
+    f,
+    "input_budget",
+    bilingual(
+      "Limita el texto de cada lote, medido en bytes, no el número de logs. La compactación puede representar muchos originales con poco texto.",
+      "Limits each batch’s text in bytes, not the number of logs. Compaction can represent many originals with little text.",
+    ),
+  );
+  fieldHelp(
+    f,
+    "context_tokens",
+    bilingual(
+      "Debe coincidir con el contexto cargado en el servidor. Consulta el modelo antes de ampliarlo; este número no identifica tu GPU.",
+      "Must match the context loaded on the server. Query the model before increasing it; this number does not identify your GPU.",
+    ),
+  );
+  fieldHelp(
+    f,
+    "interval_seconds",
+    bilingual(
+      "Reducirlo ayuda si el modelo acaba y queda esperando. Si está ocupado, primero revisa sus tiempos en Cobertura y capacidad.",
+      "Reducing this helps when the model finishes and then waits. If busy, first check its timings in Coverage and capacity.",
+    ),
+  );
+  fieldHelp(
+    f,
+    "timeout_seconds",
+    bilingual(
+      "Es cuánto esperamos una respuesta, no cuánto tardará. Aumentarlo evita algunos timeouts, pero no acelera el modelo.",
+      "How long to wait for a response, not how long it will take. Increasing it can avoid some timeouts but does not speed up the model.",
+    ),
+  );
+  const connection = guideFields(
+    f,
+    bilingual("Cambiar conexión o modelo", "Change connection or model"),
+    [
+      "server_type",
+      "provider",
+      "base_url",
+      "model",
+      "api_key",
+      "clear_api_key",
+      "remote_allowed",
+    ],
+  );
+  for (const node of [
+    ...f.querySelectorAll(".provider-help,.provider-tools,.provider-result"),
+  ])
+    connection.append(node);
+  guideFields(
+    f,
+    bilingual("Límites y tiempos avanzados", "Advanced limits and timing"),
+    [
+      "context_tokens",
+      "input_budget",
+      "max_tokens",
+      "max_events",
+      "max_calls",
+      "target_batch_seconds",
+      "cycle_budget_seconds",
+      "timeout_seconds",
+      "triage_thinking",
+      "enable_thinking",
+      "sensitivity",
+    ],
+  );
+  guideFields(
+    f,
+    bilingual("Cuánto histórico guardar", "How much history to keep"),
+    ["retention_days", "disk_limit_mb"],
+  );
   const submit = el("button", t("Guardar ajustes"));
+  const savedDraft = JSON.stringify(formData(f)),
+    savedConnection = JSON.stringify(llmFormSettings(f, c).llm),
+    draftNotice = el("p", "", "wide");
+  draftNotice.setAttribute("role", "status");
+  f.refreshSettingsDraft = () => {
+    draftNotice.textContent =
+      JSON.stringify(formData(f)) === savedDraft
+        ? ""
+        : bilingual(
+            "Hay cambios en el formulario sin guardar.",
+            "The form contains unsaved changes.",
+          );
+  };
+  f.addEventListener("input", f.refreshSettingsDraft);
+  f.addEventListener("change", f.refreshSettingsDraft);
   submit.type = "submit";
-  f.append(submit);
+  f.append(draftNotice, submit);
   f.onsubmit = async (e) => {
     e.preventDefault();
     try {
       const d = formData(f);
       Object.assign(d, llmFormSettings(f, c));
+      if (JSON.stringify(d.llm) === savedConnection) delete d.llm;
       [
         "provider",
         "server_type",
@@ -1059,13 +1201,26 @@ function settingsView(root) {
     ),
     el(
       "p",
-      t(
-        "Se reserva espacio para instrucciones y salida. Sin tokenizer compatible, el presupuesto usa bytes UTF-8 como cota conservadora. La prueba de conexión no mide calidad de detección.",
+      bilingual(
+        "Guarda un cambio y comprueba varios lotes completos en Cobertura y capacidad. Allí verás si mejora la espera o solo cambia el tamaño de entrada. Los límites avanzados quedan abajo.",
+        "Save one change and check several completed batches in Coverage and capacity. There you can see whether waiting improves or only input size changes. Advanced limits are below.",
       ),
     ),
     f,
   );
-  root.append(p);
+  root.append(
+    analysisProfiles(f, c),
+    p,
+    actions(
+      button(
+        bilingual(
+          "Comprobar rendimiento y cola",
+          "Check performance and queue",
+        ),
+        () => openCapacity(scope),
+      ),
+    ),
+  );
 }
 async function problemList(root, short = false) {
   const rows = short
@@ -1337,57 +1492,247 @@ function activity(root) {
   );
 }
 function rulePresetPanel() {
-  const box = panel(t("Presets de ruido rutinario"));
+  const b = bilingual,
+    machine = scope;
+  const box = panel(
+    b(
+      "Filtros predefinidos: probar y aplicar",
+      "Built-in filters: preview and apply",
+    ),
+  );
   box.append(
     el(
       "p",
-      t(
-        "No se activan solos. Previsualiza sobre una muestra y añade la exclusión si el recorte te parece correcto. Los fallos reales siguen en otras líneas.",
+      b(
+        "Ya hay tres filtros incluidos. Están desactivados hasta que los añadas. Apartan coincidencias del LLM, pero los originales se conservan según la retención. La compactación de repeticiones ya funciona sin activar estos filtros.",
+        "Three filters are included. They stay off until you add them. Matches are left out of LLM review, while originals follow retention settings. Repetition compaction already works without these filters.",
       ),
     ),
+    el(
+      "p",
+      b("Ámbito de los cambios: ", "Changes apply to: ") +
+        (machine
+          ? machineName(machine)
+          : b("todas las máquinas", "all machines")),
+      "guide-summary",
+    ),
+    howTo(b("Cómo aplicar un filtro", "How to apply a filter"), [
+      b(
+        "Elige la máquina en el selector superior; dejar Todas las máquinas lo hace global.",
+        "Choose a machine in the top selector; leaving All machines makes it global.",
+      ),
+      b(
+        "Abre la vista previa y comprueba ejemplos de lo que se apartaría y de lo que seguiría analizándose.",
+        "Open the preview and check examples of what would be left out and what would still be reviewed.",
+      ),
+      b(
+        "Aplica solo si el resultado te sirve. Puedes desactivarlo aquí. Para volver a analizar coincidencias retenidas, ve a Fuentes → Recuperar retenidos sin analizar.",
+        "Apply only if the result suits you. You can disable it here. To review retained matches again, use Sources → Recover unreviewed retained logs.",
+      ),
+    ]),
   );
-  const list = el("div");
+  const list = el("div", undefined, "guide-grid");
   box.append(list);
-  api("/api/rule-presets").then((presets) => {
-    for (const preset of presets) {
-      const row = el("section", undefined, "card");
-      row.append(
-        el("strong", t(preset.name)),
-        el("p", t(preset.note), "subtle"),
-        el("pre", preset.pattern),
-        actions(
-          button(t("Vista previa de coincidencias"), async () => {
-            const r = await api("/api/rules/preview", {
-              name: preset.name,
-              action: preset.action,
-              kind: preset.kind,
-              pattern: preset.pattern,
-              machine_id: scope,
-              enabled: true,
-            });
-            modal(
-              t("Vista previa · muestra de ") +
-                r.tested +
-                t(" eventos, ") +
-                r.matched +
-                t(" coincidencias"),
-              el("pre", JSON.stringify(r, null, 2)),
+  api("/api/rule-presets")
+    .then((presets) => {
+      if (!box.isConnected) return;
+      for (const preset of presets) {
+        const row = el("section", undefined, "guide-card"),
+          existing = S.rule.find(
+            (r) => r.name === preset.name && (r.machine_id || "") === machine,
+          );
+        row.append(
+          el("h3", t(preset.name)),
+          el("p", t(preset.note)),
+          guideDetails(
+            b("Ver patrón técnico", "Show technical pattern"),
+            el("pre", preset.pattern),
+          ),
+        );
+        if (existing) {
+          const same =
+            existing.pattern === preset.pattern &&
+            existing.kind === preset.kind &&
+            existing.action === preset.action &&
+            !existing.source_id &&
+            !existing.expires_at;
+          row.append(
+            el(
+              "strong",
+              same
+                ? existing.enabled
+                  ? b("Filtro activado", "Filter enabled")
+                  : b(
+                      "Filtro guardado y desactivado",
+                      "Filter saved and disabled",
+                    )
+                : b(
+                    "Hay una regla guardada con otra configuración",
+                    "A rule with different settings is saved",
+                  ),
+            ),
+          );
+          row.append(
+            button(b("Revisar regla guardada", "Review saved rule"), () => {
+              edit = existing;
+              render();
+            }),
+          );
+          if (existing.enabled)
+            row.append(
+              button(
+                b("Desactivar este filtro", "Disable this filter"),
+                async () => {
+                  await api("/api/objects/rule", {
+                    id: existing.id,
+                    enabled: false,
+                  });
+                  await refresh();
+                  notice(
+                    b(
+                      "Filtro desactivado. Los retenidos apartados no se reanalizan hasta que recuperes la fuente.",
+                      "Filter disabled. Retained excluded logs are not reviewed again until you recover the source.",
+                    ),
+                  );
+                },
+              ),
             );
-          }),
-          button(t("Añadir exclusión"), async () => {
-            await api("/api/rule-presets/" + preset.id, {
-              machine_id: scope,
-            });
-            await refresh();
-            notice(t("Preset añadido como regla de exclusión."));
-          }),
-        ),
-      );
-      list.append(row);
-    }
-  });
+        }
+        row.append(
+          button(
+            b(
+              "Ver ejemplos antes de aplicar",
+              "Preview examples before applying",
+            ),
+            async () => {
+              const r = await api("/api/rules/preview", {
+                name: preset.name,
+                action: preset.action,
+                kind: preset.kind,
+                pattern: preset.pattern,
+                machine_id: machine,
+                enabled: true,
+              });
+              const preview = el("div");
+              preview.append(
+                el(
+                  "p",
+                  b("Ámbito: ", "Scope: ") +
+                    (machine
+                      ? machineName(machine)
+                      : b("todas las máquinas", "all machines")),
+                ),
+                el(
+                  "p",
+                  r.matched +
+                    b(" coincidencias entre ", " matches among ") +
+                    r.tested +
+                    b(
+                      " logs de muestra (hasta 500 recientes). Es una muestra, no una garantía sobre futuros mensajes.",
+                      " sampled logs (up to 500 recent entries). This is a sample, not a guarantee about future messages.",
+                    ),
+                ),
+              );
+              for (const [title, entries] of [
+                [
+                  b("Se apartarían del LLM", "Would be left out of LLM review"),
+                  r.matches,
+                ],
+                [
+                  b(
+                    "Este filtro dejaría pasar",
+                    "This filter would let through",
+                  ),
+                  r.nonmatches,
+                ],
+              ]) {
+                preview.append(el("h3", title));
+                if (!entries.length)
+                  preview.append(
+                    el(
+                      "p",
+                      b(
+                        "Sin ejemplos en esta muestra.",
+                        "No examples in this sample.",
+                      ),
+                    ),
+                  );
+                else
+                  for (const entry of entries)
+                    preview.append(
+                      el(
+                        "p",
+                        entry.service ||
+                          b("Sin servicio declarado", "No declared service"),
+                        "subtle",
+                      ),
+                      el("pre", entry.message),
+                    );
+              }
+              const canApply =
+                !existing ||
+                (!existing.enabled &&
+                  existing.pattern === preset.pattern &&
+                  existing.action === preset.action &&
+                  existing.kind === preset.kind &&
+                  !existing.source_id &&
+                  !existing.expires_at);
+              if (canApply) {
+                const apply = button(
+                  b(
+                    "Aplicar filtro a este ámbito",
+                    "Apply filter to this scope",
+                  ),
+                  async () => {
+                    if (existing)
+                      await api("/api/objects/rule", {
+                        id: existing.id,
+                        enabled: true,
+                      });
+                    else
+                      await api("/api/rule-presets/" + preset.id, {
+                        machine_id: machine,
+                      });
+                    $("#modal").close();
+                    await refresh();
+                    notice(
+                      b(
+                        "Filtro aplicado. Comprueba la cobertura tras varios lotes; puedes desactivarlo desde Reglas.",
+                        "Filter applied. Check coverage after several batches; you can disable it in Rules.",
+                      ),
+                    );
+                  },
+                );
+                apply.disabled = r.matched === 0;
+                preview.append(apply);
+                if (!r.matched)
+                  preview.append(
+                    el(
+                      "p",
+                      b(
+                        "No hay coincidencias que revisar. Espera a capturar logs de este tipo antes de aplicar el filtro.",
+                        "There are no matches to inspect. Capture logs of this type before applying the filter.",
+                      ),
+                    ),
+                  );
+              }
+              modal(
+                t(preset.name) + b(" · vista previa", " · preview"),
+                preview,
+              );
+            },
+          ),
+        );
+        list.append(row);
+      }
+    })
+    .catch((error) => {
+      if (box.isConnected)
+        list.replaceChildren(el("p", error.message, "error"));
+    });
   return box;
 }
+
 function backupView(root) {
   const p = panel(t("Copia coherente del observatorio"));
   p.append(

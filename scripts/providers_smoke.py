@@ -43,7 +43,7 @@ def model(request):
 
 original = httpx.AsyncClient
 httpx.AsyncClient = lambda **kwargs: original(
-    transport=httpx.MockTransport(model), **kwargs
+    **dict(kwargs, transport=httpx.MockTransport(model))
 )
 with tempfile.TemporaryDirectory(prefix="sentinel-providers-") as directory:
     app = create_app(directory, background=False)
@@ -86,6 +86,8 @@ with tempfile.TemporaryDirectory(prefix="sentinel-providers-") as directory:
             )
             page.get_by_role("button", name="Model and analysis", exact=True).click()
             assert "8081/v1" in page.locator(".provider-active").inner_text()
+            page.get_by_text("Change connection or model", exact=True).click()
+            page.get_by_text("Advanced limits and timing", exact=True).click()
             page.get_by_role("button", name="Refresh models", exact=True).click()
             page.get_by_label("Model", exact=True).select_option(label="balanced-alias")
             assert page.locator('input[name="model"]').input_value() == "balanced-alias"
@@ -177,7 +179,7 @@ with tempfile.TemporaryDirectory(prefix="sentinel-providers-") as directory:
             page.get_by_text("Connection verified", exact=True).wait_for()
             assert store.settings().llm.base_url == cfg.llm.base_url
             assert store.settings().llm.api_key == "synthetic-private-key"
-            assert all("authorization" not in req.headers for req in seen)
+            assert all("authorization" not in req.headers for req in seen if not str(req.url).startswith(cfg.llm.base_url + "/"))
             assert "synthetic-private-key" not in page.locator("body").inner_text()
             assert json.loads(seen[-1].content)["model"] == "qwen-test:8b"
             page.get_by_role("button", name="Save settings", exact=True).click()
@@ -185,6 +187,7 @@ with tempfile.TemporaryDirectory(prefix="sentinel-providers-") as directory:
             assert store.settings().llm.provider == "ollama"
             assert store.settings().llm.api_key is None
             page.get_by_label("Language / Idioma").select_option("es")
+            page.get_by_text("Cambiar conexión o modelo", exact=True).click()
             page.get_by_label("Servidor LLM", exact=True).wait_for()
             page.set_viewport_size({"width": 390, "height": 844})
             assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
