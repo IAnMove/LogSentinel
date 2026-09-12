@@ -105,6 +105,7 @@ def apply_injection_signals(analyzer, limit=500, *, machine_id=None, events=None
             [e["id"] for e in hits],
             fingerprint=fingerprint,
             notify=notify,
+            notification_reason="historical_backfill" if not notify else None,
         )
         created += 1
     return created

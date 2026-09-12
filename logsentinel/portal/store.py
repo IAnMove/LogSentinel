@@ -60,9 +60,11 @@ class Store:
             CREATE INDEX IF NOT EXISTS jobs_ready ON jobs(machine_id,status,created);
             CREATE TABLE IF NOT EXISTS problems(id TEXT PRIMARY KEY,machine_id TEXT,fingerprint TEXT,title TEXT,severity TEXT,status TEXT,first_seen REAL,last_seen REAL,count INTEGER,data TEXT,UNIQUE(machine_id,fingerprint));
             CREATE TABLE IF NOT EXISTS appearances(problem_id TEXT,event_id TEXT,PRIMARY KEY(problem_id,event_id));
+            CREATE INDEX IF NOT EXISTS appearances_event ON appearances(event_id,problem_id);
             CREATE TABLE IF NOT EXISTS revisions(id TEXT PRIMARY KEY,problem_id TEXT,created REAL,data TEXT);
             CREATE TABLE IF NOT EXISTS usage(id TEXT PRIMARY KEY,job_id TEXT,machine_id TEXT,source_ids TEXT,kind TEXT,created REAL,input_tokens INTEGER,output_tokens INTEGER,duration REAL,status TEXT,detail TEXT);
             CREATE TABLE IF NOT EXISTS deliveries(id TEXT PRIMARY KEY,destination_id TEXT,problem_id TEXT,payload TEXT,status TEXT,attempts INTEGER,created REAL,updated REAL,next_try REAL,error TEXT);
+            CREATE TABLE IF NOT EXISTS notification_decisions(problem_id TEXT REFERENCES problems(id) ON DELETE CASCADE,destination_id TEXT,updated REAL,reason TEXT,delivery_id TEXT,PRIMARY KEY(problem_id,destination_id));
             CREATE INDEX IF NOT EXISTS deliveries_due ON deliveries(status,next_try);
             CREATE TABLE IF NOT EXISTS audit(id INTEGER PRIMARY KEY,created REAL,action TEXT,object_id TEXT,detail TEXT);
             CREATE TABLE IF NOT EXISTS metrics(source_id TEXT,key TEXT,value INTEGER,PRIMARY KEY(source_id,key));
@@ -576,6 +578,20 @@ class Store:
             )[:100]
             events = {e["id"]: e for e in self.events(ids=refs)}
             result["evidence"] = [events[ref] for ref in refs if ref in events]
+            result["notification_decisions"] = [dict(r) for r in db.execute(
+                "SELECT n.*,d.status delivery_status,d.error delivery_error FROM notification_decisions n LEFT JOIN deliveries d ON d.id=n.delivery_id WHERE n.problem_id=? ORDER BY n.updated DESC",
+                (id,),
+            )]
+            related = db.execute(
+                "SELECT p.id,p.title,p.severity,p.data,count(*) shared_events FROM appearances mine JOIN appearances other ON mine.event_id=other.event_id JOIN problems p ON p.id=other.problem_id WHERE mine.problem_id=? AND p.id!=? AND p.machine_id=? GROUP BY p.id ORDER BY shared_events DESC,p.last_seen DESC LIMIT 30",
+                (id, id, result["machine_id"]),
+            ).fetchall()
+            from .signals import deterministic_signal
+            origin = bool(deterministic_signal(result["data"]))
+            result["related"] = [
+                {k: row[k] for k in ("id", "title", "severity", "shared_events")}
+                for row in related if bool(deterministic_signal(json.loads(row["data"]))) != origin
+            ]
             result["revisions"] = [
                 dict(r)
                 for r in db.execute(

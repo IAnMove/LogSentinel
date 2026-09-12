@@ -196,6 +196,7 @@ def save_signal(analyzer, machine_id, spec, hits, spanish, source_id="", *, noti
         [e["id"] for e in hits],
         detector=spec["id"],
         notify=notify,
+        notification_reason="historical_backfill" if not notify else None,
         fingerprint=(
             hashlib.sha256(dumps([machine_id, source_id, spec["id"]]).encode()).hexdigest()
             if spec.get("window_seconds") else None

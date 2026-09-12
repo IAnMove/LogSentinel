@@ -81,6 +81,14 @@ function drawMonitor(m) {
     if (value) line.title = stamp(value);
     return line;
   };
+  if (m.build) details.append(el("div", "LogSentinel " + m.build.version +
+    (m.build.commit ? " · " + m.build.commit.slice(0, 10) : "") +
+    (m.build.dirty ? bilingual(" · cambios locales al arrancar", " · local changes at startup") : "") +
+    " · " + bilingual("arrancó ", "started ") + when(m.build.started), "subtle"));
+  if (!m.enabled_sources) details.append(el("p", bilingual(
+    "No hay fuentes de logs activas. Las métricas y comprobaciones de salud no sustituyen la captura de logs.",
+    "No log sources are active. Metrics and health checks do not replace log capture."), "monitor-warning"));
+  if (m.detector_error) details.append(el("p", bilingual("Error del detector: ", "Detector error: ") + m.detector_error, "monitor-warning"));
   capture.textContent =
     m.capture === "active"
       ? t("Captura continua activa")

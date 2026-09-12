@@ -140,7 +140,7 @@ async def test_verification_failure_preserves_first_pass_and_explicit_partial_co
 
     async def fake(payload, **kwargs):
         if kwargs.get("kind") == "investigation":
-            raise ValueError("verification timeout")
+            raise TimeoutError("verification timeout")
         return {
             "findings": [
                 {

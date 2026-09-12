@@ -36,11 +36,19 @@ class DestinationRejected(ValueError):
     """An actionable error assembled exclusively from local, safe text."""
 
 
+def record_decision(store, problem_id, reason, destination_id="", delivery_id=None, *, connection=None):
+    from contextlib import nullcontext
+    with (store.connect() if connection is None else nullcontext(connection)) as db:
+        db.execute("INSERT OR REPLACE INTO notification_decisions VALUES(?,?,?,?,?)",
+                   (problem_id, destination_id, time.time(), reason, delivery_id))
+
+
 def enqueue(store, problem_id, event_type="problem.updated"):
     problem = store.problem(problem_id)
     if not problem:
         return
     if not store.monitoring_active(problem["machine_id"]):
+        record_decision(store, problem_id, "monitoring_paused")
         return
     evidence = problem["evidence"]
     muted = False
@@ -69,20 +77,30 @@ def enqueue(store, problem_id, event_type="problem.updated"):
     }
     machine = store.get("machine", problem["machine_id"])
     payload["machine"] = redact(machine["name"] if machine else "Unknown")
-    for dest in store.objects("destination"):
+    destinations = store.objects("destination")
+    with store.connect() as db:
+        db.execute("DELETE FROM notification_decisions WHERE problem_id=? AND destination_id=''", (problem_id,))
+    if not destinations:
+        record_decision(store, problem_id, "no_destinations")
+    for dest in destinations:
         if not dest.get("enabled"):
+            record_decision(store, problem_id, "destination_disabled", dest["id"])
             continue
         if dest.get("machine_id") and dest["machine_id"] != problem["machine_id"]:
+            record_decision(store, problem_id, "different_machine", dest["id"])
             continue
         if dest.get("source_id") and dest["source_id"] not in {
             e["source_id"] for e in evidence
         }:
+            record_decision(store, problem_id, "different_source", dest["id"])
             continue
         if RANK[problem["severity"]] < RANK[dest["min_severity"]]:
+            record_decision(store, problem_id, "below_minimum_severity", dest["id"])
             continue
         with store.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
             recent = db.execute(
-                "SELECT payload FROM deliveries WHERE destination_id=? AND problem_id=? AND created>? ORDER BY created DESC LIMIT 1",
+                "SELECT payload FROM deliveries WHERE destination_id=? AND problem_id=? AND created>? AND status NOT IN ('muted','failed','cancelled') ORDER BY created DESC LIMIT 1",
                 (dest["id"], problem_id, time.time() - dest["cooldown_seconds"]),
             ).fetchone()
             cooldown = (
@@ -91,6 +109,7 @@ def enqueue(store, problem_id, event_type="problem.updated"):
                 == event_type
                 and RANK[json.loads(recent[0])["severity"]] >= RANK[problem["severity"]]
             )
+            reason = "muted_by_rule" if muted else "cooldown" if cooldown else "queued"
             id = uid()
             message = dict(payload, delivery_id=id)
             db.execute(
@@ -105,9 +124,10 @@ def enqueue(store, problem_id, event_type="problem.updated"):
                     time.time(),
                     time.time(),
                     time.time(),
-                    None,
+                    reason if muted or cooldown else None,
                 ),
             )
+            record_decision(store, problem_id, reason, dest["id"], id, connection=db)
 
 
 class Outbox:

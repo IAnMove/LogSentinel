@@ -393,7 +393,7 @@ class Analyzer:
                 raise ValueError("Model cited unavailable evidence")
 
     def save_finding(
-        self, machine, finding, ids, *, status="open", notify=True, fingerprint=None, detector=None
+        self, machine, finding, ids, *, status="open", notify=True, fingerprint=None, detector=None, notification_reason=None
     ):
         events = self.store.events(ids=ids, limit=5000)
         # Deterministic origin signatures, not LLM prose, decide grouping.
@@ -464,7 +464,7 @@ class Analyzer:
                 "INSERT INTO revisions VALUES(?,?,?,?)",
                 (uid(), id, now, dumps(finding)),
             )
-        from .notify import enqueue
+        from .notify import enqueue, record_decision
 
         if notify:
             enqueue(
@@ -474,4 +474,6 @@ class Analyzer:
                     "problem.recovered" if status == "resolved" else "problem.updated"
                 ),
             )
+        else:
+            record_decision(self.store, id, notification_reason or ("awaiting_verification" if finding.get("verification_status") == "preliminary" else "automatic_delivery_not_requested"))
         return id

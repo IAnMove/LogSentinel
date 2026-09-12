@@ -238,3 +238,30 @@ async def test_delivery_failure_classification_and_bounded_recovery(tmp_path, fa
         row = store.rows("deliveries")[0]
         assert row["status"] == "failed" and row["attempts"] == 3
     assert row["payload"] == payload
+
+
+def test_notification_decisions_explain_skips_and_muted_updates_do_not_extend_cooldown(tmp_path, monkeypatch):
+    import time
+    from logsentinel.portal.analysis import Analyzer
+    from logsentinel.portal.models import Machine
+    from logsentinel.portal.notify import enqueue
+    store = Store(tmp_path)
+    machine = store.put("machine", Machine(name="host").model_dump())
+    store.ingest(dict(id="s", machine_id=machine), [dict(origin="1", message="failure")])
+    dest = store.put("destination", Destination(name="Local", kind="file", enabled=True, min_severity="HIGH", cooldown_seconds=60).model_dump())
+    pid = Analyzer(store).save_finding(machine, dict(title="Issue", summary="Failed", severity="MEDIUM", category="application", evidence_ids=[]), [store.events()[0]["id"]])
+    assert store.problem(pid)["notification_decisions"][0]["reason"] == "below_minimum_severity"
+    with store.connect() as db:
+        db.execute("UPDATE problems SET severity='HIGH' WHERE id=?", (pid,))
+    clock = [time.time()]
+    monkeypatch.setattr(time, "time", lambda: clock[0])
+    enqueue(store, pid)
+    assert store.rows("deliveries")[0]["status"] == "pending"
+    clock[0] += 40
+    enqueue(store, pid)
+    assert store.rows("deliveries")[0]["status"] == "muted"
+    assert store.problem(pid)["notification_decisions"][0]["reason"] == "cooldown"
+    clock[0] += 21
+    enqueue(store, pid)
+    assert store.rows("deliveries")[0]["status"] == "pending"
+    assert len(store.problem(pid)["notification_decisions"]) == 1

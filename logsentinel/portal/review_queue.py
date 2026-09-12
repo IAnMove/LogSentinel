@@ -574,6 +574,7 @@ class ReviewQueue:
                 data["evidence_fragments"] = fragments
             pid = self.analyzer.save_finding(
                 machine["id"], data, evidence, notify=False,
+                notification_reason="historical_backfill" if batch["historical"] else "awaiting_verification",
                 fingerprint=(
                     hashlib.sha256(dumps([evidence, fragments]).encode()).hexdigest()
                     if fragments else None

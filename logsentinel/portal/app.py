@@ -72,6 +72,9 @@ def public(kind, obj):
 
 
 def create_app(directory, background=True):
+    from .build_info import running_build
+
+    build = running_build()
     store = Store(directory)
     collector = Collector(store)
     analyzer = Analyzer(store)
@@ -384,7 +387,8 @@ def create_app(directory, background=True):
         return dict(
             objects,
             settings=settings,
-            monitor=monitor.state(),
+            build=build,
+            monitor=dict(monitor.state(), build=build),
             setup=setup_state(),
             defaults={
                 "source": Source(
@@ -753,13 +757,13 @@ def create_app(directory, background=True):
 
     @app.get("/api/monitor")
     def monitor_state():
-        return monitor.state()
+        return dict(monitor.state(), build=build)
 
     @app.post("/api/setup/complete")
     def finish_setup():
         if not setup_state()["model_tested"]:
             raise HTTPException(400, "Test the saved model configuration first")
-        if not any(s["enabled"] for s in store.objects("source")):
+        if not any(s["enabled"] and s["kind"] not in ("health", "metrics") and store.monitoring_active(s["machine_id"]) for s in store.objects("source")):
             raise HTTPException(400, "Enable at least one log source first")
         cfg = store.settings()
         cfg.enabled = True
@@ -783,6 +787,7 @@ def create_app(directory, background=True):
                 "UPDATE jobs SET status='retry',attempts=0,updated=? WHERE id=?",
                 (time.time(), id),
             )
+            db.execute("UPDATE review_batches SET data=json_remove(data,'$.retry_at') WHERE job_id=?", (id,))
         store.audit("retry_analysis", id)
         return {"ok": True}
 

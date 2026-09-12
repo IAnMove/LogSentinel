@@ -37,6 +37,42 @@ function problemContextCard(p) {
     actions(badge(p.severity), badge(p.status)),
     el("p", p.data.summary),
   );
+  const detector = p.data.detector || (p.data.reasoning === "prompt-injection" ? "prompt-injection" : "");
+  card.append(el("p", detector
+    ? bilingual("Origen: detector determinista · ", "Origin: deterministic detector · ") + detector
+    : bilingual("Origen: modelo · ", "Origin: model · ") + (p.data.verification_status || "preliminary"), "subtle"));
+  if (p.related?.length) {
+    card.append(el("h3", bilingual("Otros hallazgos sobre la misma evidencia", "Other findings on the same evidence")));
+    for (const related of p.related) card.append(button(related.title + " · " + related.shared_events, () => openProblemPage(related.id)));
+  }
+  if (p.data.evidence_fragments?.length) card.append(el("p", bilingual(
+    "Este hallazgo procede de un fragmento. Revisa el original completo para comprobar el contexto.",
+    "This finding comes from a fragment. Inspect the complete original to check its context."), "subtle"));
+  if (p.notification_decisions?.length) {
+    const reasons = {
+      no_destinations: ["Sin destinos configurados", "No destinations configured"],
+      monitoring_paused: ["Monitorización pausada", "Monitoring paused"],
+      destination_disabled: ["Destino desactivado", "Destination disabled"],
+      different_machine: ["El destino corresponde a otra máquina", "Destination is scoped to another machine"],
+      different_source: ["El destino corresponde a otra fuente", "Destination is scoped to another source"],
+      below_minimum_severity: ["Severidad por debajo del mínimo del destino", "Below destination minimum severity"],
+      muted_by_rule: ["Silenciado por regla", "Muted by rule"],
+      cooldown: ["En espera para no repetir el aviso", "Within notification cooldown"],
+      queued: ["Entrega solicitada", "Delivery requested"],
+      historical_backfill: ["Análisis de histórico: sin aviso automático", "Historical backfill: no automatic notification"],
+      awaiting_verification: ["Pendiente de verificación", "Awaiting verification"],
+      automatic_delivery_not_requested: ["Sin solicitud de envío automático", "Automatic delivery not requested"],
+    };
+    card.append(el("h3", bilingual("Por qué se notificó o no", "Notification decisions")));
+    for (const decision of p.notification_decisions) {
+      const destination = (S.destination || []).find(d => d.id === decision.destination_id);
+      const label = reasons[decision.reason];
+      card.append(el("p", (destination ? destination.name + ": " : "") +
+        (label ? bilingual(...label) : decision.reason) +
+        (decision.delivery_status ? " · " + decision.delivery_status : "") +
+        (decision.delivery_error ? " · " + decision.delivery_error : ""), "subtle"));
+    }
+  }
   const detail = el("div");
   detail.append(
     table(
