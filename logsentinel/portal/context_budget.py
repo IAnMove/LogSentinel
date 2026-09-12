@@ -47,7 +47,9 @@ async def check_backend(client, store, cfg, headers):
         response = await client.get(cfg.llm.base_url.rstrip("/") + "/api/version", headers=headers, timeout=5)
         response.raise_for_status()
         version = response.json().get("version", "")
-        match = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)", version)
+        match = re.fullmatch(r"(\d{1,4})\.(\d{1,4})\.(\d{1,4})", version)
+        if not match:
+            version = None
         # This release's ChatRequest defines both truncate and shift. Older or
         # unidentified servers keep the byte bound rather than silently clipping.
         safe = bool(match and tuple(map(int, match.groups())) >= (0, 33, 2))

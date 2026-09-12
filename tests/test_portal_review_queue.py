@@ -674,3 +674,39 @@ async def test_independent_candidates_on_one_original_cannot_overwrite_each_othe
     assert len(problems) == 2
     assert {p["title"] for p in problems} == {"Disk failure", "Backup TLS failure"}
     assert all(p["severity"] == json.loads(p["data"])["severity"] == "HIGH" for p in problems)
+
+
+@pytest.mark.asyncio
+async def test_corrupt_source_does_not_block_another_machine(queue):
+    store, machine, source = queue
+    ingest(store, source, 1)
+    with store.connect() as db:
+        db.execute("UPDATE segments SET data=x'00' WHERE source_id=?", (source["id"],))
+    other = store.put("machine", Machine(name="Unaffected host").model_dump())
+    sid = store.put("source", Source(name="Other logs", machine_id=other, kind="push").model_dump())
+    ingest(store, store.get("source", sid), 1)
+    analyzer = Analyzer(store)
+    async def clean(*args, **kwargs):
+        return {"findings": []}
+    analyzer.client.call = clean
+    result = await analyzer.cycle()
+    assert result == dict(calls=1, errors=1)
+    assert store.events(machine_id=other)[0]["status"] == "compact"
+    assert store.meta("review_prepare_error:" + machine["id"])
+    assert store.meta("detector_error:" + machine["id"])
+
+
+def test_delayed_jobs_do_not_hide_ready_work_beyond_query_limit(queue):
+    store, machine, source = queue
+    cfg = configure(store, max_events=10)
+    ingest(store, source, 210)
+    worker = ReviewQueue(Analyzer(store))
+    work = []
+    for i in range(21):
+        item, _ = worker.prepare(machine, cfg, i)
+        assert item is not None
+        work.append(item)
+        if i < 20:
+            item[1]["retry_at"] = time.time() + 1000
+            worker.save(item[0], item[1], "retry")
+    assert worker.ready(machine, cfg, set())[0] == work[-1][0]

@@ -128,7 +128,6 @@ def create_app(directory, background=True):
             try:
                 if store.settings().enabled:
                     await asyncio.to_thread(scan_signals, analyzer)
-                store.set_meta("detector_worker_error", "")
             except asyncio.CancelledError:
                 raise
             except Exception as exc:

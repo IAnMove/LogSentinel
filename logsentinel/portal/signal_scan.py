@@ -41,6 +41,7 @@ def scan_originals(analyzer, machine_id, events):
 def scan_signals(analyzer, limit=5000):
     store = analyzer.store
     count = 0
+    errors = 0
     for machine in store.objects("machine"):
         if not store.monitoring_active(machine["id"]):
             continue
@@ -52,6 +53,14 @@ def scan_signals(analyzer, limit=5000):
                 "ORDER BY e.received,e.rowid LIMIT ?",
                 (VERSION, machine["id"], limit),
             )]
-        if ids:
-            count += scan_originals(analyzer, machine["id"], store.events(ids=ids, limit=limit))
+        try:
+            if ids:
+                count += scan_originals(analyzer, machine["id"], store.events(ids=ids, limit=limit))
+            store.set_meta("detector_error:" + machine["id"], "")
+        except Exception as exc:
+            from .analysis import safe_error
+            from .rules import protected_secrets
+            errors += 1
+            store.set_meta("detector_error:" + machine["id"], safe_error(exc, protected_secrets(store)))
+    store.set_meta("detector_worker_error", "Deterministic detection failed for " + str(errors) + " machine(s); originals remain unchecked" if errors else "")
     return count

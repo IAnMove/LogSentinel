@@ -37,8 +37,8 @@ def test_failed_detector_is_replayed_and_backfill_does_not_notify(queue, monkeyp
     def fail(*args, **kwargs):
         raise OSError("synthetic detector failure")
     monkeypatch.setattr(injection, "apply_injection_signals", fail)
-    with pytest.raises(OSError):
-        scan_signals(analyzer)
+    assert scan_signals(analyzer) == 0
+    assert store.meta("detector_worker_error")
     with store.connect() as db:
         assert db.execute("SELECT count(*) FROM signal_scans").fetchone()[0] == 0
     monkeypatch.setattr(injection, "apply_injection_signals", original)

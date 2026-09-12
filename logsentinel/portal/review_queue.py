@@ -334,8 +334,8 @@ class ReviewQueue:
             rows = db.execute(
                 "SELECT j.*,b.data batch FROM jobs j LEFT JOIN review_batches b ON b.job_id=j.id "
                 "WHERE j.machine_id=? AND j.status IN ('pending','retry') "
-                "AND (j.attempts<3 OR json_extract(b.data,'$.phase')!='triage') ORDER BY j.created LIMIT 20",
-                (machine["id"],),
+                "AND (j.attempts<3 OR json_extract(b.data,'$.phase')!='triage') AND coalesce(json_extract(b.data,'$.retry_at'),0)<=? ORDER BY j.created LIMIT 20",
+                (machine["id"], time.time()),
             ).fetchall()
         for row in rows:
             if row["id"] in failed:
@@ -906,6 +906,7 @@ class ReviewQueue:
         turns = deque(machines)
         calls = errors = idle = 0
         failed = set()
+        failed_machines = set()
         started = time.monotonic()
         for _ in range(max(20, len(machines) * cfg.max_calls * 4)):
             if (
@@ -916,7 +917,7 @@ class ReviewQueue:
                 break
             machine = turns.popleft()
             turns.append(machine)
-            if not self.store.monitoring_active(machine["id"]):
+            if not self.store.monitoring_active(machine["id"]) or machine["id"] in failed_machines or float(self.store.meta("review_prepare_retry:" + machine["id"]) or 0) > time.time():
                 idle += 1
             else:
                 # One call per acquisition: queued chats and other machines can
@@ -925,12 +926,21 @@ class ReviewQueue:
                     if not self.store.monitoring_active(machine["id"]):
                         continue
                     cfg = self.store.settings()
-                    work = await asyncio.to_thread(self.ready, machine, cfg, failed)
-                    progressed = bool(work)
-                    if work is None:
-                        counter = int(self.store.meta("review_dispatch") or "0")
-                        self.store.set_meta("review_dispatch", str(counter + 1))
-                        work, progressed = await asyncio.to_thread(self.prepare, machine, cfg, counter)
+                    try:
+                        work = await asyncio.to_thread(self.ready, machine, cfg, failed)
+                        progressed = bool(work)
+                        if work is None:
+                            counter = int(self.store.meta("review_dispatch") or "0")
+                            self.store.set_meta("review_dispatch", str(counter + 1))
+                            work, progressed = await asyncio.to_thread(self.prepare, machine, cfg, counter)
+                        self.store.set_meta("review_prepare_error:" + machine["id"], "")
+                    except Exception as exc:
+                        from .analysis import safe_error
+                        errors += 1
+                        failed_machines.add(machine["id"])
+                        self.store.set_meta("review_prepare_error:" + machine["id"], safe_error(exc, protected_secrets(self.store)))
+                        self.store.set_meta("review_prepare_retry:" + machine["id"], str(time.time() + 30))
+                        continue
                     if work:
                         used, error = await self.execute(machine, work)
                         calls += used

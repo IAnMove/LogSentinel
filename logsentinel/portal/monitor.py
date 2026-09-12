@@ -152,6 +152,7 @@ class Monitor:
             "collector_error": self.store.meta("collector_error"),
             "worker_error": self.store.meta("worker_error"),
             "detector_error": self.store.meta("detector_worker_error"),
+            "preparation_errors": {m["id"]: error for m in self.store.objects("machine") if (error := self.store.meta("review_prepare_error:" + m["id"]))},
             "analysis_enabled": cfg.enabled,
             "analysis_running": self.analyzer.running,
             "model_busy": self.analyzer.lock.locked(),

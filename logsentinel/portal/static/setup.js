@@ -88,6 +88,7 @@ function drawMonitor(m) {
   if (!m.enabled_sources) details.append(el("p", bilingual(
     "No hay fuentes de logs activas. Las métricas y comprobaciones de salud no sustituyen la captura de logs.",
     "No log sources are active. Metrics and health checks do not replace log capture."), "monitor-warning"));
+  for (const [machine, error] of Object.entries(m.preparation_errors || {})) details.append(el("p", machineName(machine) + ": " + error, "monitor-warning"));
   if (m.detector_error) details.append(el("p", bilingual("Error del detector: ", "Detector error: ") + m.detector_error, "monitor-warning"));
   capture.textContent =
     m.capture === "active"
