@@ -100,6 +100,7 @@ with tempfile.TemporaryDirectory(prefix="sentinel-setup-") as tmp:
             page.get_by_role("heading", name="Connect logs", exact=True).wait_for()
             page.get_by_label("Source type").select_option("file")
             page.get_by_label("Path (file or folder)").fill(str(logs))
+            page.get_by_text("History and line selection (optional)", exact=True).click()
             page.get_by_label("Import existing history on first read").check()
             page.get_by_role(
                 "button", name="Enable source and test reading", exact=True

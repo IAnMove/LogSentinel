@@ -201,6 +201,12 @@ const translations = {
   "No notificar mantiene el análisis. Excluir evita enviar esas coincidencias al modelo. Los presets de ruido se previsualizan y se aplican a mano.":
     "Muting keeps analysis enabled. Excluding prevents matching events from being sent to the model. Noise presets are previewed and applied by hand.",
   "Presets de ruido rutinario": "Routine noise presets",
+  "Solo líneas completas de inicio, parada o finalización correcta de un timer, sin texto adicional.":
+    "Only complete timer start, stop or successful completion lines, without additional text.",
+  "Solo la línea completa que indica desactivación correcta de una unidad. No demuestra que todo su trabajo haya sido correcto.":
+    "Only the complete line reporting a unit's successful deactivation. This does not prove all its work succeeded.",
+  "Solo inicio o parada de watchdog.service o llm-ram-watchdog.service. Conserva mensajes con fallos o texto adicional.":
+    "Only start or stop lines for watchdog.service or llm-ram-watchdog.service. Messages with failures or additional text are kept.",
   "No se activan solos. Previsualiza sobre una muestra y añade la exclusión si el recorte te parece correcto. Los fallos reales siguen en otras líneas.":
     "They are not enabled on their own. Preview a sample and add the exclusion if the cut looks right. Real failures still appear on other lines.",
   "Servicio / unidad": "Service / unit",
@@ -214,7 +220,8 @@ const translations = {
   "Ciclo rutinario del watchdog, no un timeout ni un kill.":
     "Routine watchdog lifecycle, not a watchdog timeout or kill.",
   "Añadir exclusión": "Add exclusion",
-  "Preset añadido como regla de exclusión.": "Preset added as an exclusion rule.",
+  "Preset añadido como regla de exclusión.":
+    "Preset added as an exclusion rule.",
   Añadir: "Add",
   Nombre: "Name",
   Tipo: "Type",
@@ -466,7 +473,8 @@ const translations = {
     "Future analyses are paused. The current cycle may finish.",
   "Sin conexión con el portal. No se puede confirmar el estado del monitor.":
     "Disconnected from the portal. Monitor status cannot be confirmed.",
-  "Buscando servidores LLM en este equipo…": "Looking for LLM servers on this host…",
+  "Buscando servidores LLM en este equipo…":
+    "Looking for LLM servers on this host…",
   "No se ha detectado un servidor LLM JSON en 11434, 8081 ni 8080. Configúralo abajo.":
     "No JSON LLM server was found on 11434, 8081 or 8080. Configure it below.",
   "Detectado en este equipo: ": "Detected on this host: ",
@@ -675,6 +683,9 @@ function initLanguage() {
         "input[name],select[name],textarea[name]",
       ),
     ].map((n) => [n.name, n.type === "checkbox" ? n.checked : n.value]);
+    const openGroups = [
+      ...$("#content").querySelectorAll("details[data-guide-fields][open]"),
+    ].map((n) => n.dataset.guideFields);
     locale = e.target.value;
     try {
       localStorage.setItem("logsentinel-language", locale);
@@ -696,6 +707,11 @@ function initLanguage() {
       }
       // Restoring a draft select value does not dispatch a change event.
       refreshNotificationGuides();
+      refreshSetupGuides();
+      for (const details of $("#content").querySelectorAll(
+        "details[data-guide-fields]",
+      ))
+        details.open = openGroups.includes(details.dataset.guideFields);
       drawMonitor(S.monitor);
     }
   };

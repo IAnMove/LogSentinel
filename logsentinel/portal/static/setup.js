@@ -2,7 +2,8 @@
 let setupStep = 0,
   setupMachine = "",
   setupSource = "",
-  helpHistory = [];
+  helpHistory = [],
+  monitorDetailsOpen = false;
 
 function statusLabel(key) {
   if (key === "MEDIUM") return locale === "es" ? "Media" : "Medium";
@@ -250,10 +251,54 @@ function drawMonitor(m) {
       );
     },
   );
-  root.replaceChildren(details, toggle);
+  const brief = el("div"),
+    more = guideDetails(
+      bilingual("Ver detalles del estado global", "Show global status details"),
+      details,
+    );
+  more.open = monitorDetailsOpen;
+  more.addEventListener("toggle", () => {
+    if (more.isConnected) monitorDetailsOpen = more.open;
+  });
+  brief.append(
+    el(
+      "div",
+      bilingual(
+        "Estado global · todas las máquinas",
+        "Global status · all machines",
+      ),
+      "subtle",
+    ),
+    capture,
+    el("span", " · " + m.enabled_sources + t(" fuentes habilitadas")),
+    el("div", line),
+  );
+  const grid = details.querySelector(".monitor-coverage");
+  if (grid) brief.append(grid);
+  brief.append(
+    timed(t("Último evento recibido: "), m.last_event),
+    timed(
+      bilingual("Último lote analizado: ", "Last reviewed batch: "),
+      m.last_review?.finished,
+    ),
+  );
+  if (m.coverage?.oldest_pending)
+    brief.append(
+      timed(
+        bilingual(
+          "El log más antiguo en cola llegó ",
+          "Oldest queued log arrived ",
+        ),
+        m.coverage.oldest_pending,
+      ),
+    );
+  for (const warning of [...details.querySelectorAll(".monitor-warning")])
+    brief.append(warning);
+  brief.append(more);
+  root.replaceChildren(brief, toggle);
   const selectedMachine = S.machine.find((machine) => machine.id === scope);
   if (selectedMachine?.monitoring_paused)
-    details.prepend(
+    brief.prepend(
       el(
         "p",
         selectedMachine.name +
@@ -288,6 +333,16 @@ async function setupView(root) {
     stepsNav.append(b);
   });
   root.append(
+    el(
+      "p",
+      bilingual("Paso ", "Step ") +
+        (setupStep + 1) +
+        bilingual(
+          " de 4 · Primero conectamos el modelo, después los logs y al final comprobamos el resultado.",
+          " of 4 · Connect the model, then your logs, then check the result.",
+        ),
+      "guide-summary",
+    ),
     stepsNav,
     el(
       "p",
@@ -313,6 +368,16 @@ async function setupView(root) {
         await fn(formData(f));
       } catch (error) {
         feedback.textContent = error.message;
+        if (setupStep === 0)
+          feedback.textContent += bilingual(
+            " Comprueba que el servidor está arrancado, la URL es accesible desde LogSentinel y el modelo está instalado. Tus datos siguen en el formulario.",
+            " Check that the server is running, its URL is reachable from LogSentinel and the model is installed. Your entries remain in the form.",
+          );
+        if (setupStep === 2)
+          feedback.textContent += bilingual(
+            " Comprueba la ruta y los permisos del usuario que ejecuta LogSentinel. Puedes reintentar sin crear otra fuente.",
+            " Check the path and permissions of the user running LogSentinel. You can retry without creating another source.",
+          );
         feedback.className = "wide monitor-warning";
       } finally {
         submit.disabled = false;
@@ -335,7 +400,11 @@ async function setupView(root) {
         ),
       ),
     );
-    const found = el("p", t("Buscando servidores LLM en este equipo…"), "subtle");
+    const found = el(
+      "p",
+      t("Buscando servidores LLM en este equipo…"),
+      "subtle",
+    );
     p.append(found);
     api("/api/discovery")
       .then((d) => {
@@ -354,6 +423,9 @@ async function setupView(root) {
         found.textContent = "";
       });
     llmServerFields(f, c);
+    f.elements.namedItem("base_url").required = true;
+    f.elements.namedItem("model").required = true;
+    p.append(modelConnectionGuide(f));
     add(
       "context_tokens",
       t("Contexto efectivo configurado"),
@@ -367,6 +439,31 @@ async function setupView(root) {
       "checkbox",
       c.remote_allowed,
     );
+    fieldHelp(
+      f,
+      "remote_allowed",
+      bilingual(
+        "Necesario también para otro equipo de tu red local. Los logs seleccionados se enviarán a esa dirección.",
+        "Also needed for another computer on your local network. Selected logs will be sent to that address.",
+      ),
+    );
+    fieldHelp(
+      f,
+      "context_tokens",
+      bilingual(
+        "Es el tamaño de contexto cargado en el servidor. Si no lo conoces, conserva el valor inicial y compruébalo en Modelo y análisis.",
+        "This is the context size loaded on the server. If unsure, keep the initial value and check it in Model and analysis.",
+      ),
+    );
+    const advancedConnection = guideFields(
+      f,
+      bilingual(
+        "Opciones avanzadas de conexión y contexto",
+        "Advanced connection and context options",
+      ),
+      ["provider", "clear_api_key", "context_tokens", "max_tokens"],
+    );
+    for (const node of [...f.querySelectorAll(".provider-help,.provider-tools,.provider-result")]) advancedConnection.append(node);
     p.append(
       el(
         "p",
@@ -404,7 +501,17 @@ async function setupView(root) {
     ]);
     add("hostname", t("Hostname declarado"), "text", "");
     add("os", t("Sistema / distribución"), "text", "");
-    f.append(
+    const createMachine = el("div", undefined, "form-grid wide");
+    for (const name of ["name", "kind", "hostname", "os"])
+      createMachine.append(f.elements.namedItem(name).closest("label"));
+    f.append(createMachine);
+    const optionalMachine = guideFields(
+      f,
+      bilingual("Datos opcionales del equipo", "Optional computer details"),
+      ["hostname", "os"],
+    );
+    createMachine.append(optionalMachine);
+    createMachine.prepend(
       button(t("Detectar este equipo"), async () => {
         const d = await api("/api/discovery");
         for (const [key, value] of Object.entries({
@@ -418,8 +525,27 @@ async function setupView(root) {
           kind: "local",
         }))
           f.elements.namedItem(key).value = value;
+        f.refreshSetupFields();
       }),
     );
+    const selectedMachine = el("p", "", "wide guide-summary");
+    f.insertBefore(selectedMachine, createMachine);
+    f.refreshSetupFields = () => {
+      const existing = f.elements.namedItem("existing").value;
+      createMachine.hidden = !!existing;
+      const machine = S.machine.find((m) => m.id === existing);
+      selectedMachine.hidden = !machine;
+      selectedMachine.textContent = machine
+        ? bilingual("Usaremos: ", "Using: ") +
+          machine.name +
+          " · " +
+          (machine.hostname ||
+            bilingual("sin hostname declarado", "no hostname declared"))
+        : "";
+      f.elements.namedItem("name").required = !existing;
+    };
+    f.elements.namedItem("existing").onchange = f.refreshSetupFields;
+    f.refreshSetupFields();
     p.append(
       el(
         "p",
@@ -448,7 +574,11 @@ async function setupView(root) {
       p.append(el("p", t("Crea una máquina en el paso anterior.")));
       return;
     }
-    const sources = S.source.filter((s) => s.machine_id === setupMachine);
+    const sources = S.source.filter(
+      (s) =>
+        s.machine_id === setupMachine &&
+        !["metrics", "health"].includes(s.kind),
+    );
     const current = sources.find((s) => s.id === setupSource) || sources[0];
     setupSource = current?.id || "";
     add("existing", t("Fuente"), "select", setupSource, [
@@ -458,8 +588,8 @@ async function setupView(root) {
     add("name", t("Nombre"), "text", "System logs");
     const local =
       S.machine.find((m) => m.id === setupMachine)?.kind === "local";
-    add("kind", t("Tipo de fuente"), "select", local ? "journald" : "folder", [
-      ["journald", t("Journal local")],
+    add("kind", t("Tipo de fuente"), "select", local ? "journald" : "push", [
+      ...(local ? [["journald", t("Journal local")]] : []),
       ["file", t("Archivo")],
       ["folder", t("Carpeta")],
       ["push", t("Recepción remota")],
@@ -472,32 +602,123 @@ async function setupView(root) {
       ["priority", t("Prioridad + palabras")],
       ["keywords", t("Solo palabras disparadoras")],
     ]);
-    p.append(
-      el(
-        "p",
-        t(
-          "Journal no necesita ruta: se consulta con journalctl y los permisos del servicio. Para archivos y carpetas usa una ruta absoluta en el servidor. Importar histórico puede traer todos los registros disponibles, no solo los últimos minutos.",
-        ),
+    const createSource = el("div", undefined, "form-grid wide"),
+      sourceGuide = el("div", undefined, "wide");
+    for (const name of [
+      "name",
+      "kind",
+      "path",
+      "pattern",
+      "history",
+      "analysis_mode",
+    ])
+      createSource.append(f.elements.namedItem(name).closest("label"));
+    f.append(createSource);
+    const sourceOptions = guideFields(
+      f,
+      bilingual(
+        "Histórico y selección de líneas (opcional)",
+        "History and line selection (optional)",
+      ),
+      ["history", "analysis_mode"],
+    );
+    createSource.append(sourceOptions);
+    f.append(sourceGuide);
+    fieldHelp(
+      f,
+      "history",
+      bilingual(
+        "Desactivado: empieza con las nuevas llegadas. Activado: añade también el histórico disponible; puede llenar la cola al principio.",
+        "Off: start with new arrivals. On: also import available history; this can create an initial backlog.",
       ),
     );
-    p.append(
-      el(
-        "p",
-        t(
-          "La captura conserva también los INFO. Prioridad + palabras reduce lo enviado al LLM, con menor cobertura. La fuente existente conserva su política. Los campos de creación solo se usan al elegir Crear una fuente.",
-        ),
-        "subtle",
+    fieldHelp(
+      f,
+      "analysis_mode",
+      bilingual(
+        "Empieza con todas las líneas. La compactación ya agrupa repeticiones sin excluir todo INFO o Python. Los otros modos dejan líneas sin revisión LLM.",
+        "Start with all lines. Compaction already groups repetitions without excluding all INFO or Python. Other modes leave lines without LLM review.",
       ),
     );
     const path = f.elements.namedItem("path");
-    const updatePath = () => {
-      path.disabled = !["file", "folder"].includes(
-        f.elements.namedItem("kind").value,
+    f.refreshSetupFields = () => {
+      const existing = sources.find(
+        (s) => s.id === f.elements.namedItem("existing").value,
+      );
+      createSource.hidden = !!f.elements.namedItem("existing").value;
+      const kind = existing?.kind || f.elements.namedItem("kind").value;
+      path.disabled = !!existing || !["file", "folder"].includes(kind);
+      path.required = !path.disabled;
+      path.closest("label").hidden = path.disabled;
+      f.elements.namedItem("name").required = !createSource.hidden;
+      f.elements.namedItem("pattern").closest("label").hidden =
+        kind !== "folder";
+      sourceGuide.replaceChildren();
+      if (existing)
+        sourceGuide.append(
+          el(
+            "p",
+            bilingual(
+              "Se activará la fuente guardada: ",
+              "The saved source will be enabled: ",
+            ) +
+              existing.name +
+              " · " +
+              (existing.path || existing.kind),
+            "guide-summary",
+          ),
+        );
+      const steps =
+        kind === "journald"
+          ? [
+              bilingual(
+                "Journal es el registro del sistema de este equipo. No necesita una ruta.",
+                "Journal is this computer’s system log. It needs no path.",
+              ),
+              bilingual(
+                "Pulsa «Activar fuente y comprobar lectura». Si faltan permisos, el usuario del servicio necesita acceso al journal; no es necesario ejecutar todo el portal como root.",
+                "Select “Enable source and test reading”. If permission is denied, the service user needs journal access; the whole portal does not need to run as root.",
+              ),
+            ]
+          : kind === "push"
+            ? [
+                bilingual(
+                  "Esta fuente recibirá logs enviados por otro equipo. Crear la ficha no instala el emisor ni confirma recepción.",
+                  "This source will receive logs sent by another computer. Creating it does not install a sender or confirm reception.",
+                ),
+                bilingual(
+                  "Continúa para guardar la fuente. En el último paso encontrarás las instrucciones de alta del emisor y dónde comprobar que llega su primer log.",
+                  "Continue to save the source. The last step explains sender enrollment and where to check for its first log.",
+                ),
+              ]
+            : [
+                bilingual(
+                  "La ruta pertenece al equipo donde corre LogSentinel, aunque abras el navegador en otro ordenador.",
+                  "The path belongs to the computer running LogSentinel, even if your browser is on another computer.",
+                ),
+                kind === "folder"
+                  ? bilingual(
+                      "Escribe una carpeta, por ejemplo /var/log/mi-app, y el patrón de sus archivos, por ejemplo *.log. Comprueba que el usuario del servicio puede leerlos.",
+                      "Enter a folder, such as /var/log/my-app, and its filename pattern, such as *.log. Check that the service user can read them.",
+                    )
+                  : bilingual(
+                      "Escribe la ruta completa de un log, por ejemplo /var/log/mi-app/app.log. Debe ser legible por el usuario del servicio.",
+                      "Enter a log’s full path, such as /var/log/my-app/app.log. The service user must be able to read it.",
+                    ),
+              ];
+      sourceGuide.append(
+        howTo(
+          bilingual("Cómo conectar esta fuente", "How to connect this source"),
+          steps,
+        ),
       );
     };
-    f.elements.namedItem("kind").onchange = updatePath;
-    updatePath();
+    f.elements.namedItem("kind").onchange = f.refreshSetupFields;
+    f.elements.namedItem("existing").onchange = f.refreshSetupFields;
+    f.refreshSetupFields();
     next("Activar fuente y comprobar lectura", async (d) => {
+      if (!d.existing && ["file", "folder"].includes(d.kind) && !d.path.startsWith("/"))
+        throw Error(bilingual("Escribe una ruta absoluta que empiece por /, en el equipo donde corre LogSentinel.", "Enter an absolute path starting with /, on the computer running LogSentinel."));
       feedback.textContent = t("Comprobando lectura…");
       const source = await api(
         "/api/objects/source",
@@ -515,11 +736,13 @@ async function setupView(root) {
             },
       );
       setupSource = source.id;
+      if (!sources.some((s) => s.id === source.id)) sources.push(source);
       // Remember the created source before testing; retries don't duplicate it.
       const opt = el("option", source.name);
       opt.value = source.id;
       f.elements.namedItem("existing").append(opt);
       f.elements.namedItem("existing").value = source.id;
+      f.refreshSetupFields();
       if (source.kind !== "push") {
         const r = await api("/api/source/" + source.id + "/poll", {});
         if (r.health.status !== "ok")
@@ -528,6 +751,36 @@ async function setupView(root) {
       await advance();
     });
   } else {
+    const review = el("div", undefined, "guide-summary");
+    const selected = S.source.find((s) => s.id === setupSource);
+    const sourceHealth = selected ? S.health[selected.id] : null;
+    review.append(
+      el(
+        "p",
+        bilingual("Modelo: ", "Model: ") +
+          S.settings.llm.model +
+          (S.setup.model_tested
+            ? bilingual(" · conexión comprobada", " · connection checked")
+            : bilingual(
+                " · falta probar la conexión",
+                " · connection test needed",
+              )),
+      ),
+      el("p", bilingual("Equipo: ", "Computer: ") + machineName(setupMachine)),
+      el(
+        "p",
+        bilingual("Logs: ", "Logs: ") +
+          (selected?.name ||
+            bilingual(
+              "revisa tus fuentes activas",
+              "check your active sources",
+            )) +
+          (sourceHealth?.status === "ok"
+            ? bilingual(" · lectura comprobada", " · reading checked")
+            : ""),
+      ),
+    );
+    p.append(review);
     add(
       "interval_seconds",
       t("Intervalo entre ciclos (segundos)"),
@@ -544,6 +797,14 @@ async function setupView(root) {
         ["es", "Español"],
       ],
     );
+    fieldHelp(
+      f,
+      "interval_seconds",
+      bilingual(
+        "Empieza con 30–60 segundos. La captura continúa entre análisis. Con el ajuste automático, los lotes se adaptan al tiempo medido.",
+        "Start with 30–60 seconds. Capture continues between reviews. Automatic tuning adapts batches to measured time.",
+      ),
+    );
     p.append(
       el(
         "p",
@@ -557,14 +818,6 @@ async function setupView(root) {
         "p",
         t(
           "Si llegan más logs de los que admite el modelo, los originales se guardan según la retención y se muestra la cobertura perdida. Aumentar el contexto sin comprobar el modelo no garantiza más capacidad.",
-        ),
-      ),
-    );
-    p.append(
-      el(
-        "p",
-        t(
-          "En Problemas puedes ver evidencia, copiar un prompt y silenciar notificaciones. En Reglas puedes previsualizar filtros. En Notificaciones configura y prueba el destino que prefieras.",
         ),
       ),
     );
@@ -587,6 +840,7 @@ async function setupView(root) {
           ),
         ),
       );
+    if (selected?.kind === "push") p.append(senderSetupGuide(selected));
     next("Terminar y activar análisis automático", async (d) => {
       await api("/api/settings", d);
       await api("/api/setup/complete", {});
@@ -594,13 +848,73 @@ async function setupView(root) {
       view = "summary";
       await refresh();
       notice(
-        t(
-          "Configuración terminada. La captura y el análisis automático están activados.",
+        bilingual(
+          "Configuración guardada y análisis activado. Comprueba la primera llegada y el primer lote en Cobertura y capacidad.",
+          "Configuration saved and analysis enabled. Check the first arrival and first batch in Coverage and capacity.",
         ),
       );
     });
+    root.append(quickStartMap());
   }
+  if (setupStep > 0)
+    f.append(
+      button(
+        bilingual("Volver al paso anterior", "Back to previous step"),
+        async () => {
+          setupStep--;
+          await render();
+        },
+      ),
+    );
   p.append(f);
+}
+
+function senderSetupGuide(source) {
+  const details = guideDetails(
+    bilingual(
+      "Conectar el emisor remoto: pasos pendientes",
+      "Connect the remote sender: remaining steps",
+    ),
+  );
+  details.append(
+    howTo(
+      bilingual(
+        "En el central y en el cliente",
+        "On the central and client computers",
+      ),
+      [
+        bilingual(
+          "En el central, comprueba que el listener de recepción está arrancado y que el cliente puede alcanzar su dirección HTTPS. Es una dirección distinta de la del portal.",
+          "On the central, check that the ingest listener is running and that the client can reach its HTTPS address. This is separate from the portal address.",
+        ),
+        bilingual(
+          "Genera el paquete de alta en la terminal del central. Sustituye las rutas y CENTRAL por tus valores; --data-dir debe señalar los datos de este portal. Si usas una CA privada, indica su certificado con --ca-cert.",
+          "Generate the enrollment package in the central’s terminal. Replace paths and CENTRAL with your values; --data-dir must point to this portal’s data. For a private CA, provide its certificate with --ca-cert.",
+        ),
+      ],
+    ),
+    el(
+      "pre",
+      "logsentinel enrollment-package --source-id " +
+        source.id +
+        " --receiver https://CENTRAL:8767 --data-dir /RUTA/DEL/PORTAL --out cliente.json",
+    ),
+    howTo(bilingual("Después", "Then"), [
+      bilingual(
+        "Lleva cliente.json al cliente por un canal de confianza. Allí, con LogSentinel instalado, ejecuta el comando de alta y sigue la instrucción que imprime para enviar el archivo de logs.",
+        "Transfer cliente.json to the client through a trusted channel. With LogSentinel installed there, run enrollment and follow its printed instruction to forward your log file.",
+      ),
+      bilingual(
+        "Vuelve a Histórico y selecciona esta máquina. El primer evento recibido confirma el envío. En Cobertura y capacidad podrás seguir su análisis.",
+        "Return to History and select this computer. The first received event confirms delivery. Follow its review in Coverage and capacity.",
+      ),
+    ]),
+    el(
+      "pre",
+      "logsentinel enroll cliente.json --spool ~/.local/share/logsentinel/sender",
+    ),
+  );
+  return details;
 }
 
 function initHelp() {
