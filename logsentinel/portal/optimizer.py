@@ -170,11 +170,12 @@ def propose(store, machine_id):
         ).fetchone()
     events = store.events(ids=ids, limit=2000)
     window = max(60, now - (first or now))
-    eligible = [e for e in events if not excluded(store, e)]
+    rules = store.objects("rule")
+    eligible = [e for e in events if not excluded(store, e, rules)]
     capacity = measured_capacity(store, cfg, machine_id)
     rate = total * 60 / window
     choices = []
-    ceiling = input_ceiling(cfg, machine)
+    ceiling = input_ceiling(cfg, machine, store=store)
 
     def option(id, patches, global_patch=None):
         global_patch = global_patch or {}

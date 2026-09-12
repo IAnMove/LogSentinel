@@ -1,9 +1,33 @@
 """Read-only, same-window coverage and measured planning; never calls a model."""
 
 import json
+import math
+from statistics import median
 import time
 
-from .batch_budget import input_ceiling as model_input_ceiling
+from .batch_budget import batch_budget, input_ceiling as model_input_ceiling
+
+
+def latency_breakdown(rows):
+    """Use one successful sample set; missing server timings stay unknown."""
+    samples = []
+    for row in rows:
+        if row["status"] != "ok" or row["duration"] <= 0:
+            continue
+        detail = json.loads(row["detail"])
+        values = [detail.get(k) for k in ("load_seconds", "prompt_eval_seconds", "eval_seconds")]
+        if not all(type(v) in (int, float) and math.isfinite(v) and v >= 0 for v in values):
+            continue
+        if sum(values) > row["duration"] + 1:
+            continue
+        samples.append((row["duration"], *values))
+    return dict(
+        samples=len(samples),
+        **{name: median(s[i] for s in samples) if samples else None for i, name in enumerate(
+            ("total_seconds", "load_seconds", "input_seconds", "output_seconds")
+        )},
+        loading_dominates=bool(len(samples) >= 3 and sum(s[1] for s in samples) > sum(s[0] for s in samples) / 2),
+    )
 
 
 def review_signature(cfg):
@@ -165,6 +189,16 @@ def capacity_report(store, machine_id=""):
                 (json.dumps(ids),),
             ).fetchone()
         )
+        timing_rows = db.execute(
+            "SELECT duration,status,detail FROM usage WHERE kind IN ('analysis','investigation') "
+            "AND job_id IN (SELECT value FROM json_each(?)) ORDER BY created DESC LIMIT 100",
+            (json.dumps(ids),),
+        ).fetchall()
+        retained = _window(db, 0, now, machine_id)
+        last_event = db.execute(
+            "SELECT max(received) FROM events WHERE status!='measured'" + (" AND machine_id=?" if machine_id else ""),
+            [machine_id] if machine_id else [],
+        ).fetchone()[0]
         # Ignore the still-collecting tail for the planning calculation. These are
         # observed retained-event statuses, not theoretical tokens/s or a promise.
         end = max((j["created"] for j in done), default=since)
@@ -201,7 +235,7 @@ def capacity_report(store, machine_id=""):
         m for m in store.objects("machine") if not machine_id or m["id"] == machine_id
     ]
     input_ceiling = min(
-        (model_input_ceiling(cfg, m) for m in scoped_machines),
+        (model_input_ceiling(cfg, m, store=store) for m in scoped_machines),
         default=model_input_ceiling(cfg, store=store),
     )
     journals = [s for s in sources if s["kind"] == "journald" and s["enabled"]]
@@ -211,10 +245,16 @@ def capacity_report(store, machine_id=""):
         and (not machine_id or any(s["machine_id"] == machine_id for s in journals))
         else []
     )
+    log_sources = [s for s in sources if s["kind"] not in ("health", "metrics") and (not machine_id or s["machine_id"] == machine_id)]
+    active_sources = [s for s in log_sources if s["enabled"] and store.monitoring_active(s["machine_id"])]
     return dict(
         generated=now,
         **hour,
         signal=coverage_signal(hour),
+        capture=dict(configured_sources=len(log_sources), enabled_sources=sum(s["enabled"] for s in log_sources), active_sources=len(active_sources), last_event=last_event),
+        retained=retained,
+        latency=latency_breakdown(timing_rows),
+        tuning=batch_budget(store, cfg, input_ceiling),
         services=services,
         analysis=usage,
         retained_capacity=retained_gap,

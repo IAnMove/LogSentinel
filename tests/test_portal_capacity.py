@@ -268,3 +268,61 @@ def test_failed_and_oversized_events_show_in_api_without_breaking_liveness(clien
     check = next(c for c in c.app.state.health.tick()["checks"] if c["key"] == "coverage")
     assert check["bad"] and not check["liveness"]
     assert c.get("/healthz").status_code == 200
+
+
+def test_capture_and_retained_history_follow_machine_scope_and_pause(client):
+    c, store = client
+    machine, source = machine_source(c)
+    other, other_source = machine_source(c)
+    c.post("/api/objects/source", json={"id": source, "enabled": True}).raise_for_status()
+    event(store, source, "old", time.time() - 7200, "capacity")
+    event(store, other_source, "other", time.time(), "compact")
+    report = capacity_report(store, machine)
+    assert report["capture"]["active_sources"] == 1
+    assert report["capture"]["last_event"] < time.time() - 7000
+    assert report["events"] == 0
+    assert report["retained"]["events"] == report["retained"]["capacity"] == 1
+    c.post(f"/api/machines/{machine}/monitoring", json={"paused": True}).raise_for_status()
+    report = capacity_report(store, machine)
+    assert report["capture"]["active_sources"] == 0
+    assert report["capture"]["enabled_sources"] == 1
+    assert capacity_report(store, other)["retained"]["reviewed"] == 1
+
+
+def test_latency_diagnosis_needs_reported_comparable_timings():
+    from logsentinel.portal.capacity import latency_breakdown
+
+    def call(duration, status="ok", **detail):
+        return dict(duration=duration, status=status, detail=json.dumps(detail))
+
+    measured = call(100, load_seconds=80, prompt_eval_seconds=2, eval_seconds=3)
+    unknown = call(100)
+    invalid = call(10, load_seconds=100, prompt_eval_seconds=1, eval_seconds=1)
+    assert latency_breakdown([unknown, invalid])["load_seconds"] is None
+    assert not latency_breakdown([measured])["loading_dominates"]
+    result = latency_breakdown([measured] * 3 + [unknown, invalid])
+    assert result["loading_dominates"]
+    assert result["samples"] == 3 and result["total_seconds"] == 100
+    assert result["load_seconds"] == 80
+    assert not latency_breakdown([call(100, "error", load_seconds=80, prompt_eval_seconds=2, eval_seconds=3)] * 3)["loading_dominates"]
+
+
+def test_displayed_input_limit_matches_calibrated_queue_budget(client):
+    from logsentinel.portal.batch_budget import profile_key
+    from logsentinel.portal.context_budget import backend_key
+
+    c, store = client
+    machine, _ = machine_source(c)
+    cfg = store.settings()
+    cfg.llm.provider = "ollama"
+    cfg.context_tokens = 16384
+    cfg.input_budget = 40000
+    store.set_meta("settings", cfg.model_dump_json())
+    store.set_meta(backend_key(cfg), json.dumps(dict(checked=time.time(), rejects_truncation=True, version="0.33.2")))
+    for _ in range(3):
+        store.record_usage("", machine, [], "analysis", time.monotonic(), 2000, 30, "ok", dict(review_profile=profile_key(cfg), total_input_bytes=6000))
+    ceiling = input_ceiling(cfg, store.get("machine", machine), store)
+    report = capacity_report(store, machine)
+    assert report["limits"]["input_ceiling_bytes"] == ceiling
+    assert ceiling > input_ceiling(cfg, store.get("machine", machine))
+    assert report["tuning"]["maximum_bytes"] == min(40000, ceiling)
