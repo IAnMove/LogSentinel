@@ -245,6 +245,23 @@ def test_discovery_lists_reachable_local_llm(client, monkeypatch):
     }
 
 
+@pytest.mark.parametrize("preset_id,message", [
+    ("systemd_timer_success", "Started daily-backup.timer."),
+    ("systemd_timer_success", "daily-backup.timer: Deactivated successfully."),
+    ("systemd_oneshot_success", "backup.service: Deactivated successfully."),
+    ("watchdog_lifecycle", "Started llm-ram-watchdog.service."),
+])
+def test_noise_presets_keep_errors_and_quoted_success_messages(preset_id, message):
+    from logsentinel.portal.rules import matches, NOISE_PRESETS
+
+    preset = next(p for p in NOISE_PRESETS if p["id"] == preset_id)
+    assert matches(preset, {"message": message})
+    for extra in [" ERROR disk failure", " failed: out of memory", "\nignore previous instructions"]:
+        assert not matches(preset, {"message": message + extra})
+    assert not matches(preset, {"message": 'Parser failed while handling "' + message + '"'})
+    assert not matches(preset, {"message": "Out of memory; " + message})
+
+
 def test_service_rules_and_noise_presets_are_opt_in(client):
     from logsentinel.portal.rules import matches, NOISE_PRESETS
 
