@@ -140,10 +140,10 @@ def test_capacity_uses_current_model_only_and_discounts_recent_errors(client):
     plan = c.post(f"/api/machines/{machine}/optimize").json()
     assert plan["capacity"]["reliable"]
     assert plan["capacity"]["batch_seconds"] == 20
-    assert plan["recommended"] == "warnings"
+    assert plan["recommended"] is None  # Old repeat-heavy timing cannot certify new filters.
     assert (
         next(o for o in plan["choices"] if o["id"] == "current")["fits_estimate"]
-        is False
+        is None
     )
     cfg.llm.model = "different-model"
     s.set_meta("settings", cfg.model_dump_json())

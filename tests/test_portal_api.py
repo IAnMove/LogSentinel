@@ -10,13 +10,13 @@ from logsentinel.portal.analysis import ReviewClient
 def client(tmp_path):
     app = create_app(tmp_path, background=False)
     with TestClient(app, base_url="http://localhost") as c:
+        c.headers["X-LogSentinel"] = "portal"
         assert (
             c.post(
                 "/login", json={"token": app.state.store.meta("admin_token")}
             ).status_code
             == 200
         )
-        c.headers["X-LogSentinel"] = "portal"
         yield c, app.state.store
 
 
@@ -34,8 +34,20 @@ def test_auth_csrf_and_host_are_required(tmp_path):
     app = create_app(tmp_path, background=False)
     with TestClient(app, base_url="http://localhost") as c:
         assert c.get("/api/state").status_code == 401
-        assert c.post("/login", json={"token": "wrong"}).status_code == 401
-        c.post("/login", json={"token": app.state.store.meta("admin_token")})
+        assert c.post("/login", json={"token": "wrong"}).status_code == 403
+        assert (
+            c.post(
+                "/login",
+                json={"token": "wrong"},
+                headers={"X-LogSentinel": "portal"},
+            ).status_code
+            == 401
+        )
+        c.post(
+            "/login",
+            json={"token": app.state.store.meta("admin_token")},
+            headers={"X-LogSentinel": "portal"},
+        )
         assert c.post("/api/objects/machine", json={"name": "A"}).status_code == 403
         assert c.get("/", headers={"host": "attacker.example"}).status_code == 400
         assert (
@@ -48,6 +60,70 @@ def test_auth_csrf_and_host_are_required(tmp_path):
             ).status_code
             == 403
         )
+
+
+def test_access_key_rotation_invalidates_sessions_and_rewrites_file(client):
+    c, s = client
+    old = s.meta("admin_token")
+    result = c.post("/api/access-key/rotate")
+    assert result.status_code == 200, result.text
+    token = result.json()["token"]
+    assert token != old
+    assert s.meta("admin_token") == token
+    assert old in json.loads(s.meta("retired_admin_tokens"))
+    assert (s.directory / "access-key.txt").read_text().strip() == token
+    assert token not in c.get("/healthz").text
+    assert c.get("/api/state").status_code == 401
+    assert c.post("/login", json={"token": old}).status_code == 401
+    assert c.post("/login", json={"token": token}).status_code == 200
+    assert c.get("/api/state").status_code == 200
+
+
+def test_expired_sessions_are_dropped(tmp_path):
+    import time
+
+    app = create_app(tmp_path, background=False)
+    with TestClient(app, base_url="http://localhost") as c:
+        app.state.sessions["dead"] = time.time() - 1
+        assert c.get("/healthz").status_code in (200, 503)
+        assert "dead" not in app.state.sessions
+
+
+def test_events_api_redacts_access_key(client):
+    c, s = client
+    m, source = machine_source(c)
+    secret = s.meta("admin_token")
+    s.ingest(
+        s.get("source", source),
+        [{"origin": "leak", "message": "token was " + secret}],
+    )
+    body = c.get("/api/events").text
+    assert secret not in body
+    assert "[REDACTED]" in body
+
+
+def test_destinations_reject_metadata_urls(client):
+    c, _ = client
+    for url in (
+        "http://169.254.169.254/latest/meta-data",
+        "http://metadata.google.internal/",
+        "http://[fe80::1]/",
+    ):
+        result = c.post(
+            "/api/objects/destination",
+            json={"name": "hook", "kind": "webhook", "url": url, "enabled": False},
+        )
+        assert result.status_code in (400, 422), (url, result.text)
+    ok = c.post(
+        "/api/objects/destination",
+        json={
+            "name": "local",
+            "kind": "webhook",
+            "url": "http://127.0.0.1:5678/hook",
+            "enabled": False,
+        },
+    )
+    assert ok.status_code == 200, ok.text
 
 
 def test_destinations_write_only_secrets_and_save_does_not_send(client):
@@ -110,6 +186,117 @@ def test_disabled_destination_cancels_queue(client):
     d["enabled"] = False
     assert c.post("/api/objects/destination", json=d).status_code == 200
     assert s.rows("deliveries")[0]["status"] == "cancelled"
+
+
+def test_sensitive_files_cannot_be_log_sources(client, tmp_path):
+    c, _ = client
+    machine = c.post("/api/objects/machine", json={"name": "A"}).json()["id"]
+    denied = c.post(
+        "/api/objects/source",
+        json={
+            "name": "shadow",
+            "machine_id": machine,
+            "kind": "file",
+            "path": "/etc/shadow",
+        },
+    )
+    assert denied.status_code == 400
+    unusual = tmp_path / "not-a-log"
+    unusual.write_text("x\n")
+    # /tmp is not /etc; create under a fake /etc by using the real unusual flag via /etc
+    warned = c.post(
+        "/api/objects/source",
+        json={
+            "name": "hosts",
+            "machine_id": machine,
+            "kind": "file",
+            "path": "/etc/hosts",
+            "enabled": False,
+        },
+    )
+    assert warned.status_code == 200, warned.text
+    assert "warning" in warned.json()
+
+
+def test_discovery_lists_reachable_local_llm(client, monkeypatch):
+    class FakeResponse:
+        is_success = True
+        headers = {"content-type": "application/json"}
+
+    class FakeClient:
+        def __init__(self, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def get(self, url):
+            assert "127.0.0.1" in url
+            return FakeResponse()
+
+    monkeypatch.setattr("logsentinel.portal.collect.httpx.Client", FakeClient)
+    found = client[0].get("/api/discovery").json()["llm"]
+    assert {item["base_url"] for item in found} >= {
+        "http://127.0.0.1:11434",
+        "http://127.0.0.1:8081",
+    }
+
+
+def test_service_rules_and_noise_presets_are_opt_in(client):
+    from logsentinel.portal.rules import matches, NOISE_PRESETS
+
+    c, s = client
+    m, source = machine_source(c)
+    s.ingest(
+        s.get("source", source),
+        [
+            {
+                "origin": "t1",
+                "message": "Started daily-backup.timer.",
+                "service": "systemd",
+            },
+            {
+                "origin": "w1",
+                "message": "Started llm-ram-watchdog.service.",
+                "service": "llm-ram-watchdog",
+            },
+            {
+                "origin": "ssh",
+                "message": "Failed password for root",
+                "service": "sshd",
+            },
+        ],
+    )
+    timer = next(p for p in NOISE_PRESETS if p["id"] == "systemd_timer_success")
+    assert matches(timer, {"message": "Started daily-backup.timer."})
+    assert not matches(timer, {"message": "Failed password for root"})
+    assert matches(
+        {"kind": "service", "pattern": "sshd", "action": "mute", "enabled": True},
+        {"message": "x", "service": "sshd"},
+    )
+    listed = c.get("/api/rule-presets")
+    assert listed.status_code == 200 and {p["id"] for p in listed.json()} >= {
+        "systemd_timer_success",
+        "watchdog_lifecycle",
+    }
+    added = c.post("/api/rule-presets/systemd_timer_success", json={"machine_id": m})
+    assert added.status_code == 200, added.text
+    assert added.json()["action"] == "exclude"
+    assert c.post("/api/rule-presets/systemd_timer_success", json={"machine_id": m}).status_code == 409
+    preview = c.post(
+        "/api/rules/preview",
+        json={
+            "name": "svc",
+            "action": "mute",
+            "kind": "service",
+            "pattern": "sshd",
+        },
+    )
+    assert preview.status_code == 200
+    assert preview.json()["matched"] >= 1
 
 
 def test_regex_preview_does_not_save_rule(client):

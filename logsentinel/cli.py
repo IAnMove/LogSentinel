@@ -14,7 +14,7 @@ from rich.text import Text
 import typer
 import yaml
 from logsentinel import __version__
-from logsentinel.config import Config, get_default_config_dir
+from logsentinel.config import Config, get_default_config_dir, get_default_data_dir
 from logsentinel.core.engine import SentinelEngine
 from logsentinel.core.models import (
     Alert,
@@ -85,7 +85,11 @@ def print_alert_card(alert: Alert) -> None:
 def run(
     config_file: Optional[str] = typer.Option(None, "--config", "-c", help="Path to config.yaml"),
 ) -> None:
-    """Start real-time monitoring of Linux logs."""
+    """Legacy monitor. Prefer `logsentinel portal` for the current product."""
+    console.print(
+        "[yellow]The 'run' command is the legacy engine with a separate database. "
+        "Use `logsentinel portal` for the current observatory.[/yellow]"
+    )
     cfg = Config.load(config_file)
     console.print(Panel.fit(
         f"[bold cyan]LogSentinel v{__version__}[/bold cyan] [green]ONLINE[/green]\n"
@@ -523,27 +527,90 @@ def config_init(
 
 # --- Service Subcommands ---
 
+SYSTEM_UNIT_DIR = Path("/etc/systemd/system")
+
+# Applied to every generated unit. A log reader needs no privilege beyond reading
+# the files it was granted, so the unit drops capabilities and write access up front
+# instead of relying on the operator to remember.
+SERVICE_HARDENING = """NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+UMask=0077"""
+
+
 @service_app.command(name="install")
 def service_install(
     system: bool = typer.Option(False, "--system", help="Install system-wide service (/etc/systemd/system)"),
+    run_as: Optional[str] = typer.Option(None, "--run-as", help="Account for a system service (default: current user)"),
+    allow_root: bool = typer.Option(False, "--allow-root", help="Permit a system service running as root"),
+    legacy: bool = typer.Option(False, "--legacy", help="Install the old CLI monitor instead of the portal"),
 ) -> None:
-    """Generate and install systemd service unit."""
+    """Generate and install a systemd user or system unit for the portal."""
+    import getpass
+
+    account = ""
+    if system:
+        # A system unit without User= runs as root. Reading logs never requires that,
+        # so name the account explicitly and refuse root unless it is asked for.
+        account = run_as or getpass.getuser()
+        if account == "root" and not allow_root:
+            console.print(
+                "[red]A system service would run as root.[/red] Pass --run-as with a "
+                "dedicated account that can read the logs, or --allow-root to accept it."
+            )
+            raise typer.Exit(1)
+    elif run_as:
+        raise typer.BadParameter("--run-as applies to --system units; a user unit runs as you")
+
+    identity = "" if not account or account == "root" else f"User={account}\nGroup={account}\n"
+    # The daemon resolves its data directory from the running account's home, so only
+    # grant write access when this install knows that path: the account is ours.
+    own_account = not account or account == getpass.getuser()
+    data_root = get_default_data_dir() if legacy else Path.home() / ".local/share/logsentinel"
+    writable = f"ReadWritePaths={data_root}\n" if own_account else ""
+    if legacy:
+        start = f"{sys.executable} -m logsentinel.cli run"
+        description = "LogSentinel legacy log monitor"
+    else:
+        start = (
+            f"{sys.executable} -m logsentinel.cli portal "
+            f"--data-dir {Path(data_root) / 'portal'} --port 8765"
+        )
+        description = "LogSentinel local log review portal"
     unit_content = f"""[Unit]
-Description=LogSentinel AI Log Monitoring Daemon
+Description={description}
 After=network.target
 
 [Service]
 Type=simple
-ExecStart={sys.executable} -m logsentinel.cli run
-Restart=always
+{identity}ExecStart={start}
+Restart=on-failure
 RestartSec=5s
 Environment=PYTHONUNBUFFERED=1
+{writable}{SERVICE_HARDENING}
 
 [Install]
 WantedBy=default.target
 """
     if system:
-        unit_dir = Path("/etc/systemd/system")
+        unit_dir = SYSTEM_UNIT_DIR
     else:
         unit_dir = Path.home() / ".config" / "systemd" / "user"
 
@@ -554,6 +621,11 @@ WantedBy=default.target
         f.write(unit_content)
 
     console.print(f"[green]✓ Systemd unit written to:[/green] {unit_file}")
+    if account and not own_account:
+        console.print(
+            f"[yellow]Add ReadWritePaths for the data directory of {account}[/yellow] "
+            "before starting; the unit grants no write access yet."
+        )
     if not system:
         console.print("[cyan]To enable and start:[/cyan]")
         console.print("  systemctl --user daemon-reload")
@@ -564,17 +636,81 @@ WantedBy=default.target
         console.print("  sudo systemctl enable --now logsentinel")
 
 
+LOOPBACK = ("127.0.0.1", "::1", "localhost")
+
+
+def _split_listen(value: str) -> tuple[str, int]:
+    """Split HOST:PORT, accepting a bracketed IPv6 literal."""
+    host, _, port = value.rpartition(":")
+    host = host.strip("[]")
+    if not host or not port.isdigit() or not 1 <= int(port) <= 65535:
+        raise typer.BadParameter("Use HOST:PORT, for example 0.0.0.0:8767")
+    return host, int(port)
+
+
 @app.command(name="portal")
 def portal(data_dir: str = typer.Option("~/.local/share/logsentinel/portal", "--data-dir"),
-           port: int = typer.Option(8765, "--port")) -> None:
+           port: int = typer.Option(8765, "--port"),
+           ingest_listen: Optional[str] = typer.Option(None, "--ingest-listen", help="HOST:PORT serving reception only, separate from the panel"),
+           tls_cert: Optional[str] = typer.Option(None, "--tls-cert", help="Certificate for the reception listener"),
+           tls_key: Optional[str] = typer.Option(None, "--tls-key", help="Private key for the reception listener")) -> None:
     """Run the local portal and its independent monitoring workers."""
     import uvicorn
     from logsentinel.portal.app import create_app
+    if (tls_cert or tls_key) and not ingest_listen:
+        raise typer.BadParameter("--tls-cert and --tls-key apply to --ingest-listen")
+    if bool(tls_cert) != bool(tls_key):
+        raise typer.BadParameter("Give both --tls-cert and --tls-key")
+    ingest_host = ingest_port = None
+    if ingest_listen:
+        ingest_host, ingest_port = _split_listen(ingest_listen)
+        # Loopback stays open for an SSH tunnel and for local testing. Anything
+        # reachable from the network carries source tokens, so it needs TLS.
+        if ingest_host not in LOOPBACK and not tls_cert:
+            raise typer.BadParameter(
+                "A reception listener outside loopback requires --tls-cert and --tls-key"
+            )
+        for label, path in (("certificate", tls_cert), ("private key", tls_key)):
+            if path and not Path(path).expanduser().is_file():
+                raise typer.BadParameter(f"Cannot read the TLS {label}: {path}")
     application = create_app(data_dir)
     console.print(f"Portal: http://127.0.0.1:{port}")
-    console.print("Access key (enter in the local login form):", markup=False)
-    console.print(application.state.store.meta("admin_token"), markup=False)
-    uvicorn.run(application, host="127.0.0.1", port=port, proxy_headers=False)
+    # stdout is often captured by journald and then read back as log evidence.
+    # Keep the bootstrap credential in an owner-only local file instead.
+    key_path = application.state.store.write_access_key()
+    console.print("Read the access key for local login from:", key_path, markup=False)
+    if not ingest_listen:
+        uvicorn.run(application, host="127.0.0.1", port=port, proxy_headers=False)
+        return
+
+    from logsentinel.portal.ingest import create_ingest_app
+
+    scheme = "https" if tls_cert else "http"
+    console.print(f"Reception: {scheme}://{ingest_host}:{ingest_port} (senders only)")
+    servers = [
+        uvicorn.Server(
+            uvicorn.Config(
+                application, host="127.0.0.1", port=port, proxy_headers=False
+            )
+        ),
+        uvicorn.Server(
+            uvicorn.Config(
+                create_ingest_app(
+                    application.state.store, application.state.telemetry
+                ),
+                host=ingest_host,
+                port=ingest_port,
+                proxy_headers=False,
+                ssl_certfile=tls_cert,
+                ssl_keyfile=tls_key,
+            )
+        ),
+    ]
+
+    async def serve():
+        await asyncio.gather(*(server.serve() for server in servers))
+
+    asyncio.run(serve())
 
 
 @app.command(name="forward")
@@ -609,6 +745,112 @@ def metrics_forward_command(
     asyncio.run(forward_metrics(receiver, machine_id, token, spool, interval, disk, once))
 
 
+@app.command(name="enrollment-package")
+def enrollment_package(
+    source_id: str = typer.Option(..., "--source-id", help="Push source this package enrolls"),
+    receiver: str = typer.Option(..., "--receiver", help="Address the sender will reach, e.g. https://central.lan:8767"),
+    data_dir: str = typer.Option("~/.local/share/logsentinel/portal", "--data-dir"),
+    ca_cert: Optional[str] = typer.Option(None, "--ca-cert", help="PEM certificate the sender must trust"),
+    validity: int = typer.Option(3600, "--validity", min=60, max=604800, help="Seconds the code stays valid"),
+    out: str = typer.Option(..., "--out", help="Where to write the package"),
+) -> None:
+    """Write the onboarding package a sender imports. Run this on the central."""
+    import json
+    from logsentinel.portal.store import Store
+    from logsentinel.portal.enroll import issue_package
+    certificate = Path(ca_cert).expanduser().read_text() if ca_cert else ""
+    try:
+        package = issue_package(Store(data_dir), source_id, receiver, certificate, validity)
+    except ValueError as refusal:
+        raise typer.BadParameter(str(refusal))
+    target = Path(out).expanduser()
+    fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as handle:
+        json.dump(package, handle, indent=2)
+    console.print(f"[green]\u2713 Package written to:[/green] {target}")
+    console.print("Deliver it over a channel you trust; it holds a single-use code, not the credential.")
+    if package.get("fingerprint"):
+        console.print("Certificate fingerprint:", package["fingerprint"], markup=False)
+
+
+@app.command(name="enroll")
+def enroll_command(
+    package_file: str = typer.Argument(..., help="Package written by the central"),
+    spool: str = typer.Option(..., "--spool", help="Directory holding this sender's queue and credential"),
+) -> None:
+    """Redeem an onboarding package and store this sender's credential."""
+    import json
+    from logsentinel.portal.enrollment_client import claim
+    package = json.loads(Path(package_file).expanduser().read_text())
+    try:
+        result = claim(package, Path(spool).expanduser())
+    except ValueError as refusal:
+        console.print(f"[red]{refusal}[/red]")
+        raise typer.Exit(1)
+    console.print(f"[green]\u2713 Enrolled as source[/green] {result['source_id']}")
+    console.print("Credential stored in:", result["token_path"], markup=False)
+    if result.get("ca_path"):
+        console.print("Trusted certificate stored in:", result["ca_path"], markup=False)
+    console.print("[cyan]Start forwarding with:[/cyan]")
+    console.print(
+        f"  LOGSENTINEL_PUSH_TOKEN=$(cat {result['token_path']}) logsentinel forward /path/app.log "
+        f"--receiver {result['receiver']} --source-id {result['source_id']} --spool {spool}"
+    )
+
+
+@app.command(name="prepare-host")
+def prepare_host(
+    account: str = typer.Option("logsentinel-agent", "--account", help="System account the agent will run as"),
+    source: list[str] = typer.Option(None, "--source", help="Log file or directory to grant read access to"),
+    journal: bool = typer.Option(False, "--journal", help="Also grant read access to the whole systemd journal"),
+    apply_changes: bool = typer.Option(False, "--apply", help="Make the changes; without it nothing is touched"),
+) -> None:
+    """Create the agent's account and grant it read access. Shows the plan before acting."""
+    from logsentinel import hostprep
+    try:
+        targets = [hostprep.check_source(item) for item in (source or [])]
+    except ValueError as refusal:
+        raise typer.BadParameter(str(refusal))
+    if not targets and not journal:
+        raise typer.BadParameter("Name at least one --source or pass --journal")
+    steps = hostprep.plan(account, targets, journal)
+
+    table = Table(title="Planned changes", show_lines=False)
+    table.add_column("Command", style="cyan", overflow="fold")
+    table.add_column("Why", overflow="fold")
+    for step in steps:
+        table.add_row(" ".join(step["command"]), step["why"])
+    console.print(table)
+    for note in hostprep.rotation_notes(targets, account):
+        console.print(f"[yellow]Note:[/yellow] {note}")
+    if not apply_changes:
+        console.print("[yellow]Nothing was changed.[/yellow] Re-run with --apply as root to make it so.")
+        return
+    try:
+        hostprep.apply(steps)
+    except PermissionError as refusal:
+        console.print(f"[red]{refusal}[/red]")
+        raise typer.Exit(1)
+    except RuntimeError as failure:
+        console.print(f"[red]Stopped: {failure}[/red]")
+        raise typer.Exit(1)
+
+    console.print("[green]\u2713 Applied.[/green] Reading back as the account itself:")
+    unreadable = []
+    for check in hostprep.verify(account, targets, journal):
+        mark = "[green]readable[/green]" if check["readable"] else "[red]NOT readable[/red]"
+        console.print(f"  {check['target']}: {mark}")
+        if not check["readable"]:
+            unreadable.append(check["target"])
+    if unreadable:
+        console.print(
+            "[red]Some sources are still unreachable.[/red] Check the directories above them "
+            "and whether the owning program restricts its files further."
+        )
+        raise typer.Exit(1)
+    console.print(f"[cyan]Install the service with:[/cyan] logsentinel service install --system --run-as {account}")
+
+
 @app.command(name="spool-status")
 def spool_status(spool: str = typer.Option(..., "--spool")) -> None:
     """Read sender queue counts and errors without opening or changing the spool."""
@@ -641,7 +883,16 @@ def restore_backup(backup: str, data_dir: str = typer.Option(..., "--data-dir"))
     target.mkdir(mode=0o700, parents=True)
     shutil.copyfile(source, target / "sentinel.db")
     os.chmod(target / "sentinel.db", 0o600)
-    console.print(f"Restored to {target}. The backup includes secrets; rotate sender/admin tokens if needed.", markup=False)
+    from logsentinel.portal.store import Store
+
+    restored = Store(target)
+    restored.write_access_key()
+    console.print(
+        f"Restored to {target}. The backup includes secrets and the previous "
+        "access key; rotate the access key, sender tokens and notification "
+        "credentials before using this copy.",
+        markup=False,
+    )
 
 
 def main() -> None:

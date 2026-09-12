@@ -1,11 +1,25 @@
 """Validated portal contracts. Secrets never belong to public representations."""
 
 from __future__ import annotations
+import ipaddress
 from typing import Literal
 from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
 from pydantic import BaseModel, Field, ConfigDict, field_validator, model_validator
 from logsentinel.config import LLMConfig
+
+METADATA_HOSTS = {
+    "metadata.google.internal",
+    "metadata.goog",
+    "instance-data",
+}
+METADATA_NETWORKS = (
+    ipaddress.ip_network("169.254.0.0/16"),
+    ipaddress.ip_network("fe80::/10"),
+    ipaddress.ip_network("0.0.0.0/8"),
+    ipaddress.ip_network("255.255.255.255/32"),
+    ipaddress.ip_network("100.100.100.200/32"),
+)
 
 
 class Model(BaseModel):
@@ -64,13 +78,22 @@ class Settings(Model):
     enabled: bool = False
     language: Literal["en", "es"] = "en"
     llm: LLMConfig = Field(default_factory=LLMConfig)
-    interval_seconds: int = Field(default=300, ge=5, le=86400)
+    interval_seconds: int = Field(default=60, ge=5, le=86400)
     context_tokens: int = Field(default=8192, ge=2048, le=1_000_000)
     input_budget: int = Field(default=5000, ge=512, le=500_000)
     max_events: int = Field(default=500, ge=10, le=5000)
     max_calls: int = Field(default=3, ge=1, le=10)
+    adaptive_batching: bool = True
+    target_batch_seconds: int = Field(default=30, ge=5, le=240)
+    cycle_budget_seconds: int = Field(default=90, ge=5, le=3600)
+    triage_thinking: bool = False
+    verification: Literal["important", "all", "manual"] = "important"
     retention_days: int = Field(default=30, ge=1, le=3650)
     disk_limit_mb: int = Field(default=1024, ge=32, le=1_000_000)
+    # Per sender, so one noisy or compromised machine cannot spend the shared
+    # disk quota and the review budget on its own.
+    sender_mb_per_hour: int = Field(default=256, ge=1, le=1_000_000)
+    sender_events_per_hour: int = Field(default=200_000, ge=100, le=100_000_000)
     sensitivity: Literal["light", "balanced", "thorough"] = "balanced"
     remote_allowed: bool = False
     health_alerts: bool = True
@@ -87,16 +110,33 @@ class Settings(Model):
         return self
 
 
+def _blocked_ip(address):
+    ip = ipaddress.ip_address(address)
+    mapped = getattr(ip, "ipv4_mapped", None)
+    if mapped is not None:
+        ip = mapped
+    return any(ip in network for network in METADATA_NETWORKS)
+
+
 def check_url(value):
     p = urlsplit(value)
+    host = (p.hostname or "").rstrip(".").lower()
     if (
         p.scheme not in ("http", "https")
-        or not p.hostname
+        or not host
         or p.username
         or p.password
         or p.fragment
     ):
         raise ValueError("Use an HTTP(S) URL without embedded credentials or fragment")
+    if host in METADATA_HOSTS:
+        raise ValueError("This URL points at a cloud metadata service")
+    try:
+        blocked = _blocked_ip(host)
+    except ValueError:
+        blocked = False
+    if blocked:
+        raise ValueError("This URL points at a link-local or metadata address")
     return value
 
 
@@ -189,7 +229,7 @@ def merge_destination(old, patch, clear):
 class Rule(Model):
     name: str = Field(min_length=1, max_length=120)
     action: Literal["mute", "exclude"] = "mute"
-    kind: Literal["problem", "regex", "ip"] = "regex"
+    kind: Literal["problem", "regex", "ip", "service"] = "regex"
     pattern: str = Field(min_length=1, max_length=1000)
     machine_id: str = ""
     source_id: str = ""

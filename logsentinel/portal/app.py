@@ -15,12 +15,11 @@ from urllib.parse import urlsplit
 
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
-from fastapi.staticfiles import StaticFiles
 from pydantic import ValidationError
 
 from .store import Store, dumps, uid
 from .models import Machine, Source, Destination, Rule, Settings, merge_destination
-from .collect import Collector, discovery, normalize
+from .collect import Collector, discovery
 from .analysis import Analyzer, ReviewClient, safe_error
 from .monitor import Monitor
 from .problem_context import context_for, chat_system, validate_chat
@@ -36,8 +35,18 @@ from .notify import Outbox
 from .health import HealthMonitor
 from .widget_api import register_widget
 from .capacity import capacity_report
-from .rules import validate_rule, matches, excluded, redact, sanitize
 from .omarchy_detect import host_javascript
+from .rules import (
+    validate_rule,
+    matches,
+    excluded,
+    redact,
+    sanitize,
+    protected_secrets,
+    NOISE_PRESETS,
+)
+from .ingest import register_ingest
+from .enroll import register_enrollment
 
 STATIC = Path(__file__).parent / "static"
 MODELS = {
@@ -195,6 +204,7 @@ def create_app(directory, background=True):
     app.state.monitor = monitor
     app.state.outbox = outbox
     app.state.health = health_monitor
+    app.state.sessions = sessions
     register_telemetry(app, telemetry)
     register_disk_info(app, disk_scans)
     register_widget(app, store, monitor, telemetry, health_monitor)
@@ -238,10 +248,22 @@ def create_app(directory, background=True):
                 parts.append(chunk)
             request._body = b"".join(parts)
         path = request.url.path
-        if path.startswith("/api/"):
-            token = request.cookies.get("sentinel_session", "")
-            if sessions.get(token, 0) < time.time():
-                return JSONResponse({"detail": "Login required"}, status_code=401)
+        now = time.time()
+        for token, exp in list(sessions.items()):
+            if exp < now:
+                sessions.pop(token, None)
+        for ip, stamps in list(attempts.items()):
+            recent = [x for x in stamps if x > now - 60]
+            if recent:
+                attempts[ip] = recent
+            else:
+                attempts.pop(ip, None)
+        login_post = path == "/login" and request.method == "POST"
+        if login_post or path.startswith("/api/"):
+            if path.startswith("/api/"):
+                token = request.cookies.get("sentinel_session", "")
+                if sessions.get(token, 0) < now:
+                    return JSONResponse({"detail": "Login required"}, status_code=401)
             if request.method not in ("GET", "HEAD"):
                 origin = request.headers.get("origin")
                 if origin and origin.rstrip("/") != str(request.base_url).rstrip("/"):
@@ -281,10 +303,12 @@ def create_app(directory, background=True):
         return FileResponse(STATIC / "index.html")
 
     @app.get("/omarchy-host.js")
-    def omarchy_host_js():
-        return PlainTextResponse(host_javascript(), media_type="text/javascript")
+    def omarchy_host():
+        return PlainTextResponse(host_javascript(), media_type="application/javascript")
 
-    app.mount("/static", StaticFiles(directory=STATIC), name="static")
+    from .public_static import PublicStaticFiles
+
+    app.mount("/static", PublicStaticFiles(directory=STATIC), name="static")
 
     @app.post("/login")
     async def login(request: Request):
@@ -323,6 +347,15 @@ def create_app(directory, background=True):
         result = JSONResponse({"ok": True})
         result.delete_cookie("sentinel_session")
         return result
+
+    @app.post("/api/access-key/rotate")
+    def rotate_access_key():
+        token = store.rotate_admin_token()
+        sessions.clear()
+        return {
+            "token": token,
+            "message": "Shown once. Previous access key is now invalid and open sessions were signed out.",
+        }
 
     @app.get("/api/state")
     def state():
@@ -365,6 +398,7 @@ def create_app(directory, background=True):
             obj = store.get("source", source)
             if not obj or (machine and obj["machine_id"] != machine):
                 raise HTTPException(400, "Source does not belong to machine")
+        warning = ""
         if kind == "rule":
             validate_rule(Rule(**data))
         if kind == "source" and data["kind"] in ("file", "folder"):
@@ -373,8 +407,25 @@ def create_app(directory, background=True):
                 raise HTTPException(
                     400, "The application data directory cannot be a log source"
                 )
+            names = {"id_rsa", "id_ed25519", "id_ecdsa", "id_dsa", "shadow", "gshadow", "sudoers"}
+            blocked = (
+                "/etc/shadow",
+                "/etc/gshadow",
+                "/etc/sudoers",
+                "/etc/passwd",
+            )
+            if path.name in names or str(path) in blocked:
+                raise HTTPException(
+                    400, "Refusing to ingest this path as a log source"
+                )
+            unusual = any(
+                path == Path(root) or path.is_relative_to(root)
+                for root in ("/etc", "/root", "/proc", "/sys", "/dev")
+            )
+            if unusual:
+                warning = "Esta ruta no es un sitio típico de logs. El proceso leerá lo que pueda abrir."
             data["path"] = str(path)
-        return data
+        return data, warning
 
     @app.post("/api/objects/{kind}")
     async def save_object(kind: str, request: Request):
@@ -413,7 +464,7 @@ def create_app(directory, background=True):
             or (old and old["kind"] in ("metrics", "health"))
         ):
             raise HTTPException(400, "Manage this source in Metrics or Health")
-        scoped(kind, data)
+        data, warning = scoped(kind, data)
         if kind == "source" and data["kind"] == "journald" and data["enabled"]:
             if any(
                 s["kind"] == "journald" and s["enabled"] and s["id"] != id
@@ -437,7 +488,10 @@ def create_app(directory, background=True):
         id = store.put(kind, data, id)
         if kind == "source" and (not old or not old["enabled"] and data["enabled"]):
             store.set_meta("health_since:source:" + id, str(time.time()))
-        return public(kind, dict(data, id=id))
+        result = public(kind, dict(data, id=id))
+        if warning:
+            result["warning"] = warning
+        return result
 
     @app.delete("/api/objects/{kind}/{id}")
     def remove(kind: str, id: str):
@@ -779,7 +833,7 @@ def create_app(directory, background=True):
                 if not q or q.casefold() in e.get("message", "").casefold()
             )
         return {
-            "events": sanitize(rows, (store.settings().llm.api_key,)),
+            "events": sanitize(rows, protected_secrets(store)),
             "search_scope": "retained events",
             "offset": offset,
             "next_offset": cursor,
@@ -799,7 +853,7 @@ def create_app(directory, background=True):
             args.extend([min(max(limit, 1), 100), max(0, offset)])
             return sanitize(
                 [dict(r) for r in db.execute(query, args)],
-                (store.settings().llm.api_key,),
+                protected_secrets(store),
             )
 
     @app.get("/api/problems/{id}")
@@ -813,7 +867,7 @@ def create_app(directory, background=True):
         p["investigations"] = [
             j for j in store.objects("investigation") if j["problem_id"] == id
         ][-10:]
-        return sanitize(p, (store.settings().llm.api_key,))
+        return sanitize(p, protected_secrets(store))
 
     @app.get("/api/problems/{id}/investigations")
     def investigations(id: str):
@@ -821,7 +875,7 @@ def create_app(directory, background=True):
             raise HTTPException(404)
         return sanitize(
             [j for j in store.objects("investigation") if j["problem_id"] == id][-10:],
-            (store.settings().llm.api_key,),
+            protected_secrets(store),
         )
 
     @app.post("/api/problems/{id}/investigations")
@@ -830,7 +884,7 @@ def create_app(directory, background=True):
             raise HTTPException(404)
         options = InvestigationRequest(**(await request.json()))
         return sanitize(
-            researcher.enqueue(id, options), (store.settings().llm.api_key,)
+            researcher.enqueue(id, options), protected_secrets(store)
         )
 
     @app.post("/api/problems/{id}/resolve")
@@ -904,9 +958,40 @@ def create_app(directory, background=True):
             "tested": len(rows),
             "matched": len(yes),
             "sample": True,
-            "matches": sanitize(yes[:5], (store.settings().llm.api_key,)),
-            "nonmatches": sanitize(no[:5], (store.settings().llm.api_key,)),
+            "matches": sanitize(yes[:5], protected_secrets(store)),
+            "nonmatches": sanitize(no[:5], protected_secrets(store)),
         }
+
+    @app.get("/api/rule-presets")
+    def rule_presets():
+        return list(NOISE_PRESETS)
+
+    @app.post("/api/rule-presets/{id}")
+    async def apply_rule_preset(id: str, request: Request):
+        preset = next((p for p in NOISE_PRESETS if p["id"] == id), None)
+        if not preset:
+            raise HTTPException(404, "Unknown preset")
+        body = await request.json() if await request.body() else {}
+        machine_id = body.get("machine_id") or ""
+        if machine_id and not store.get("machine", machine_id):
+            raise HTTPException(400, "Unknown machine")
+        name = preset["name"]
+        if any(
+            r["name"] == name and r.get("machine_id", "") == machine_id
+            for r in store.objects("rule")
+        ):
+            raise HTTPException(409, "This preset is already present")
+        data = Rule(
+            name=name,
+            action=preset["action"],
+            kind=preset["kind"],
+            pattern=preset["pattern"],
+            machine_id=machine_id,
+            enabled=True,
+        ).model_dump()
+        rid = store.put("rule", data)
+        store.audit("apply_rule_preset", id)
+        return public("rule", dict(data, id=rid))
 
     @app.post("/api/reanalyze")
     async def reanalyze(request: Request):
@@ -914,11 +999,21 @@ def create_app(directory, background=True):
         source = store.get("source", body.get("source_id", ""))
         if not source:
             raise HTTPException(400, "Select a source")
-        rows = store.events(source_id=source["id"], limit=500)
-        ids = [e["id"] for e in rows if not excluded(store, e)]
-        store.mark(ids, "pending")
-        store.audit("reanalyze", source["id"], str(len(ids)))
-        return {"scheduled": len(ids), "limit": 500}
+        if not store.monitoring_active(source["machine_id"]):
+            raise HTTPException(409, "Machine monitoring is paused")
+        # Schedule the entire retained scope by state. The worker applies the
+        # current filters in bounded batches; active frozen jobs keep ownership.
+        with store.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            cursor = db.execute(
+                "UPDATE events SET status='pending' WHERE source_id=? AND status IN ('capacity','oversized','sampled','excluded','error') "
+                "AND id NOT IN (SELECT value FROM jobs j,json_each(j.event_ids) WHERE j.status IN ('pending','running','retry'))",
+                (source["id"],),
+            )
+            count = cursor.rowcount
+        store.audit("reanalyze", source["id"], str(count))
+        monitor.next_due = time.time()
+        return {"scheduled": count, "scope": "all_retained_unreviewed", "limit": None}
 
     @app.post("/api/destinations/{id}/test")
     async def test_destination(id: str):
@@ -950,7 +1045,7 @@ def create_app(directory, background=True):
     @app.get("/api/chat/history")
     def chat_history(machine_id: str = "", problem_id: str = ""):
         return [
-            sanitize(c, (store.settings().llm.api_key,))
+            sanitize(c, protected_secrets(store))
             for c in store.objects("chat")
             if (not machine_id or c["machine_id"] == machine_id)
             and c.get("problem_id", "") == problem_id
@@ -1123,11 +1218,14 @@ def create_app(directory, background=True):
                 config=cfg,
             )
         )
-        proposal = result.get("filter")
+        from .injection import sanitize_chat_filter
+
+        proposal = sanitize_chat_filter(result.get("filter"))
         if proposal:
             proposal = validate_rule(
                 Rule(**dict(proposal, machine_id=machine, source_id=source))
             ).model_dump()
+            proposal = sanitize_chat_filter(proposal)
         reply = {
             "answer": redact(result["answer"], (store.settings().llm.api_key,)),
             "evidence_ids": result["evidence_ids"],
@@ -1215,82 +1313,8 @@ def create_app(directory, background=True):
             "message": "Shown once. Previous token is now invalid.",
         }
 
-    def push_source(id, request):
-        token = request.headers.get("authorization", "").removeprefix("Bearer ")
-        expected = store.meta("push:" + id)
-        if not expected or not hmac.compare_digest(
-            hashlib.sha256(token.encode()).hexdigest(), expected
-        ):
-            raise HTTPException(401)
-        source = store.get("source", id)
-        if not source or source["kind"] != "push" or not source["enabled"]:
-            raise HTTPException(409, "Source disabled")
-        if not store.monitoring_active(source["machine_id"]):
-            raise HTTPException(
-                409, "Machine monitoring is paused; retain and retry events"
-            )
-        return source
-
-    @app.post("/heartbeat/{id}")
-    async def heartbeat(id: str, request: Request):
-        push_source(id, request)
-        body = await request.json()
-        if (
-            not isinstance(body, dict)
-            or type(body.get("ok")) is not bool
-            or type(body.get("pending")) is not int
-            or not 0 <= body["pending"] <= 1000000000
-            or set(body) != {"ok", "pending"}
-        ):
-            raise HTTPException(
-                400, "Send ok (boolean) and pending (non-negative integer)"
-            )
-        old = json.loads(store.meta("health:" + id) or "{}")
-        old.update(
-            heartbeat=time.time(),
-            status="ok" if body["ok"] else "error",
-            sender_pending=body["pending"],
-            error=(
-                ""
-                if body["ok"]
-                else "Sender capture failed; inspect its spool and permissions"
-            ),
-        )
-        store.set_meta("health:" + id, dumps(old))
-        return {"ok": True}
-
-    @app.post("/ingest/{id}")
-    async def ingest(id: str, request: Request):
-        source = push_source(id, request)
-        body = await request.json()
-        items = body.get("events", [])
-        if not isinstance(items, list) or not 1 <= len(items) <= 500:
-            raise HTTPException(400, "Send 1–500 events")
-        entries = []
-        for item in items:
-            if (
-                not isinstance(item, dict)
-                or not isinstance(item.get("id"), str)
-                or not 1 <= len(item["id"]) <= 200
-                or not isinstance(item.get("raw"), str)
-                or len(item["raw"].encode()) > 256_000
-            ):
-                raise HTTPException(400, "Invalid event")
-            entries.append(normalize(item["raw"], "remote", item["id"]))
-        try:
-            count = store.ingest(source, entries)
-        except OSError:
-            raise HTTPException(507, "Storage full; retain and retry these events")
-        old_health = json.loads(store.meta("health:" + id) or "{}")
-        old_health.update(checked=time.time(), new_events=count)
-        if "heartbeat" not in old_health:
-            old_health["status"] = "ok"
-        store.set_meta("health:" + id, dumps(old_health))
-        return {
-            "status": "durable",
-            "accepted": count,
-            "acknowledged": [item["id"] for item in items],
-        }
+    register_ingest(app, store)
+    register_enrollment(app, store)
 
     @app.post("/api/backup")
     async def backup():
@@ -1302,7 +1326,7 @@ def create_app(directory, background=True):
         store.audit("backup", path.name)
         return {
             "filename": path.name,
-            "message": "Backup contains original logs and configuration secrets. Stored locally with owner-only permissions.",
+            "message": "Backup contains original logs, the access key and configuration secrets. Stored locally with owner-only permissions. Rotate credentials after restore.",
         }
 
     @app.get("/api/templates/{kind}")

@@ -182,6 +182,8 @@ class JournaldCollector(BaseCollector):
             timestamp=ts,
             metadata={
                 "timestamp_inferred": inferred,
+                "systemd_unit": data.get("_SYSTEMD_UNIT"),
+                "systemd_user_unit": data.get("_SYSTEMD_USER_UNIT"),
                 "transport": data.get("_TRANSPORT"),
                 "exe": data.get("_EXE"),
                 "cmdline": data.get("_CMDLINE"),

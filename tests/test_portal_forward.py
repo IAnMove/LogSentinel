@@ -154,3 +154,34 @@ def test_heartbeat_is_source_bound_and_does_not_invent_events(tmp_path):
             headers=headers,
         )
         assert json.loads(store.meta("health:" + source))["status"] == "error"
+
+
+@pytest.mark.asyncio
+async def test_sender_waits_the_pause_the_receiver_asked_for(tmp_path, monkeypatch):
+    """A quota refusal names its own delay; exponential backoff must not shorten it."""
+    from logsentinel.portal.sender import run_workers
+
+    store = Store(tmp_path)
+    delays = []
+
+    async def record(seconds):
+        delays.append(seconds)
+        if len(delays) >= 3:
+            raise asyncio.CancelledError
+
+    monkeypatch.setattr(asyncio, "sleep", record)
+
+    async def capture():
+        # Hold the capture loop so only delivery reaches the patched sleep.
+        await asyncio.Event().wait()
+
+    results = iter([900, False, False])
+
+    async def deliver():
+        return next(results)
+
+    with pytest.raises(asyncio.CancelledError):
+        await run_workers(capture, deliver, 60, store, False)
+    # 900 is honoured verbatim, and backoff restarts from its base afterwards
+    # instead of inheriting the pause.
+    assert delays == [900, 4, 8]

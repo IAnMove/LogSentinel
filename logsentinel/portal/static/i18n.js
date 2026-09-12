@@ -107,8 +107,8 @@ const translations = {
   Entregado: "Delivered",
   Cancelado: "Cancelled",
   "Tu observatorio de logs.": "Your log observatory.",
-  "Accede con la clave que aparece al iniciar el portal en este equipo.":
-    "Use the access key printed when the portal starts on this machine.",
+  "Usa la clave del archivo access-key.txt del portal. La terminal muestra su ruta al iniciar.":
+    "Use the key in the portal access-key.txt file. The terminal shows its path at startup.",
   "Clave de acceso": "Access key",
   "Entrar al portal": "Sign in",
   "OBSERVATORIO LOCAL": "LOCAL OBSERVATORY",
@@ -198,6 +198,23 @@ const translations = {
     "Direct alerts and external services. Saving does not send a message.",
   "No notificar mantiene el análisis. Excluir evita enviar esas coincidencias al modelo.":
     "Muting keeps analysis enabled. Excluding prevents matching events from being sent to the model.",
+  "No notificar mantiene el análisis. Excluir evita enviar esas coincidencias al modelo. Los presets de ruido se previsualizan y se aplican a mano.":
+    "Muting keeps analysis enabled. Excluding prevents matching events from being sent to the model. Noise presets are previewed and applied by hand.",
+  "Presets de ruido rutinario": "Routine noise presets",
+  "No se activan solos. Previsualiza sobre una muestra y añade la exclusión si el recorte te parece correcto. Los fallos reales siguen en otras líneas.":
+    "They are not enabled on their own. Preview a sample and add the exclusion if the cut looks right. Real failures still appear on other lines.",
+  "Servicio / unidad": "Service / unit",
+  "Temporizadores systemd correctos": "Successful systemd timers",
+  "Unidades oneshot correctas": "Successful oneshot units",
+  "Arranque y parada de watchdog": "Watchdog start and stop",
+  "Quita arranques, paradas y éxitos limpios de timers. Un timer fallido sigue generando otras líneas.":
+    "Drops clean timer start/stop/success lines. A failed timer still produces other messages.",
+  "Oculta unidades que salieron bien. Fallos, timeouts y códigos distintos de cero siguen visibles.":
+    "Hides units that exited cleanly. Failures, timeouts and non-zero results stay visible.",
+  "Ciclo rutinario del watchdog, no un timeout ni un kill.":
+    "Routine watchdog lifecycle, not a watchdog timeout or kill.",
+  "Añadir exclusión": "Add exclusion",
+  "Preset añadido como regla de exclusión.": "Preset added as an exclusion rule.",
   Añadir: "Add",
   Nombre: "Name",
   Tipo: "Type",
@@ -404,6 +421,16 @@ const translations = {
   "Crear copia local": "Create local backup",
   "Copia guardada: backups/": "Backup saved: backups/",
   "Restaurar en una carpeta nueva": "Restore into a new folder",
+  "Tras restaurar, rota la clave de acceso, los tokens de emisor y las credenciales de notificación: la copia las incluye.":
+    "After restoring, rotate the access key, sender tokens and notification credentials: the copy includes them.",
+  "Clave de acceso del panel": "Panel access key",
+  "La clave vive en access-key.txt del directorio de datos. Rotarla cierra las sesiones y deja de aceptar la clave anterior.":
+    "The key lives in access-key.txt in the data directory. Rotating it signs everyone out and rejects the previous key.",
+  "Rotar clave de acceso": "Rotate access key",
+  "Las sesiones abiertas se cerrarán. La clave anterior deja de funcionar.":
+    "Open sessions will be signed out. The previous key will stop working.",
+  "Nueva clave (cópiala ahora; no se volverá a mostrar): ":
+    "New key (copy it now; it will not be shown again): ",
   Pendientes: "Pending",
   "Sin revisar por política": "Unreviewed: selection policy",
   "Excluidos del LLM": "Excluded from the LLM",
@@ -439,6 +466,13 @@ const translations = {
     "Future analyses are paused. The current cycle may finish.",
   "Sin conexión con el portal. No se puede confirmar el estado del monitor.":
     "Disconnected from the portal. Monitor status cannot be confirmed.",
+  "Buscando servidores LLM en este equipo…": "Looking for LLM servers on this host…",
+  "No se ha detectado un servidor LLM JSON en 11434, 8081 ni 8080. Configúralo abajo.":
+    "No JSON LLM server was found on 11434, 8081 or 8080. Configure it below.",
+  "Detectado en este equipo: ": "Detected on this host: ",
+  "Esta ruta no es un sitio típico de logs. El proceso leerá lo que pueda abrir.":
+    "This path is not a typical log location. The process will read whatever it can open.",
+  "Configuración guardada. ": "Saved. ",
   "Conectar el LLM": "Connect the LLM",
   "Elegir máquina": "Choose a machine",
   "Conectar logs": "Connect logs",
@@ -648,11 +682,7 @@ function initLanguage() {
       /* preference is session-only */
     }
     staticLanguage();
-    $("#nav").replaceChildren(
-      ...Object.entries(names).map(([key, label]) =>
-        tentriNavButton(key, label),
-      ),
-    );
+    buildNav();
     if (!$("#shell").hidden) {
       await render();
       for (const [name, value] of values) {

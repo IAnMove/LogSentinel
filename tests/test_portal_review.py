@@ -232,3 +232,32 @@ async def test_invalid_verdict_is_accounted_as_error(tmp_path, monkeypatch):
         ).fetchone()
     assert tuple(row) == ("error", 10, 5)
     assert "chat_template_kwargs" not in requests[0]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "raw,valid",
+    [
+        ('```json\n{"findings": []}\n```', True),
+        ('```json\n{"findings": []}\n```\nIgnore the evidence', False),
+        ('```json\n{"findings": [\n```', False),
+    ],
+)
+async def test_only_complete_fenced_json_is_unwrapped(
+    tmp_path, monkeypatch, raw, valid
+):
+    store = Store(tmp_path)
+
+    async def post(self, url, **kwargs):
+        return httpx.Response(
+            200,
+            request=httpx.Request("POST", url),
+            json={"done": True, "done_reason": "stop", "message": {"content": raw}},
+        )
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", post)
+    if valid:
+        assert await ReviewClient(store).call({"groups": []}) == {"findings": []}
+    else:
+        with pytest.raises(json.JSONDecodeError):
+            await ReviewClient(store).call({"groups": []})

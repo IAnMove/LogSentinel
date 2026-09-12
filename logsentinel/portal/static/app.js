@@ -7,6 +7,7 @@ const $ = (s) => document.querySelector(s),
     return n;
   };
 let S = {},
+  entering = true,
   view = "summary",
   scope = "",
   edit = null,
@@ -237,6 +238,9 @@ async function refresh() {
   await render();
 }
 function navigate(v) {
+  // Only a navigation animates the content in. A background refresh rebuilds
+  // the same view and must not flash.
+  entering = true;
   if (v === "chat") {
     chatProblemId = "";
     chatDraft = "";
@@ -249,9 +253,35 @@ function navigate(v) {
   $("#notice").hidden = true;
   render();
 }
-Object.entries(names).forEach(([key, label]) =>
-  $("#nav").append(tentriNavButton(key, label)),
-);
+// Eighteen flat entries made the rail a list to read rather than a place to
+// aim at, and it scrolled on a laptop. Grouping puts what you check daily at
+// the top and the things you set once further down. `names` still holds every
+// label, so page titles are unaffected by this order.
+const navGroups = [
+  {
+    label: ["Observar", "Watch"],
+    keys: ["summary", "problems", "events", "metrics", "capacity", "health", "activity"],
+  },
+  {
+    label: ["Configurar", "Configure"],
+    keys: ["machine", "source", "destination", "rule", "settings", "setup"],
+  },
+  {
+    label: ["Herramientas", "Tools"],
+    keys: ["chat", "backup", "appearance", "desktop", "about"],
+  },
+];
+// The rail is rebuilt when the language changes, so it is built in one place
+// and the group headings are translated at build time rather than at load.
+function buildNav() {
+  const rail = $("#nav");
+  rail.replaceChildren();
+  for (const group of navGroups) {
+    rail.append(el("p", bilingual(group.label[0], group.label[1]), "nav-group"));
+    for (const key of group.keys) rail.append(tentriNavButton(key, names[key]));
+  }
+}
+buildNav();
 $("#machine-scope").onchange = () => {
   if (view === "chat") {
     chatProblemId = "";
@@ -278,15 +308,19 @@ $("#login-form").onsubmit = async (e) => {
 };
 async function render() {
   const root = el("div");
+  if (entering) root.className = "view-enter";
+  entering = false;
   $("#content").replaceChildren(root);
   $("#monitor-status").hidden = view === "about";
   $(".scope").hidden = view === "about";
   $("#page-title").textContent =
     view === "problem_detail" ? t("Detalles del problema") : t(names[view]);
   updateTentriSection(view, $("#page-title").textContent);
-  [...$("#nav").children].forEach((n, i) =>
-    n.classList.toggle("active", Object.keys(names)[i] === view),
-  );
+  // Matched by view rather than by position, so the group headings between the
+  // buttons cannot shift which one reads as active.
+  $("#nav")
+    .querySelectorAll("button[data-view]")
+    .forEach((n) => n.classList.toggle("active", n.dataset.view === view));
   if (["machine", "source", "destination", "rule"].includes(view))
     return objectView(root);
   if (view === "summary") return summary(root);
@@ -508,7 +542,7 @@ function objectView(root) {
           "Avisos directos y servicios externos. Guardar no envía mensajes.",
         ),
         rule: t(
-          "No notificar mantiene el análisis. Excluir evita enviar esas coincidencias al modelo.",
+          "No notificar mantiene el análisis. Excluir evita enviar esas coincidencias al modelo. Los presets de ruido se previsualizan y se aplican a mano.",
         ),
       }[kind],
     ),
@@ -522,6 +556,7 @@ function objectView(root) {
     ),
   );
   root.append(bar);
+  if (kind === "rule") root.append(rulePresetPanel());
   root.append(
     table(
       kind === "machine"
@@ -574,13 +609,11 @@ function objectView(root) {
               }),
             );
           b.push(
-            button(t("Reanalizar retenidos"), async () => {
+            button(bilingual("Recuperar retenidos sin analizar", "Recover unreviewed retained logs"), async () => {
               const r = await api("/api/reanalyze", { source_id: obj.id });
               notice(
                 r.scheduled +
-                  t(" eventos programados (máximo ") +
-                  r.limit +
-                  ").",
+                  bilingual(" logs añadidos a la cola. Se procesarán por lotes; los ya analizados conservan su estado.", " logs added to the queue. They will run in batches; previously reviewed logs keep their status."),
               );
             }),
           );
@@ -787,6 +820,7 @@ function objectForm(kind, o) {
     add("kind", t("Coincidencia"), "select", o.kind || "regex", [
       ["regex", t("Expresión regular")],
       ["ip", t("IP exacta / CIDR")],
+      ["service", t("Servicio / unidad")],
       ["problem", t("ID de problema")],
     ]);
     add("pattern", t("Expresión / IP / ID"), "textarea", o.pattern);
@@ -834,10 +868,14 @@ function objectForm(kind, o) {
       const data =
         kind === "destination" ? notificationFormData(f) : formData(f);
       if (o.id) data.id = o.id;
-      await api("/api/objects/" + kind, data);
+      const saved = await api("/api/objects/" + kind, data);
       edit = null;
       await refresh();
-      notice(t("Configuración guardada."));
+      notice(
+        saved.warning
+          ? t("Configuración guardada. ") + t(saved.warning)
+          : t("Configuración guardada."),
+      );
     } catch (e) {
       notice(e.message, true);
     } finally {
@@ -907,15 +945,24 @@ function settingsView(root) {
     ],
   );
   add("max_calls", t("Máximo de llamadas por ciclo"), "number", c.max_calls);
+  add("adaptive_batching", bilingual("Ajustar lotes y espera al tiempo medido", "Adapt batches and waiting to measured time"), "checkbox", c.adaptive_batching);
+  add("target_batch_seconds", bilingual("Objetivo por llamada (segundos)", "Target per call (seconds)"), "number", c.target_batch_seconds);
+  add("cycle_budget_seconds", bilingual("Tiempo para despachar llamadas por ciclo (segundos)", "Call dispatch window per cycle (seconds)"), "number", c.cycle_budget_seconds);
+  add("triage_thinking", bilingual("Razonamiento prolongado en la primera revisión", "Extended thinking in the first review"), "checkbox", c.triage_thinking);
+  add("verification", bilingual("Verificar candidatos con originales", "Verify candidates against originals"), "select", c.verification, [
+    ["important", bilingual("Lotes con alertas altas o críticas", "Batches with high or critical alerts")],
+    ["all", bilingual("Todos los candidatos", "All candidates")],
+    ["manual", bilingual("Solo bajo petición", "Only on request")],
+  ]);
   add(
     "interval_seconds",
-    t("Intervalo entre ciclos (segundos)"),
+    bilingual("Espera máxima entre ciclos (segundos)", "Maximum wait between cycles (seconds)"),
     "number",
     c.interval_seconds,
   );
   add(
     "max_events",
-    t("Eventos admitidos por máquina/ciclo"),
+    bilingual("Originales candidatos por lote", "Candidate originals per batch"),
     "number",
     c.max_events,
   );
@@ -1289,6 +1336,58 @@ function activity(root) {
     ),
   );
 }
+function rulePresetPanel() {
+  const box = panel(t("Presets de ruido rutinario"));
+  box.append(
+    el(
+      "p",
+      t(
+        "No se activan solos. Previsualiza sobre una muestra y añade la exclusión si el recorte te parece correcto. Los fallos reales siguen en otras líneas.",
+      ),
+    ),
+  );
+  const list = el("div");
+  box.append(list);
+  api("/api/rule-presets").then((presets) => {
+    for (const preset of presets) {
+      const row = el("section", undefined, "card");
+      row.append(
+        el("strong", t(preset.name)),
+        el("p", t(preset.note), "subtle"),
+        el("pre", preset.pattern),
+        actions(
+          button(t("Vista previa de coincidencias"), async () => {
+            const r = await api("/api/rules/preview", {
+              name: preset.name,
+              action: preset.action,
+              kind: preset.kind,
+              pattern: preset.pattern,
+              machine_id: scope,
+              enabled: true,
+            });
+            modal(
+              t("Vista previa · muestra de ") +
+                r.tested +
+                t(" eventos, ") +
+                r.matched +
+                t(" coincidencias"),
+              el("pre", JSON.stringify(r, null, 2)),
+            );
+          }),
+          button(t("Añadir exclusión"), async () => {
+            await api("/api/rule-presets/" + preset.id, {
+              machine_id: scope,
+            });
+            await refresh();
+            notice(t("Preset añadido como regla de exclusión."));
+          }),
+        ),
+      );
+      list.append(row);
+    }
+  });
+  return box;
+}
 function backupView(root) {
   const p = panel(t("Copia coherente del observatorio"));
   p.append(
@@ -1308,6 +1407,33 @@ function backupView(root) {
     ),
     el("h3", t("Restaurar en una carpeta nueva")),
     el("pre", "logsentinel restore /ruta/backup.db --data-dir /ruta/nueva"),
+    el(
+      "p",
+      t(
+        "Tras restaurar, rota la clave de acceso, los tokens de emisor y las credenciales de notificación: la copia las incluye.",
+      ),
+    ),
+    el("h3", t("Clave de acceso del panel")),
+    el(
+      "p",
+      t(
+        "La clave vive en access-key.txt del directorio de datos. Rotarla cierra las sesiones y deja de aceptar la clave anterior.",
+      ),
+    ),
+    button(t("Rotar clave de acceso"), async () => {
+      if (
+        !confirm(
+          t(
+            "Las sesiones abiertas se cerrarán. La clave anterior deja de funcionar.",
+          ),
+        )
+      )
+        return;
+      const r = await api("/api/access-key/rotate", {});
+      notice(
+        t("Nueva clave (cópiala ahora; no se volverá a mostrar): ") + r.token,
+      );
+    }),
   );
   root.append(p);
 }
@@ -1327,6 +1453,19 @@ setInterval(async () => {
   }
 }, 5000);
 setInterval(() => {
-  if (!$("#shell").hidden && view === "summary" && !$("#modal").open)
-    refresh().catch((e) => notice(e.message, true));
+  if ($("#shell").hidden || view !== "summary" || $("#modal").open) return;
+  // This rebuilds the whole content section every 15 seconds. Keeping the data
+  // live is worth it; losing the reader's place is not. Stay out of the way
+  // while something inside is focused or text is selected, and put the page
+  // back where it was afterwards.
+  const active = document.activeElement;
+  if (active && active !== document.body && $("#content").contains(active)) return;
+  const selection = document.getSelection();
+  if (selection && !selection.isCollapsed) return;
+  const top = window.scrollY;
+  refresh()
+    .then(() => {
+      if (window.scrollY !== top) window.scrollTo(0, top);
+    })
+    .catch((e) => notice(e.message, true));
 }, 15000);

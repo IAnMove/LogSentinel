@@ -5,7 +5,8 @@ import pytest
 
 from test_portal_api import client, machine_source
 from logsentinel.portal.analysis import Analyzer, SYSTEM
-from logsentinel.portal.capacity import capacity_report
+from logsentinel.portal.capacity import capacity_report, coverage_signal, recent_coverage
+from logsentinel.portal.batch_budget import input_ceiling
 
 
 def job(store, machine, id, created, cfg=None, status="done", attempts=1):
@@ -107,10 +108,7 @@ def test_current_model_planning_excludes_previous_model_and_collecting_tail(clie
         and not r["analysis"]["errors"]
     )
     assert r["limits"]["effective_input_bytes"] == 5000
-    assert (
-        r["limits"]["input_ceiling_bytes"]
-        == 16384 - cfg.llm.max_tokens - len(SYSTEM.encode()) - 1024
-    )
+    assert r["limits"]["input_ceiling_bytes"] == input_ceiling(cfg, s.get("machine", m))
     assert all(x["machine_id"] == m for x in r["services"])
     # A config change starts a new measurement, not a zero-capacity verdict.
     c.post("/api/settings", json={"input_budget": 6000}).raise_for_status()
@@ -176,6 +174,48 @@ def test_duplicate_local_journal_is_blocked_across_machine_cards(client):
     assert capacity_report(s)["duplicate_journals"] == []
 
 
+def test_coverage_signal_flags_a_model_that_cannot_keep_up():
+    quiet = coverage_signal(
+        dict(
+            events=5,
+            capacity=0,
+            pending=1,
+            queued=0,
+            incoming_per_minute=1,
+            covered_per_minute=1,
+        )
+    )
+    assert quiet["level"] == "ok"
+    behind = coverage_signal(
+        dict(
+            events=100,
+            capacity=80,
+            pending=10,
+            queued=0,
+            incoming_per_minute=50,
+            covered_per_minute=5,
+        )
+    )
+    assert behind["level"] == "critical"
+    assert behind["reason"] == "model_behind"
+
+
+def test_coverage_gap_is_visible_without_failing_readiness(client):
+    c, s = client
+    m, source = machine_source(c)
+    now = time.time()
+    for i in range(40):
+        event(s, source, f"cap{i}", now - 60, "capacity")
+    report = capacity_report(s)
+    assert report["signal"]["level"] in ("warn", "critical")
+    assert recent_coverage(s)["level"] == report["signal"]["level"]
+    health = c.app.state.health.tick()
+    coverage = next(x for x in health["checks"] if x["key"] == "coverage")
+    assert coverage["bad"] is True
+    assert coverage["liveness"] is False
+    assert c.get("/healthz").json()["status"] == "ok"
+
+
 @pytest.mark.asyncio
 async def test_old_capacity_history_does_not_create_a_new_overload_warning(client):
     c, s = client
@@ -189,6 +229,6 @@ async def test_old_capacity_history_does_not_create_a_new_overload_warning(clien
 
     a.client.call = healthy
     await a.cycle()
-    assert len(s.events(status="capacity")) == 1
-    assert len(s.events(status="compact")) == 1
+    assert not s.events(status="capacity")
+    assert len(s.events(status="compact")) == 2
     assert not s.rows("problems")

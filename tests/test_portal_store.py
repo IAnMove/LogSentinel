@@ -41,15 +41,38 @@ def test_segment_cursor_and_dedup_survive_restart(setup):
     assert store.stats()["segments"]["compressed"] > 0
 
 
-def test_gzip_stability_and_import_idempotency(setup):
+def test_gzip_stability_and_import_idempotency(setup, monkeypatch):
     store, source, path = setup
     path = path.with_suffix(".log.gz")
     path.write_bytes(gzip.compress(b"one\ntwo\n"))
+
+    def refuse_slurp(*_args, **_kwargs):
+        raise AssertionError("compressed sources must be hashed in chunks")
+
+    monkeypatch.setattr(type(path), "read_bytes", refuse_slurp)
     c = Collector(store)
     assert c.file(source, path) == 0
     assert c.file(source, path) == 2
     assert c.file(source, path) == 0
     assert len(store.events()) == 2
+    assert store.cursor("s", str(path))["digest"]
+
+
+def test_gzip_expanded_limit_stops_without_stalling(setup, monkeypatch):
+    import logsentinel.portal.collect as collect
+
+    store, source, path = setup
+    path = path.with_suffix(".log.gz")
+    path.write_bytes(gzip.compress(b"one\ntwo\nthree\n"))
+    monkeypatch.setattr(collect, "MAX_EXPANDED_BYTES", 8)
+    c = Collector(store)
+    assert c.file(source, path) == 0
+    first = c.file(source, path)
+    assert first >= 1
+    cursor = store.cursor("s", str(path))
+    assert cursor["done"] is True
+    assert c.file(source, path) == 0
+    assert len(store.events()) == first
 
 
 def test_transaction_failure_does_not_advance_cursor(setup, monkeypatch):
@@ -130,3 +153,73 @@ def test_open_rotated_descriptor_keeps_late_writes(setup):
         assert collector.poll(source) == 0
     finally:
         collector.close()
+
+
+def _journal_source(store):
+    machine = store.objects("machine")[0]["id"]
+    return dict(
+        Source(
+            machine_id=machine,
+            name="journal",
+            kind="journald",
+            enabled=True,
+            history=True,
+        ).model_dump(),
+        id="journal",
+    )
+
+
+def _journalctl_output(payload):
+    def popen(cmd, stdout=None, stderr=None):
+        stdout.write(payload)
+        stdout.flush()
+
+        class Proc:
+            returncode = 0
+
+            def poll(self):
+                return 0
+
+            def terminate(self):
+                return None
+
+            def kill(self):
+                return None
+
+            def wait(self, timeout=None):
+                return 0
+
+        return Proc()
+
+    return popen
+
+
+def test_malformed_journal_line_does_not_stall_the_cursor(setup, monkeypatch):
+    store, _, _ = setup
+    source = _journal_source(store)
+    good = (
+        b'{"MESSAGE":"first","__CURSOR":"c1","SYSLOG_IDENTIFIER":"sshd"}\n'
+        b"this is not json\n"
+        b'{"MESSAGE":"second","__CURSOR":"c2","SYSLOG_IDENTIFIER":"sshd"}\n'
+        b"[1,2,3]\n"
+        b'{"MESSAGE":"third","__CURSOR":"c3","SYSLOG_IDENTIFIER":"sshd"}\n'
+    )
+    monkeypatch.setattr("logsentinel.portal.collect.subprocess.Popen", _journalctl_output(good))
+    collector = Collector(store)
+    assert collector.journal(source) == 3
+    assert [e["message"] for e in store.events()] == ["first", "second", "third"]
+    assert store.cursor("journal", "journal")["cursor"] == "c3"
+    with store.connect() as db:
+        skipped = db.execute(
+            "SELECT value FROM metrics WHERE source_id=? AND key='journal_skipped'",
+            ("journal",),
+        ).fetchone()
+    assert skipped[0] == 2
+
+    monkeypatch.setattr(
+        "logsentinel.portal.collect.subprocess.Popen",
+        _journalctl_output(b'{"not":"a log line"}\nnot-json\n'),
+    )
+    assert collector.journal(source) == 0
+    assert store.cursor("journal", "journal")["cursor"] == "c3"
+    assert [e["message"] for e in store.events()] == ["first", "second", "third"]

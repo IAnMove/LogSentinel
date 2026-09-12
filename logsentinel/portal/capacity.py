@@ -3,7 +3,7 @@
 import json
 import time
 
-from .analysis import SYSTEM
+from .batch_budget import input_ceiling as model_input_ceiling
 
 
 def review_signature(cfg):
@@ -23,9 +23,52 @@ def review_signature(cfg):
                 "max_events",
                 "max_calls",
                 "sensitivity",
+                "adaptive_batching",
+                "target_batch_seconds",
+                "cycle_budget_seconds",
+                "triage_thinking",
+                "verification",
             )
         ),
     )
+
+
+def coverage_signal(hour):
+    """Last-hour backlog vs review rate. Unreviewed is never a clean result."""
+    events = hour.get("events") or 0
+    backlog = (
+        (hour.get("capacity") or 0)
+        + (hour.get("pending") or 0)
+        + (hour.get("queued") or 0)
+    )
+    incoming = hour.get("incoming_per_minute") or 0
+    covered = hour.get("covered_per_minute") or 0
+    ratio = backlog / events if events else 0
+    behind = events >= 20 and (
+        ratio >= 0.2
+        or (incoming > 0 and covered * 2 < incoming and backlog >= 20)
+    )
+    if not behind:
+        level, reason = "ok", "low_volume" if events < 20 else "keeping_up"
+    elif ratio >= 0.5 or (incoming > 0 and covered * 5 < incoming):
+        level, reason = "critical", "model_behind"
+    else:
+        level, reason = "warn", "model_behind"
+    return dict(
+        level=level,
+        reason=reason,
+        events=events,
+        backlog=backlog,
+        ratio=round(ratio, 3),
+        incoming_per_minute=incoming,
+        covered_per_minute=covered,
+    )
+
+
+def recent_coverage(store, machine_id=""):
+    now = time.time()
+    with store.connect() as db:
+        return coverage_signal(_window(db, now - 3600, now, machine_id))
 
 
 def _window(db, start, end, machine_id):
@@ -46,6 +89,8 @@ def _window(db, start, end, machine_id):
         reviewed=statuses.get("compact", 0) + statuses.get("reviewed", 0),
         capacity=statuses.get("capacity", 0),
         pending=statuses.get("pending", 0),
+        queued=statuses.get("queued", 0),
+        oversized=statuses.get("oversized", 0),
         policy=statuses.get("sampled", 0),
         excluded=statuses.get("excluded", 0),
         error=statuses.get("error", 0),
@@ -146,8 +191,12 @@ def capacity_report(store, machine_id=""):
         if done
         else None
     )
-    input_ceiling = max(
-        0, cfg.context_tokens - cfg.llm.max_tokens - len(SYSTEM.encode()) - 1024
+    scoped_machines = [
+        m for m in store.objects("machine") if not machine_id or m["id"] == machine_id
+    ]
+    input_ceiling = min(
+        (model_input_ceiling(cfg, m) for m in scoped_machines),
+        default=model_input_ceiling(cfg),
     )
     journals = [s for s in sources if s["kind"] == "journald" and s["enabled"]]
     duplicate_journals = (
@@ -159,6 +208,7 @@ def capacity_report(store, machine_id=""):
     return dict(
         generated=now,
         **hour,
+        signal=coverage_signal(hour),
         services=services,
         analysis=usage,
         retained_capacity=retained_gap,

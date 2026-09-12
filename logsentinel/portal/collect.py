@@ -13,12 +13,24 @@ import time
 import threading
 from contextlib import nullcontext
 from pathlib import Path
+import httpx
 from logsentinel.collectors.file_tailer import FileTailerCollector
 from logsentinel.collectors.journald import JournaldCollector
 from logsentinel.config import JournaldSourceConfig
 from .store import dumps
 
 MAX_LINE = 256_000
+MAX_ARCHIVE_BYTES = 64 * 1024 * 1024
+MAX_EXPANDED_BYTES = 128 * 1024 * 1024
+HASH_CHUNK = 1024 * 1024
+
+
+def file_digest(path):
+    digest = hashlib.sha256()
+    with path.open("rb") as raw:
+        while chunk := raw.read(HASH_CHUNK):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def discovery():
@@ -37,9 +49,28 @@ def discovery():
         "/var/log/messages",
         "/var/log/kern.log",
     ]
+    llm = []
+    for provider, url, path in (
+        ("ollama", "http://127.0.0.1:11434", "/api/tags"),
+        ("llama.cpp", "http://127.0.0.1:8081", "/v1/models"),
+        ("llama.cpp", "http://127.0.0.1:8080", "/v1/models"),
+    ):
+        try:
+            with httpx.Client(
+                timeout=0.4, trust_env=False, follow_redirects=False
+            ) as client:
+                response = client.get(url + path)
+            if (
+                response.is_success
+                and "json" in response.headers.get("content-type", "").lower()
+            ):
+                llm.append({"provider": provider, "base_url": url, "reachable": True})
+        except httpx.HTTPError:
+            continue
     return {
         "hostname": os.uname().nodename,
         "os": info.get("PRETTY_NAME", "Linux"),
+        "llm": llm,
         "journalctl": bool(shutil.which("journalctl")),
         "files": [
             {"path": p, "readable": os.access(p, os.R_OK)}
@@ -216,11 +247,19 @@ class Collector:
             if old.get("done"):
                 return 0
             # A new archive is imported only after an unchanged polling interval.
-            if stat.st_size > 64 * 1024 * 1024:
+            if stat.st_size > MAX_ARCHIVE_BYTES:
                 raise ValueError("Archive exceeds 64 MiB input limit")
-            digest = hashlib.sha256(path.read_bytes()).hexdigest()
+            digest = old.get("digest") or file_digest(path)
             generation = "gz:" + digest
             offset = old.get("offset", 0)
+            if offset >= MAX_EXPANDED_BYTES:
+                self.store.ingest(
+                    source,
+                    [],
+                    key,
+                    dict(old, stamp=stamp, stable=True, done=True, digest=digest),
+                )
+                return 0
             opener = {".gz": gzip.open, ".xz": lzma.open, ".bz2": bz2.open}[path.suffix]
         else:
             generation = old.get(
@@ -248,6 +287,9 @@ class Collector:
             f.seek(offset)
             while used < source["max_batch_bytes"] and len(entries) < 1000:
                 begin = f.tell()
+                if compressed and begin >= MAX_EXPANDED_BYTES:
+                    done = True
+                    break
                 line = f.readline(MAX_LINE + 1)
                 if not line:
                     done = True
@@ -256,6 +298,10 @@ class Collector:
                     raise ValueError(
                         "Event exceeds 256 KB; change source format or explicit source limit policy"
                     )
+                if compressed and begin + len(line) > MAX_EXPANDED_BYTES:
+                    done = True
+                    f.seek(begin)
+                    break
                 if not line.endswith(b"\n") and not compressed:
                     f.seek(begin)
                     break
@@ -278,9 +324,7 @@ class Collector:
             "tail": tail,
         }
         if compressed:
-            cursor.update(stamp=stamp, stable=True, done=done)
-        if compressed and end > 128 * 1024 * 1024:
-            raise ValueError("Archive exceeds 128 MiB expanded limit")
+            cursor.update(stamp=stamp, stable=True, done=done, digest=digest)
         count = self.store.ingest(source, entries, key, cursor)
         self.store.metric(source["id"], "read_bytes", used)
         return count
@@ -318,16 +362,31 @@ class Collector:
         collector = JournaldCollector(JournaldSourceConfig())
         entries = []
         last = None
+        skipped = 0
         for line in raw.splitlines(keepends=True):
             if not line.endswith(b"\n"):
                 break
-            data = json.loads(line)
-            last = data.get("__CURSOR")
-            e = collector._parse_json_line(line.decode(errors="replace"))
-            if e and last:
+            text = line.decode("utf-8", errors="replace")
+            try:
+                data = json.loads(text)
+            except (json.JSONDecodeError, TypeError, ValueError):
+                skipped += 1
+                continue
+            if not isinstance(data, dict):
+                skipped += 1
+                continue
+            mark = data.get("__CURSOR")
+            if not isinstance(mark, str) or not mark:
+                skipped += 1
+                continue
+            last = mark
+            e = collector._parse_json_line(text)
+            if e:
                 entries.append(
                     dict(e.model_dump(mode="json"), origin="journal:" + last)
                 )
+        if skipped:
+            self.store.metric(source["id"], "journal_skipped", skipped)
         if last:
             if not cursor and not source.get("history"):
                 entries = []

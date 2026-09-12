@@ -2,7 +2,12 @@ import asyncio
 import pytest
 from logsentinel.portal.store import Store
 from logsentinel.portal.models import Machine
-from logsentinel.portal.analysis import Analyzer, compact, interleave_services
+from logsentinel.portal.analysis import (
+    Analyzer,
+    compact,
+    interleave_services,
+    grouping_key,
+)
 from logsentinel.portal.rules import redact
 
 
@@ -19,6 +24,68 @@ def data(tmp_path):
         ],
     )
     return s, m
+
+
+def test_deterministic_signals_fire_without_the_model(data):
+    from logsentinel.portal.signals import apply_signals
+
+    s, m = data
+    s.ingest(
+        {"id": "s", "machine_id": m},
+        [
+            {"origin": "oom", "message": "Out of memory: Kill process 12", "service": "kernel"},
+            {"origin": "disk", "message": "write failed: No space left on device", "service": "app"},
+            {"origin": "sudo", "message": "user NOT in sudoers ; TTY=pts/0", "service": "sudo"},
+        ]
+        + [
+            {
+                "origin": "ssh" + str(i),
+                "message": "Failed password for root from 192.0.2.10",
+                "service": "sshd",
+            }
+            for i in range(5)
+        ],
+    )
+    a = Analyzer(s)
+    assert apply_signals(a) >= 4
+    titles = {p["title"] for p in s.rows("problems")}
+    assert any("memory" in t.lower() or "memoria" in t.lower() for t in titles)
+    assert any("ssh" in t.lower() for t in titles)
+    assert apply_signals(a) >= 4
+    assert len(s.rows("problems")) >= 4
+
+
+def test_findings_group_by_shape_not_category_or_digits(data):
+    s, m = data
+    a = Analyzer(s)
+    events = s.events()
+    first = events[0]
+    finding = {
+        "title": "Pool exhausted",
+        "summary": "check evidence",
+        "severity": "HIGH",
+        "category": "reliability",
+        "evidence_ids": [first["id"]],
+        "reasoning": "",
+        "next_steps": "",
+    }
+    first_id = a.save_finding(m, finding, [first["id"]], notify=False)
+    s.ingest(
+        {"id": "s", "machine_id": m},
+        [{"origin": "repeat", "message": "connection pool exhausted 12", "service": "app"}],
+    )
+    other = [e for e in s.events() if e["origin"] == "repeat"][0]
+    finding["category"] = "application"
+    finding["evidence_ids"] = [other["id"]]
+    second_id = a.save_finding(m, finding, [other["id"]], notify=False)
+    assert first_id == second_id
+    assert s.problem(first_id)["count"] == 2
+    assert grouping_key(first) == grouping_key(
+        dict(first, message="connection pool exhausted 99")
+    )
+    assert grouping_key({"source_id": "s", "service": "app", "message": "line-1"}) != grouping_key(
+        {"source_id": "s", "service": "app", "message": "line-6"}
+    )
 
 
 def test_context_is_shared_with_quiet_services_without_losing_events():
@@ -89,6 +156,9 @@ async def test_verification_failure_preserves_first_pass_and_explicit_partial_co
     analyzer.client.call = fake
     result = await analyzer.cycle()
     assert result["errors"] == 1
+    assert s.rows("jobs")[0]["status"] == "retry"
+    await analyzer.cycle()
+    await analyzer.cycle()
     assert s.rows("jobs")[0]["status"] == "partial"
     assert len(s.rows("problems")) == 1
     problem = s.problem(s.rows("problems")[0]["id"])
@@ -158,6 +228,15 @@ def test_compaction_preserves_count_and_ids():
 def test_redaction():
     assert "abc123" not in redact("Authorization: Bearer abc123")
     assert "hunter2" not in redact("password=hunter2")
+    assert "AKIAAAAAAAAAAAAAAAAA" not in redact("aws AKIAAAAAAAAAAAAAAAAA used")
+    assert "xoxb-1234567890-token" not in redact("Slack xoxb-1234567890-token")
+    jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0In0.abcdeffake"
+    assert jwt not in redact("auth " + jwt)
+    pem = "-----BEGIN PRIVATE KEY-----\nabcDEF1234567890\n-----END PRIVATE KEY-----"
+    assert "abcDEF1234567890" not in redact(pem)
+    assert "secret-hook" not in redact(
+        "https://discord.com/api/webhooks/1/secret-hook"
+    )
 
 
 def test_source_filter_uses_priority_and_case_insensitive_terms():
@@ -229,6 +308,6 @@ async def test_capacity_is_visible_and_preserves_original(data):
 
     a.client.call = healthy
     await a.cycle()
-    assert len(s.events(status="capacity")) >= 1
+    assert len(s.events(status="oversized")) >= 1
     assert any(p["data"].find("monitor.capacity") >= 0 for p in s.rows("problems"))
-    assert any(e["message"] == "x" * 3000 for e in s.events(status="capacity"))
+    assert any(e["message"] == "x" * 3000 for e in s.events(status="oversized"))

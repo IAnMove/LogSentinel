@@ -380,12 +380,33 @@ function recentMetricChart(key, history, threshold) {
       y2: y(threshold),
       class: "resource-threshold",
     });
+  const density = rows.length > 90 ? 0.9 : rows.length > 45 ? 1.4 : 2;
   for (const type of ["maximum", "average"]) {
     let points = [],
       previous;
     const draw = () => {
-      if (points.length)
-        node("polyline", { points: points.join(" "), class: "metric-" + type });
+      if (!points.length) return;
+      // The area goes in first so the line always sits on top of its own fill.
+      // Only the average carries one; filling both reads as mud.
+      if (type === "average" && points.length > 1) {
+        const first = points[0].split(",")[0],
+          last = points[points.length - 1].split(",")[0];
+        // Painted first of all, so gridlines and the threshold stay readable
+        // through it rather than being covered by the fill.
+        svg.prepend(
+          node("polygon", {
+            points: `${first},${y(0)} ${points.join(" ")} ${last},${y(0)}`,
+            class: "metric-area",
+          }),
+        );
+      }
+      // pathLength normalises the stroke so the draw-in animation works the
+      // same on a short flat series and a long jagged one.
+      node("polyline", {
+        points: points.join(" "),
+        pathLength: 1,
+        class: "metric-" + type,
+      });
     };
     for (const row of rows) {
       if (
@@ -399,7 +420,10 @@ function recentMetricChart(key, history, threshold) {
       const dot = node("circle", {
         cx: x(row.observed),
         cy: y(row[type]),
-        r: 2,
+        // At one sample a minute an hour of history beads the whole line and
+        // hides its shape. Keep the marks so each still carries its tooltip,
+        // but shrink them until the line reads as a line again.
+        r: density,
         class: "metric-" + type,
       });
       const tip = document.createElementNS(ns, "title");

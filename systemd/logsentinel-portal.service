@@ -4,11 +4,31 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=%h/.venv/bin/logsentinel portal --data-dir %h/.local/share/logsentinel/portal --port 8765
+ExecStart=/usr/bin/env logsentinel portal --data-dir %h/.local/share/logsentinel/portal --port 8765
 Restart=on-failure
 RestartSec=5
+ReadWritePaths=%h/.local/share/logsentinel
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
 UMask=0077
-NoNewPrivileges=true
 
 [Install]
 WantedBy=default.target
