@@ -280,7 +280,7 @@ def grouping_key(event):
     text = regex.sub(r"\bpid[=:]?\s*\d+", "pid=#", text, flags=regex.I)
     text = regex.sub(r"(?:\s+\d+)+\s*$", "", text)
     text = regex.sub(r"\s+", " ", text).strip()
-    return (event.get("source_id") or "", event.get("service") or "", text[:400])
+    return (event.get("source_id") or "", event.get("service") or "", text)
 
 
 class Analyzer:

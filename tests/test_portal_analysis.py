@@ -311,3 +311,22 @@ async def test_capacity_is_visible_and_preserves_original(data):
     assert len(s.events(status="oversized")) >= 1
     assert any(p["data"].find("monitor.capacity") >= 0 for p in s.rows("problems"))
     assert any(e["message"] == "x" * 3000 for e in s.events(status="oversized"))
+
+
+def test_long_tracebacks_group_by_full_normalized_message(data):
+    store, machine = data
+    prefix = "Traceback (most recent call last): " + "shared frame; " * 50
+    store.ingest({"id": "s", "machine_id": machine}, [
+        dict(origin="long-a", service="app", message=prefix + "Database unavailable at 192.0.2.1 pid=123"),
+        dict(origin="long-b", service="app", message=prefix + "Permission denied at 192.0.2.1 pid=123"),
+        dict(origin="long-repeat", service="app", message=prefix + "Database unavailable at 192.0.2.22 pid=456"),
+    ])
+    analyzer = Analyzer(store)
+    problems = {}
+    for event in store.events():
+        if event["origin"].startswith("long-"):
+            finding = dict(title="Failure", summary="Read evidence", severity="HIGH", category="application", evidence_ids=[event["id"]])
+            problems[event["origin"]] = analyzer.save_finding(machine, finding, [event["id"]], notify=False)
+    assert problems["long-a"] != problems["long-b"]
+    assert problems["long-repeat"] == problems["long-a"]
+    assert store.problem(problems["long-a"])["count"] == 2
