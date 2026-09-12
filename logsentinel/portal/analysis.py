@@ -6,6 +6,7 @@ from collections import deque
 import hashlib
 import json
 import time
+import threading
 import regex
 from urllib.parse import urlsplit
 import httpx
@@ -289,6 +290,7 @@ class Analyzer:
         self.client = ReviewClient(store)
         self.lock = asyncio.Lock()
         self.cycle_lock = asyncio.Lock()
+        self.detector_lock = threading.RLock()
         self.running = False
         self.started = None
         self.finished = None
@@ -377,12 +379,9 @@ class Analyzer:
 
     async def _cycle(self):
         from .review_queue import ReviewQueue
-        from .signals import apply_signals
+        from .signal_scan import scan_signals
 
-        from .injection import apply_injection_signals
-
-        apply_signals(self)
-        apply_injection_signals(self)
+        await asyncio.to_thread(scan_signals, self)
         return await ReviewQueue(self).run()
 
     @staticmethod

@@ -568,6 +568,9 @@ async def test_failed_signal_scan_does_not_cover_frozen_evidence(queue, monkeypa
     def failed(*args, **kwargs):
         raise OSError("synthetic detector failure")
 
+    # Simulate a recovered batch created before the incremental detector.
+    with store.connect() as db:
+        db.execute("DELETE FROM signal_scans")
     monkeypatch.setattr("logsentinel.portal.injection.apply_injection_signals", failed)
     assert await worker.execute(machine, work) == (0, 1)
     assert not store.events(status="compact")

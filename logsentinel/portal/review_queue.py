@@ -172,6 +172,9 @@ class ReviewQueue:
                     if rows:
                         break
             events = self.store.events(ids=[r[0] for r in rows], limit=cfg.max_events)
+            from .signal_scan import scan_originals
+
+            scan_originals(self.analyzer, machine["id"], events)
             source = source_objects.get(sid, {})
             triggers, skipped = self.analyzer._trigger_events(events, source)
             if skipped:
@@ -650,8 +653,7 @@ class ReviewQueue:
         called = False
         try:
             if not batch.get("signals_checked"):
-                from .signals import apply_signals
-                from .injection import apply_injection_signals
+                from .signal_scan import scan_originals
 
                 originals = self.store.events(
                     machine_id=machine["id"], ids=batch["selected"],
@@ -659,8 +661,7 @@ class ReviewQueue:
                 )
                 if {e["id"] for e in originals} != set(batch["selected"]):
                     raise ValueError("Frozen signal evidence is unavailable")
-                apply_signals(self.analyzer, machine_id=machine["id"], events=originals)
-                apply_injection_signals(self.analyzer, machine_id=machine["id"], events=originals)
+                await asyncio.to_thread(scan_originals, self.analyzer, machine["id"], originals)
                 # Persist only after both floors succeed, also for recovered replies.
                 batch["signals_checked"] = True
                 self.save(job, batch)
@@ -836,12 +837,12 @@ class ReviewQueue:
                     if not self.store.monitoring_active(machine["id"]):
                         continue
                     cfg = self.store.settings()
-                    work = self.ready(machine, cfg, failed)
+                    work = await asyncio.to_thread(self.ready, machine, cfg, failed)
                     progressed = bool(work)
                     if work is None:
                         counter = int(self.store.meta("review_dispatch") or "0")
                         self.store.set_meta("review_dispatch", str(counter + 1))
-                        work, progressed = self.prepare(machine, cfg, counter)
+                        work, progressed = await asyncio.to_thread(self.prepare, machine, cfg, counter)
                     if work:
                         used, error = await self.execute(machine, work)
                         calls += used

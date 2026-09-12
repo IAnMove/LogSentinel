@@ -118,6 +118,20 @@ def create_app(directory, background=True):
             health_monitor.beat("analysis")
             await asyncio.sleep(1)
 
+    async def detecting():
+        from .signal_scan import scan_signals
+
+        while True:
+            try:
+                if store.settings().enabled:
+                    await asyncio.to_thread(scan_signals, analyzer)
+                store.set_meta("detector_worker_error", "")
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                store.set_meta("detector_worker_error", safe_error(exc))
+            await asyncio.sleep(1)
+
     async def delivering():
         while True:
             try:
@@ -176,7 +190,7 @@ def create_app(directory, background=True):
         tasks = (
             [
                 asyncio.create_task(f())
-                for f in (collecting, working, delivering, measuring, supervising)
+                for f in (collecting, working, detecting, delivering, measuring, supervising)
             ]
             if background
             else []

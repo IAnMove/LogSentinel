@@ -68,7 +68,7 @@ def sanitize_chat_filter(proposal):
     return proposal
 
 
-def apply_injection_signals(analyzer, limit=500, *, machine_id=None, events=None):
+def apply_injection_signals(analyzer, limit=500, *, machine_id=None, events=None, notify=True):
     store = analyzer.store
     spanish = store.settings().language == "es"
     created = 0
@@ -104,6 +104,7 @@ def apply_injection_signals(analyzer, limit=500, *, machine_id=None, events=None
             },
             [e["id"] for e in hits],
             fingerprint=fingerprint,
+            notify=notify,
         )
         created += 1
     return created

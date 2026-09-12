@@ -141,7 +141,7 @@ def window_evidence(store, machine_id, spec, hits, rules):
 
 
 
-def apply_signals(analyzer, limit=500, *, machine_id=None, events=None):
+def apply_signals(analyzer, limit=500, *, machine_id=None, events=None, notify=True):
     store = analyzer.store
     spanish = store.settings().language == "es"
     created = 0
@@ -169,12 +169,12 @@ def apply_signals(analyzer, limit=500, *, machine_id=None, events=None):
             for source_id, evidence in batches:
                 if len(evidence) < spec["min"]:
                     continue
-                save_signal(analyzer, machine_id, spec, evidence, spanish, source_id)
+                save_signal(analyzer, machine_id, spec, evidence, spanish, source_id, notify=notify)
                 created += 1
     return created
 
 
-def save_signal(analyzer, machine_id, spec, hits, spanish, source_id=""):
+def save_signal(analyzer, machine_id, spec, hits, spanish, source_id="", *, notify=True):
     idx = 0 if spanish else 1
     analyzer.save_finding(
         machine_id,
@@ -195,6 +195,7 @@ def save_signal(analyzer, machine_id, spec, hits, spanish, source_id=""):
         },
         [e["id"] for e in hits],
         detector=spec["id"],
+        notify=notify,
         fingerprint=(
             hashlib.sha256(dumps([machine_id, source_id, spec["id"]]).encode()).hexdigest()
             if spec.get("window_seconds") else None
