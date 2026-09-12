@@ -18,6 +18,7 @@ import httpx
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from logsentinel.portal.analysis import Analyzer, ReviewClient, SYSTEM, TRIAGE_SYSTEM
 from logsentinel.portal.models import Machine, Settings, Source
+from logsentinel.portal.signals import deterministic_signal
 from logsentinel.portal.store import Store
 
 
@@ -267,19 +268,23 @@ def cases(held_out=False):
     ]
 
 
-def score(case, result):
+def score(case, result, *, combined=False):
     findings = result.get("findings", [])
     expected = case["expected"]
-    matched = set()
+    matched = {}
     unsupported = []
     for index, finding in enumerate(findings):
+        origin = "detector" if deterministic_signal(finding) else "model"
+        finding = dict(finding)
+        if combined and deterministic_signal(finding) == "oom":
+            finding["category"] = "memory"
         refs = set(finding["evidence_ids"])
         hits = [
             i
             for i, wanted in enumerate(expected)
             if refs.intersection(wanted["evidence_ids"])
         ]
-        if len(hits) != 1 or hits[0] in matched:
+        if len(hits) != 1 or (hits[0] in matched and (not combined or origin in matched[hits[0]])):
             unsupported.append(index)
             continue
         target = expected[hits[0]]
@@ -292,13 +297,27 @@ def score(case, result):
         ):
             unsupported.append(index)
             continue
-        matched.add(hits[0])
+        matched.setdefault(hits[0], set()).add(origin)
     return dict(
         passed=len(matched) == len(expected) and not unsupported,
         expected=len(expected),
         matched=len(matched),
         unmatched=[i for i in range(len(expected)) if i not in matched],
         unexpected_or_misattributed=unsupported,
+    )
+
+
+def pipeline_scores(case, result):
+    # Fixture expectations are independent of the detectors' implementation.
+    oom_index = {"disk_and_memory_same_service": 1, "rare_error_among_successes": 18,
+                 "heldout_three_kernel_failures": 1}.get(case["name"])
+    expected = [] if oom_index is None else [dict(
+        evidence_ids=["g" + str(oom_index)], categories=["resource"], severities=["HIGH"],
+    )]
+    return dict(
+        model=score(case, {"findings": result["model_findings"]}),
+        detectors=score({"expected": case.get("detector_expected", expected)}, {"findings": result["detector_findings"]}),
+        combined=score(case, result, combined=True),
     )
 
 
@@ -325,11 +344,13 @@ async def pipeline(case, cfg, directory):
     )
     analyzer = Analyzer(store)
     cycles = []
-    for _ in range(8):
+    for _ in range(32):
         cycles.append(await analyzer.cycle())
-        if not any(j["status"] in ("pending", "retry") for j in store.rows("jobs")):
+        with store.connect() as db:
+            pending = db.execute("SELECT 1 FROM events WHERE status IN ('pending','capacity','queued','error') LIMIT 1").fetchone()
+        if not pending and not any(j["status"] in ("pending", "retry") for j in store.rows("jobs")):
             break
-    by_id = {e["id"]: e["origin"] for e in store.events()}
+    by_id = {e["id"]: e["origin"] for e in store.events(limit=5000)}
     findings = []
     for row in store.rows("problems"):
         if row["status"] == "resolved":
@@ -340,11 +361,16 @@ async def pipeline(case, cfg, directory):
             dict.fromkeys(by_id[e["id"]] for e in problem["evidence"])
         )
         findings.append(data)
+    model_findings = [f for f in findings if not deterministic_signal(f) and not f.get("category", "").startswith("monitor.")]
+    detector_findings = [f for f in findings if deterministic_signal(f)]
+    with store.connect() as db:
+        coverage = dict(db.execute("SELECT count(*) total,coalesce(sum(status IN ('compact','reviewed')),0) covered FROM events").fetchone())
     return (
         store,
-        {"findings": findings},
+        {"findings": model_findings + detector_findings, "model_findings": model_findings, "detector_findings": detector_findings},
         dict(
             cycles=cycles,
+            coverage=coverage,
             jobs=[
                 dict(status=j["status"], attempts=j["attempts"])
                 for j in store.rows("jobs")
@@ -360,6 +386,8 @@ async def run(args):
         cfg = Settings.model_validate_json(
             db.execute("SELECT value FROM meta WHERE key='settings'").fetchone()[0]
         )
+    if getattr(args, "model", None):
+        cfg.llm.model = args.model
     results = []
     captured = {}
     original_post = httpx.AsyncClient.post
@@ -403,8 +431,11 @@ async def run(args):
                             config=config,
                             system=TRIAGE_SYSTEM if variant == "triage" else SYSTEM,
                         )
-                    row.update(score(case, row["result"]))
+                    row.update(score(case, row["result"], combined=variant == "pipeline"))
                     if variant == "pipeline":
+                        row["scores"] = pipeline_scores(case, row["result"])
+                        row["passed"] &= all(s["passed"] for s in row["scores"].values())
+                        row["passed"] &= row["pipeline"]["coverage"]["total"] == row["pipeline"]["coverage"]["covered"]
                         row["passed"] &= all(
                             j["status"] == "done" for j in row["pipeline"]["jobs"]
                         )
@@ -447,4 +478,5 @@ if __name__ == "__main__":
     parser.add_argument("--output", required=True)
     parser.add_argument("--variants", default="triage,baseline")
     parser.add_argument("--held-out", action="store_true")
+    parser.add_argument("--model", help="Override only the model for a comparable synthetic run")
     sys.exit(0 if asyncio.run(run(parser.parse_args())) else 1)
