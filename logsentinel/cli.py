@@ -555,6 +555,37 @@ SystemCallErrorNumber=EPERM
 UMask=0077"""
 
 
+def _unit_path(value, *, command=False):
+    value = str(value).replace("%", "%%")
+    if command:
+        value = value.replace("$", "$$")
+    if any(c in value for c in (' ', '"', "\\", "\t", "\n")):
+        value = '"' + value.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n").replace("\t", "\\t") + '"'
+    return value
+
+
+def _prepare_service_data(path, account_info=None):
+    """Create only missing directories; never chown an existing tree or follow links."""
+    fd = os.open("/", os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        for part in path.parts[1:]:
+            created = False
+            try:
+                os.mkdir(part, mode=0o700, dir_fd=fd)
+                created = True
+            except FileExistsError:
+                pass
+            child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+            os.close(fd)
+            fd = child
+            if created and account_info and os.geteuid() == 0:
+                os.fchown(fd, account_info.pw_uid, account_info.pw_gid)
+        if account_info and os.fstat(fd).st_uid != account_info.pw_uid:
+            raise typer.BadParameter(f"The data directory {path} must belong to {account_info.pw_name}")
+    finally:
+        os.close(fd)
+
+
 @service_app.command(name="install")
 def service_install(
     system: bool = typer.Option(False, "--system", help="Install system-wide service (/etc/systemd/system)"),
@@ -564,7 +595,10 @@ def service_install(
 ) -> None:
     """Generate and install a systemd user or system unit for the portal."""
     import getpass
+    import pwd
+    import grp
 
+    account_info = None
     account = ""
     if system:
         # A system unit without User= runs as root. Reading logs never requires that,
@@ -579,19 +613,32 @@ def service_install(
     elif run_as:
         raise typer.BadParameter("--run-as applies to --system units; a user unit runs as you")
 
-    identity = "" if not account or account == "root" else f"User={account}\nGroup={account}\n"
-    # The daemon resolves its data directory from the running account's home, so only
-    # grant write access when this install knows that path: the account is ours.
-    own_account = not account or account == getpass.getuser()
-    data_root = get_default_data_dir() if legacy else Path.home() / ".local/share/logsentinel"
-    writable = f"ReadWritePaths={data_root}\n" if own_account else ""
+    identity = ""
+    if account:
+        try:
+            account_info = pwd.getpwnam(account)
+            group = grp.getgrgid(account_info.pw_gid).gr_name
+        except KeyError:
+            raise typer.BadParameter(f"Create the service account and its primary group before installing: {account}")
+        home = Path(account_info.pw_dir)
+        if not home.is_absolute() or str(home) in ("/", "/nonexistent"):
+            raise typer.BadParameter(f"Configure a usable home directory for {account}")
+        home = home.resolve()
+        identity = f"User={account_info.pw_name}\nGroup={group}\n"
+        data_root = home / ".local/share/logsentinel"
+    else:
+        data_root = get_default_data_dir() if legacy else Path.home() / ".local/share/logsentinel"
+    data_root = Path(data_root).absolute()
+    data_directory = data_root if legacy else data_root / "portal"
+    _prepare_service_data(data_directory, account_info)
+    writable = f"ReadWritePaths={_unit_path(data_root)}\n"
     if legacy:
-        start = f"{sys.executable} -m logsentinel.cli run"
+        start = f"{_unit_path(sys.executable, command=True)} -m logsentinel.cli run"
         description = "LogSentinel legacy log monitor"
     else:
         start = (
-            f"{sys.executable} -m logsentinel.cli portal "
-            f"--data-dir {Path(data_root) / 'portal'} --port 8765"
+            f"{_unit_path(sys.executable, command=True)} -m logsentinel.cli portal "
+            f"--data-dir {_unit_path(data_directory, command=True)} --port 8765"
         )
         description = "LogSentinel local log review portal"
     unit_content = f"""[Unit]
@@ -621,11 +668,6 @@ WantedBy=default.target
         f.write(unit_content)
 
     console.print(f"[green]✓ Systemd unit written to:[/green] {unit_file}")
-    if account and not own_account:
-        console.print(
-            f"[yellow]Add ReadWritePaths for the data directory of {account}[/yellow] "
-            "before starting; the unit grants no write access yet."
-        )
     if not system:
         console.print("[cyan]To enable and start:[/cyan]")
         console.print("  systemctl --user daemon-reload")

@@ -147,20 +147,34 @@ def test_system_service_never_defaults_to_root(tmp_path, monkeypatch):
 
 def test_installed_unit_names_an_account_and_drops_privileges(tmp_path, monkeypatch):
     import getpass
+    import grp
+    import os
+    import pwd
+    from types import SimpleNamespace
+
+    home = tmp_path / "agent-home"
+    uid = 12345 if os.geteuid() == 0 else os.geteuid()
+    account = SimpleNamespace(pw_name="logsentinel-agent", pw_dir=str(home), pw_uid=uid, pw_gid=os.getegid())
+    monkeypatch.setattr(pwd, "getpwnam", lambda name: account)
+    monkeypatch.setattr(grp, "getgrgid", lambda gid: SimpleNamespace(gr_name="log-readers"))
     monkeypatch.setattr(getpass, "getuser", lambda: "root")
-    monkeypatch.setattr(cli, "get_default_data_dir", lambda: tmp_path / "data")
+    monkeypatch.setattr(cli.Path, "home", classmethod(lambda cls: tmp_path / "installer-home"))
     monkeypatch.setattr(cli, "SYSTEM_UNIT_DIR", tmp_path / "units")
     result = CliRunner().invoke(
         cli.app, ["service", "install", "--system", "--run-as", "logsentinel-agent"]
     )
     assert result.exit_code == 0, result.exception
     unit = (tmp_path / "units" / "logsentinel.service").read_text()
-    assert "User=logsentinel-agent" in unit and "Group=logsentinel-agent" in unit
+    assert "User=logsentinel-agent" in unit and "Group=log-readers" in unit
     assert "portal" in unit
     for directive in ["NoNewPrivileges=yes", "CapabilityBoundingSet=", "ProtectSystem=strict"]:
         assert directive in unit
-    # The account is not ours, so the unit must not guess a writable path for it.
-    assert "ReadWritePaths=" not in unit
+    data = home / ".local/share/logsentinel"
+    assert f"ReadWritePaths={data}" in unit
+    assert f"--data-dir {data / 'portal'}" in unit
+    assert "installer-home" not in unit
+    assert (data / "portal").stat().st_uid == uid
+    assert (home / ".local").stat().st_uid == uid
 
 
 def test_user_unit_keeps_write_access_to_its_own_data_directory(tmp_path, monkeypatch):
@@ -174,3 +188,37 @@ def test_user_unit_keeps_write_access_to_its_own_data_directory(tmp_path, monkey
     assert "NoNewPrivileges=yes" in unit
     # User= is rejected by systemd in user units.
     assert "User=" not in unit
+
+
+def test_install_rejects_unknown_service_account_before_writing_unit(tmp_path, monkeypatch):
+    import pwd
+
+    def missing(name):
+        raise KeyError(name)
+
+    monkeypatch.setattr(pwd, "getpwnam", missing)
+    monkeypatch.setattr(cli, "SYSTEM_UNIT_DIR", tmp_path / "units")
+    result = CliRunner().invoke(cli.app, ["service", "install", "--system", "--run-as", "missing-account"])
+    assert result.exit_code != 0
+    assert "Create the service account" in result.output
+    assert not (tmp_path / "units").exists()
+
+
+def test_service_state_creation_does_not_follow_symlinks(tmp_path):
+    target = tmp_path / "unrelated"
+    target.mkdir()
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / ".local").symlink_to(target, target_is_directory=True)
+    with pytest.raises(OSError):
+        cli._prepare_service_data(home / ".local/share/logsentinel/portal")
+    assert not list(target.iterdir())
+
+
+def test_user_service_quotes_paths_with_spaces_and_specifiers(tmp_path, monkeypatch):
+    home = tmp_path / "home % directory"
+    monkeypatch.setattr(cli.Path, "home", classmethod(lambda cls: home))
+    result = CliRunner().invoke(cli.app, ["service", "install"])
+    assert result.exit_code == 0, result.exception
+    unit = (home / ".config/systemd/user/logsentinel.service").read_text()
+    assert f'--data-dir "{str(home).replace("%", "%%")}/.local/share/logsentinel/portal"' in unit
