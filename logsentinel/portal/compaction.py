@@ -9,7 +9,7 @@ import math
 from .rules import redact
 from .store import dumps
 
-VERSION = "routine-dates-v2"
+VERSION = "routine-dates-v3"
 DATE = re.compile(
     r"\b\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:[.,]\d+)?" r"(?:Z|[+-]\d{2}:?\d{2})?\b"
 )
@@ -139,6 +139,11 @@ def compact(events, budget):
             group["last"] = datetime.fromtimestamp(
                 max(times), tz=timezone.utc
             ).isoformat()
+        if group["count"] == 1 and group.get("examples"):
+            # A singleton needs its original message, not a template plus a
+            # duplicate example of the same line. Keep its complete redacted text.
+            group["message"] = group.pop("examples")[0]["message"]
+            group.pop("normalizer", None)
         cost = len(dumps(public_group(group)).encode()) + bool(admitted)
         if used + cost <= budget:
             admitted.append(group)

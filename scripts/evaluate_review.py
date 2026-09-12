@@ -428,9 +428,9 @@ async def run(args):
                 observed_store = store
                 try:
                     if variant == "pipeline":
-                        observed_store, row["result"], row["pipeline"] = await pipeline(
-                            case, config, Path(directory) / case["name"]
-                        )
+                        work = pipeline(case, config, Path(directory) / case["name"])
+                        limit = getattr(args, "max_case_seconds", 0)
+                        observed_store, row["result"], row["pipeline"] = await asyncio.wait_for(work, limit) if limit else await work
                     else:
                         observed_store = store
                         row["result"] = await client.call(
@@ -490,5 +490,6 @@ if __name__ == "__main__":
     parser.add_argument("--variants", default="triage,baseline")
     parser.add_argument("--held-out", action="store_true")
     parser.add_argument("--cases", help="Comma separated synthetic case names")
+    parser.add_argument("--max-case-seconds", type=float, default=0, help="Optional wall-time bound per synthetic pipeline case")
     parser.add_argument("--model", help="Override only the model for a comparable synthetic run")
     sys.exit(0 if asyncio.run(run(parser.parse_args())) else 1)

@@ -246,7 +246,7 @@ def test_retained_journald_events_recover_unit_from_original():
     ]
     groups, selected, _ = compact(events, 5000)
     assert len(groups) == 1 and len(selected) == 2
-    assert groups[0]["normalizer"] == "routine-dates-v2"
+    assert groups[0]["normalizer"] == "routine-dates-v3"
 
 
 @pytest.mark.asyncio
@@ -728,3 +728,12 @@ async def test_adaptive_scheduler_dispatches_new_work_after_idle_without_waiting
     ingest(store, source, 1)
     await monitor.tick()
     assert len(calls) == 1 and store.events()[0]["status"] == "compact"
+
+
+def test_single_routine_line_does_not_duplicate_its_text_as_an_example():
+    event = routine(0)
+    groups, selected, omitted = compact([event], 5000)
+    assert selected == [event["id"]] and not omitted
+    assert groups[0]["message"] == event["message"]
+    assert "examples" not in groups[0] and "normalizer" not in groups[0]
+    assert groups[0]["event_ids"] == [event["id"]]
