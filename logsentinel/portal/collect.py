@@ -18,6 +18,7 @@ from logsentinel.collectors.file_tailer import FileTailerCollector
 from logsentinel.collectors.journald import JournaldCollector
 from logsentinel.config import JournaldSourceConfig
 from .store import dumps
+from .source_paths import open_source, validate_source_handle, validate_source_path, UnsafeSourcePath
 
 MAX_LINE = 256_000
 MAX_ARCHIVE_BYTES = 64 * 1024 * 1024
@@ -25,9 +26,10 @@ MAX_EXPANDED_BYTES = 128 * 1024 * 1024
 HASH_CHUNK = 1024 * 1024
 
 
-def file_digest(path):
+def file_digest(path, handle=None):
     digest = hashlib.sha256()
-    with path.open("rb") as raw:
+    with nullcontext(handle) if handle else path.open("rb") as raw:
+        raw.seek(0)
         while chunk := raw.read(HASH_CHUNK):
             digest.update(chunk)
     return digest.hexdigest()
@@ -131,7 +133,7 @@ class Collector:
             elif source["kind"] in ("push", "metrics", "health"):
                 return 0
             else:
-                root = Path(source["path"]).expanduser().resolve()
+                root = validate_source_path(source["path"], self.store.directory)
                 paths = (
                     [root]
                     if source["kind"] == "file"
@@ -144,11 +146,16 @@ class Collector:
                         path.is_symlink() or not path.resolve().is_relative_to(root)
                     ):
                         continue
-                    if path.suffix in (".gz", ".xz", ".bz2", ".zst", ".zip", ".tar"):
-                        if path.is_file():
-                            total += self.file(source, path)
-                    elif path.is_file() or (source["id"], str(path)) in self.handles:
-                        total += self.plain(source, path)
+                    try:
+                        validate_source_path(path, self.store.directory)
+                        if path.suffix in (".gz", ".xz", ".bz2", ".zst", ".zip", ".tar"):
+                            if path.is_file():
+                                total += self.file(source, path)
+                        elif path.is_file() or (source["id"], str(path)) in self.handles:
+                            total += self.plain(source, path)
+                    except UnsafeSourcePath:
+                        self.store.metric(source["id"], "blocked_source_files", 1)
+                        continue
                 for item in list(self.retired):
                     if item["source"] != source["id"]:
                         continue
@@ -217,12 +224,16 @@ class Collector:
                 raise OSError(
                     "Open source/rotation handle limit reached; reduce sources or rotation frequency"
                 )
-            handle = path.open("rb")
+            handle = open_source(path, self.store.directory)
             self.handles[key] = handle
         return self.file(source, path, handle=handle)
 
     def file(self, source, path, handle=None, cursor_key=None):
-        stat = os.fstat(handle.fileno()) if handle else path.stat()
+        if handle is None:
+            with open_source(path, self.store.directory) as opened:
+                return self.file(source, path, handle=opened, cursor_key=cursor_key)
+        validate_source_handle(handle, self.store.directory)
+        stat = os.fstat(handle.fileno())
         key = cursor_key or str(path)
         old = self.store.cursor(source["id"], key) or {}
         sig = [stat.st_dev, stat.st_ino]
@@ -249,7 +260,7 @@ class Collector:
             # A new archive is imported only after an unchanged polling interval.
             if stat.st_size > MAX_ARCHIVE_BYTES:
                 raise ValueError("Archive exceeds 64 MiB input limit")
-            digest = old.get("digest") or file_digest(path)
+            digest = old.get("digest") or file_digest(path, handle)
             generation = "gz:" + digest
             offset = old.get("offset", 0)
             if offset >= MAX_EXPANDED_BYTES:
@@ -260,7 +271,11 @@ class Collector:
                     dict(old, stamp=stamp, stable=True, done=True, digest=digest),
                 )
                 return 0
-            opener = {".gz": gzip.open, ".xz": lzma.open, ".bz2": bz2.open}[path.suffix]
+            def opener(*args):
+                handle.seek(0)
+                if path.suffix == ".gz":
+                    return gzip.GzipFile(fileobj=handle, mode="rb")
+                return {".xz": lzma.LZMAFile, ".bz2": bz2.BZ2File}[path.suffix](handle, "rb")
         else:
             generation = old.get(
                 "generation", f"{stat.st_dev}:{stat.st_ino}:{stat.st_ctime_ns}"

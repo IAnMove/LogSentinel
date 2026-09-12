@@ -223,3 +223,56 @@ def test_malformed_journal_line_does_not_stall_the_cursor(setup, monkeypatch):
     assert collector.journal(source) == 0
     assert store.cursor("journal", "journal")["cursor"] == "c3"
     assert [e["message"] for e in store.events()] == ["first", "second", "third"]
+
+
+def test_folder_cannot_ingest_sensitive_files_added_after_configuration(setup):
+    store, source, path = setup
+    folder = path.parent / "logs"
+    folder.mkdir()
+    source.update(kind="folder", path=str(folder), pattern="*")
+    collector = Collector(store)
+    try:
+        (folder / "app.log").write_text("ordinary log\n")
+        assert collector.poll(source) == 1
+        (folder / "id_ed25519").write_text("synthetic private data\n")
+        (folder / "shadow.gz").write_bytes(gzip.compress(b"synthetic password data\n"))
+        (folder / "other.log").write_text("another log\n")
+        assert collector.poll(source) == 1
+        assert {e["message"] for e in store.events()} == {"ordinary log", "another log"}
+        assert store.cursor(source["id"], str(folder / "id_ed25519")) is None
+    finally:
+        collector.close()
+
+
+def test_opened_file_target_is_checked_after_symlink_swap(setup, monkeypatch):
+    import os
+    from logsentinel.portal.source_paths import open_source, UnsafeSourcePath
+
+    store, source, path = setup
+    path.write_text("normal log\n")
+    secret = path.parent / "id_rsa"
+    secret.write_text("synthetic private data\n")
+    original = os.open
+
+    def swapped(target, flags, *args, **kwargs):
+        if Path(target) == path:
+            path.unlink()
+            path.symlink_to(secret)
+        return original(target, flags, *args, **kwargs)
+
+    monkeypatch.setattr(os, "open", swapped)
+    with pytest.raises(UnsafeSourcePath):
+        open_source(path, store.directory)
+    assert not store.events()
+
+
+def test_runtime_guard_rejects_data_directory_alias(setup):
+    from logsentinel.portal.source_paths import UnsafeSourcePath
+
+    store, source, path = setup
+    private = store.directory / "innocent.log"
+    private.write_text("synthetic private data\n")
+    path.symlink_to(private)
+    with pytest.raises(UnsafeSourcePath):
+        Collector(store).file(source, path)
+    assert not store.events()

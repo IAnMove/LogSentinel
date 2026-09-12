@@ -402,22 +402,9 @@ def create_app(directory, background=True):
         if kind == "rule":
             validate_rule(Rule(**data))
         if kind == "source" and data["kind"] in ("file", "folder"):
-            path = Path(data["path"]).expanduser().resolve()
-            if path.is_relative_to(store.directory):
-                raise HTTPException(
-                    400, "The application data directory cannot be a log source"
-                )
-            names = {"id_rsa", "id_ed25519", "id_ecdsa", "id_dsa", "shadow", "gshadow", "sudoers"}
-            blocked = (
-                "/etc/shadow",
-                "/etc/gshadow",
-                "/etc/sudoers",
-                "/etc/passwd",
-            )
-            if path.name in names or str(path) in blocked:
-                raise HTTPException(
-                    400, "Refusing to ingest this path as a log source"
-                )
+            from .source_paths import validate_source_path
+
+            path = validate_source_path(data["path"], store.directory)
             unusual = any(
                 path == Path(root) or path.is_relative_to(root)
                 for root in ("/etc", "/root", "/proc", "/sys", "/dev")
