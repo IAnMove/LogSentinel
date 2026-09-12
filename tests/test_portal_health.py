@@ -193,7 +193,9 @@ async def test_automatic_model_failures_back_off_and_success_resets(
     ]
 
     async def cycle():
-        return results.pop(0)
+        result = results.pop(0)
+        c.app.state.analyzer.provider_failed = bool(result["errors"])
+        return result
 
     monkeypatch.setattr(c.app.state.analyzer, "cycle", cycle)
     await monitor.tick()

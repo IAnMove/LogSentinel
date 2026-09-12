@@ -14,7 +14,7 @@ class Monitor:
 
     def reschedule(self):
         cfg = self.store.settings()
-        signature = (cfg.enabled, cfg.interval_seconds, cfg.adaptive_batching)
+        signature = (cfg.enabled, cfg.interval_seconds, cfg.adaptive_batching, cfg.llm.provider, cfg.llm.base_url, cfg.llm.model)
         if signature != self.signature:
             self.next_due = time.time()
             if self.signature is not None:
@@ -38,7 +38,7 @@ class Monitor:
             self.next_due = time.time() + cfg.interval_seconds
             started = time.time()
             result = await self.analyzer.cycle()
-            if result.get("errors"):
+            if self.analyzer.provider_failed:
                 failures = min(
                     10, int(self.store.meta("model_cycle_failures") or 0) + 1
                 )

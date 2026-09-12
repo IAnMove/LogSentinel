@@ -5,6 +5,7 @@ from collections import deque
 from contextlib import nullcontext
 import json
 import hashlib
+import httpx
 import time
 
 from .batch_budget import batch_budget, input_ceiling
@@ -354,6 +355,8 @@ class ReviewQueue:
                     )
                 continue
             batch = json.loads(row["batch"])
+            if batch.get("retry_at", 0) > time.time():
+                continue
             saved = Settings.model_validate_json(row["config"])
             identity = lambda c: (
                 c.llm.provider,
@@ -756,6 +759,8 @@ class ReviewQueue:
                         else lambda r: self.validate_verification(r, batch)
                     ),
                 )
+                self.analyzer.provider_failed = False
+                batch.pop("retry_at", None)
                 if phase == "triage":
                     verdict = Verdict.model_validate(result)
                     self.analyzer.validate_refs(
@@ -832,6 +837,15 @@ class ReviewQueue:
                         connection=db,
                     )
                 return int(called), 0
+            shared = isinstance(exc, (httpx.RequestError, TimeoutError)) or (
+                isinstance(exc, httpx.HTTPStatusError) and (exc.response.status_code in (401, 403, 429) or exc.response.status_code >= 500)
+            )
+            if shared:
+                self.analyzer.provider_failed = True
+            else:
+                with self.store.connect() as db:
+                    attempts = db.execute("SELECT attempts FROM jobs WHERE id=?", (job,)).fetchone()[0]
+                batch["retry_at"] = time.time() + min(300, 5 * 2 ** min(6, max(attempts, batch.get("verification_attempts", 0))))
             error = safe_error(exc, (cfg.llm.api_key,))
             if phase.startswith("verification"):
                 self.save(
@@ -846,10 +860,8 @@ class ReviewQueue:
                 )
             else:
                 with self.store.connect() as db:
-                    db.execute(
-                        "UPDATE jobs SET status=CASE WHEN attempts>=3 THEN 'failed' ELSE 'retry' END,error=?,updated=? WHERE id=?",
-                        (error, time.time(), job),
-                    )
+                    attempts = db.execute("SELECT attempts FROM jobs WHERE id=?", (job,)).fetchone()[0]
+                self.save(job, batch, "failed" if attempts >= 3 else "retry", error)
                 self.store.mark(batch["selected"], "error")
             return int(called), 1
 

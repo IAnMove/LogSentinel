@@ -296,12 +296,14 @@ class Analyzer:
         self.finished = None
         self.outcome = None
         self.calls_started = 0
+        self.provider_failed = False
 
     async def cycle(self):
         async with self.cycle_lock:
             self.running = True
             self.started = time.time()
             self.calls_started = 0
+            self.provider_failed = False
             try:
                 result = await self._cycle()
                 self.outcome = (

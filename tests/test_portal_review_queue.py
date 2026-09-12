@@ -295,7 +295,7 @@ async def test_every_candidate_gets_independent_verification_in_bounded_chunks(q
 
 
 @pytest.mark.asyncio
-async def test_omitted_verification_candidate_is_retried_and_never_erased(queue):
+async def test_omitted_verification_candidate_is_retried_and_never_erased(queue, monkeypatch):
     store, machine, source = queue
     configure(store, max_calls=2)
     ingest(store, source, 2)
@@ -328,7 +328,10 @@ async def test_omitted_verification_candidate_is_retried_and_never_erased(queue)
         }
 
     analyzer.client.call = model
+    clock = [time.time()]
+    monkeypatch.setattr(time, "time", lambda: clock[0])
     for _ in range(3):
+        clock[0] += 600
         await analyzer.cycle()
         assert len(store.rows("problems")) == 2
         assert all(p["status"] == "open" for p in store.rows("problems"))
@@ -613,3 +616,28 @@ async def test_model_cannot_downgrade_or_resolve_deterministic_finding(queue, le
     # Rechecking the exact evidence must not create a second deterministic issue.
     apply_signals(analyzer, machine_id=machine["id"], events=store.events())
     assert len(store.rows("problems")) == 2
+
+
+@pytest.mark.asyncio
+async def test_bad_job_does_not_back_off_other_machines(queue):
+    store, machine, source = queue
+    configure(store, enabled=True, max_calls=3)
+    other = store.put("machine", Machine(name="Healthy host").model_dump())
+    sid = store.put("source", Source(name="Other logs", machine_id=other, kind="push").model_dump())
+    ingest(store, source, 1)
+    ingest(store, store.get("source", sid), 1)
+    analyzer = Analyzer(store)
+    async def reply(payload, **kw):
+        if kw["machine"] == machine["id"]:
+            raise ValueError("Model cited unavailable evidence")
+        return {"findings": []}
+    analyzer.client.call = reply
+    monitor = Monitor(store, analyzer, True)
+    await monitor.tick()
+    assert store.events(machine_id=other)[0]["status"] == "compact"
+    assert monitor.state()["retry_after"] is None
+    worker = ReviewQueue(analyzer)
+    assert worker.ready(machine, store.settings(), set()) is None
+    with store.connect() as db:
+        batch = json.loads(db.execute("SELECT b.data FROM review_batches b JOIN jobs j ON j.id=b.job_id WHERE j.machine_id=?", (machine["id"],)).fetchone()[0])
+    assert batch["retry_at"] > time.time()
