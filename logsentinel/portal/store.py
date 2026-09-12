@@ -55,6 +55,8 @@ class Store:
             CREATE INDEX IF NOT EXISTS signal_window ON signal_hits(signal,machine_id,source_id,policy,instant);
             CREATE TABLE IF NOT EXISTS jobs(id TEXT PRIMARY KEY,machine_id TEXT,event_ids TEXT,status TEXT,created REAL,updated REAL,attempts INTEGER DEFAULT 0,config TEXT,error TEXT);
             CREATE TABLE IF NOT EXISTS review_batches(job_id TEXT PRIMARY KEY REFERENCES jobs(id) ON DELETE CASCADE,data TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS review_parts(job_id TEXT PRIMARY KEY REFERENCES jobs(id) ON DELETE CASCADE,event_id TEXT REFERENCES events(id) ON DELETE CASCADE,start INTEGER,end INTEGER,covered INTEGER DEFAULT 0);
+            CREATE INDEX IF NOT EXISTS parts_event ON review_parts(event_id);
             CREATE INDEX IF NOT EXISTS jobs_ready ON jobs(machine_id,status,created);
             CREATE TABLE IF NOT EXISTS problems(id TEXT PRIMARY KEY,machine_id TEXT,fingerprint TEXT,title TEXT,severity TEXT,status TEXT,first_seen REAL,last_seen REAL,count INTEGER,data TEXT,UNIQUE(machine_id,fingerprint));
             CREATE TABLE IF NOT EXISTS appearances(problem_id TEXT,event_id TEXT,PRIMARY KEY(problem_id,event_id));
@@ -83,6 +85,8 @@ class Store:
                 "INSERT OR IGNORE INTO meta VALUES('admin_token',?)",
                 (secrets.token_urlsafe(32),),
             )
+            if db.execute("INSERT OR IGNORE INTO meta VALUES('fragment_version','1')").rowcount:
+                db.execute("UPDATE events SET status='pending' WHERE status='oversized'")
         os.chmod(self.path, 0o600)
 
     @contextmanager

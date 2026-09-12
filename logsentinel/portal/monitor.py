@@ -113,6 +113,9 @@ class Monitor:
             eligible = db.execute(
                 "SELECT count(*) FROM events e JOIN objects m ON m.id=e.machine_id AND m.kind='machine' WHERE e.status IN ('pending','capacity','queued') AND NOT coalesce(json_extract(m.data,'$.monitoring_paused'),0) AND NOT coalesce(json_extract(m.data,'$.deletion_pending'),0)"
             ).fetchone()[0]
+            parts = dict(db.execute(
+                "SELECT count(DISTINCT p.event_id) originals,count(*) total,coalesce(sum(p.covered),0) completed FROM review_parts p JOIN events e ON e.id=p.event_id WHERE e.status NOT IN ('compact','reviewed')"
+            ).fetchone())
             last_error = db.execute(
                 "SELECT error,updated FROM jobs WHERE error IS NOT NULL AND status IN ('failed','retry','partial') ORDER BY updated DESC LIMIT 1"
             ).fetchone()
@@ -148,6 +151,7 @@ class Monitor:
             "source_health": health,
             "collector_error": self.store.meta("collector_error"),
             "worker_error": self.store.meta("worker_error"),
+            "detector_error": self.store.meta("detector_worker_error"),
             "analysis_enabled": cfg.enabled,
             "analysis_running": self.analyzer.running,
             "model_busy": self.analyzer.lock.locked(),
@@ -184,6 +188,7 @@ class Monitor:
                 errors=counts.get("error", 0),
                 retrying=retry_events,
                 oversized=counts.get("oversized", 0),
+                fragments=parts,
                 oldest_pending=oldest,
             ),
             "last_started": self.analyzer.started or result.get("started"),

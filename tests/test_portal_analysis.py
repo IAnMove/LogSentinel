@@ -308,9 +308,12 @@ async def test_capacity_is_visible_and_preserves_original(data):
 
     a.client.call = healthy
     await a.cycle()
-    assert len(s.events(status="oversized")) >= 1
-    assert any(p["data"].find("monitor.capacity") >= 0 for p in s.rows("problems"))
-    assert any(e["message"] == "x" * 3000 for e in s.events(status="oversized"))
+    from logsentinel.portal.monitor import Monitor
+    coverage = Monitor(s, a, True).state()["coverage"]
+    assert s.events(source_id="oversize")[0]["status"] == "queued"
+    assert coverage["fragments"]["originals"] == 1
+    assert 0 < coverage["fragments"]["completed"] < coverage["fragments"]["total"]
+    assert s.events(source_id="oversize")[0]["message"] == "x" * 3000
 
 
 def test_long_tracebacks_group_by_full_normalized_message(data):

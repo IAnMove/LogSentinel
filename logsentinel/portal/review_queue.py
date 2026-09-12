@@ -4,6 +4,7 @@ import asyncio
 from collections import deque
 from contextlib import nullcontext
 import json
+import hashlib
 import time
 
 from .batch_budget import batch_budget, input_ceiling
@@ -38,6 +39,13 @@ class ReviewQueue:
     def cancel(self, job, batch, reason):
         with self.store.connect() as db:
             db.execute("BEGIN IMMEDIATE")
+            part = db.execute("SELECT event_id FROM review_parts WHERE job_id=?", (job,)).fetchone()
+            if part:
+                db.execute(
+                    "UPDATE jobs SET status='cancelled',error=?,updated=? WHERE id IN (SELECT job_id FROM review_parts WHERE event_id=?) AND status IN ('pending','retry','running','failed')",
+                    (reason, time.time(), part[0]),
+                )
+                db.execute("DELETE FROM review_parts WHERE event_id=?", (part[0],))
             db.execute(
                 "UPDATE events SET status='pending' WHERE id IN (SELECT value FROM json_each(?)) AND status IN ('queued','error')",
                 (dumps(batch["selected"]),),
@@ -235,6 +243,27 @@ class ReviewQueue:
             for e in candidates
             if e["id"] in set(omitted) and not compact([e], tuning["maximum_bytes"])[0]
         ]
+        fragment_work = None
+        if impossible:
+            from .fragments import fragment_groups
+
+            remaining = []
+            for event in impossible:
+                pieces = fragment_groups(event, tuning["maximum_bytes"], (cfg.llm.api_key, *protected_secrets(self.store)))
+                if not pieces or event["status"] not in ("pending", "capacity"):
+                    remaining.append(event)
+                    continue
+                historical_part = event["received"] < cutoff or event["status"] == "capacity"
+                with self.store.connect() as db:
+                    db.execute("BEGIN IMMEDIATE")
+                    for piece in pieces:
+                        work = self.create(machine, cfg, [piece], [event["id"]], tuning["maximum_bytes"], historical_part, connection=db)
+                        offsets = piece["fragment"]
+                        db.execute("INSERT INTO review_parts VALUES(?,?,?,?,0)", (work[0], event["id"], offsets["start"], offsets["end"]))
+                        if fragment_work is None:
+                            fragment_work = work
+                progressed = True
+            impossible = remaining
         if impossible:
             self.store.mark(
                 [e["id"] for e in impossible if e["status"] in ("pending", "capacity")],
@@ -256,7 +285,7 @@ class ReviewQueue:
             )
             progressed = True
         if not groups:
-            return None, progressed
+            return fragment_work, progressed
         selected_set = set(selected)
         fresh_selected = [
             e["id"]
@@ -264,7 +293,7 @@ class ReviewQueue:
             if e["id"] in selected_set and e["status"] in ("pending", "capacity")
         ]
         if not fresh_selected:
-            return None, progressed
+            return fragment_work, progressed
         historical = all(
             e["received"] < cutoff or e["status"] == "capacity"
             for e in candidates
@@ -390,8 +419,9 @@ class ReviewQueue:
             - len(VERIFY_SYSTEM.encode())
             - 2500,
         )
+        rules = self.store.objects("rule")
         for event in originals:
-            if excluded(self.store, event):
+            if excluded(self.store, event, rules):
                 continue
             item = sanitize(
                 {
@@ -400,6 +430,10 @@ class ReviewQueue:
                 },
                 (cfg.llm.api_key, *protected_secrets(self.store)),
             )
+            fragment = next((g for g in batch["groups"] if "fragment" in g and event["id"] in g["event_ids"]), None)
+            if fragment:
+                item["message"] = fragment["message"]
+                item["fragment"] = fragment["fragment"]
             item["id"] = "e" + str(len(packed))
             if len(dumps(packed + [item]).encode()) > budget:
                 continue
@@ -516,7 +550,12 @@ class ReviewQueue:
         verdict = Verdict.model_validate(batch["result"])
         refs = {"g" + str(i): g["event_ids"] for i, g in enumerate(batch["groups"])}
         self.analyzer.validate_refs(verdict, set(refs))
-        self.store.mark(batch["selected"], "compact")
+        with self.store.connect() as db:
+            db.execute("UPDATE review_parts SET covered=1 WHERE job_id=?", (job,))
+            db.execute(
+                "UPDATE events SET status='compact' WHERE id IN (SELECT value FROM json_each(?)) AND NOT EXISTS (SELECT 1 FROM review_parts p WHERE p.event_id=events.id AND p.covered=0)",
+                (dumps(batch["selected"]),),
+            )
         problems = []
         for finding in verdict.findings:
             evidence = list(
@@ -527,8 +566,15 @@ class ReviewQueue:
                 "Preliminary model finding; original-evidence verification has not completed."
             )
             data["verification_status"] = "preliminary"
+            fragments = [g["fragment"] for ref in finding.evidence_ids for g in [batch["groups"][int(ref[1:])]] if "fragment" in g]
+            if fragments:
+                data["evidence_fragments"] = fragments
             pid = self.analyzer.save_finding(
-                machine["id"], data, evidence, notify=False
+                machine["id"], data, evidence, notify=False,
+                fingerprint=(
+                    hashlib.sha256(dumps([evidence, fragments]).encode()).hexdigest()
+                    if fragments else None
+                ),
             )
             problems.append(dict(id=pid, finding=data, evidence=evidence))
         batch["problems"] = problems
@@ -609,7 +655,7 @@ class ReviewQueue:
             # their own general review, which can find unrelated issues.
             with self.store.connect() as db:
                 db.execute(
-                    "UPDATE events SET status='reviewed' WHERE status='compact' AND id IN (SELECT value FROM json_each(?))",
+                    "UPDATE events SET status='reviewed' WHERE status='compact' AND id IN (SELECT value FROM json_each(?)) AND NOT EXISTS (SELECT 1 FROM review_parts p WHERE p.event_id=events.id)",
                     (dumps(original_ids),),
                 )
             if (

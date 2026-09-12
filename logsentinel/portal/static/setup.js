@@ -149,6 +149,9 @@ function drawMonitor(m) {
     details.append(grid, el("div",
       coverage.represented + bilingual(" representados en grupos · ", " represented in groups · ") +
       coverage.originals + bilingual(" originales citados en verificación", " originals cited in verification"), "subtle"));
+    if (coverage.fragments?.originals) details.append(el("div",
+      coverage.fragments.originals + bilingual(" entradas largas en proceso · ", " long entries in progress · ") +
+      coverage.fragments.completed + "/" + coverage.fragments.total + bilingual(" fragmentos analizados; el original cuenta como pendiente hasta completarlos todos", " fragments reviewed; each original remains pending until all its fragments are reviewed")));
     if (coverage.history_remaining || coverage.history_recovered) details.append(el("div",
       bilingual("Recuperación del histórico: ", "History recovery: ") +
       coverage.history_recovered + bilingual(" analizados · ", " reviewed · ") +
