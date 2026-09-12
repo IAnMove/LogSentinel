@@ -12,6 +12,7 @@ from pathlib import Path
 import shutil
 import time
 import httpx
+from .network import CheckedAsyncTransport
 from .rules import matches, redact, sanitize
 from .store import uid, dumps
 
@@ -216,6 +217,7 @@ class Outbox:
         else:
             headers["X-Request-ID"] = payload["delivery_id"]
         async with httpx.AsyncClient(
+                transport=CheckedAsyncTransport(),
             timeout=15, follow_redirects=False, trust_env=False
         ) as client:
             response = await client.post(url, content=raw, headers=headers)

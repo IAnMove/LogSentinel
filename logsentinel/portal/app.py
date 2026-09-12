@@ -11,6 +11,7 @@ from pathlib import Path
 import secrets
 import time
 import httpx
+from .network import CheckedAsyncTransport
 from urllib.parse import urlsplit
 
 from fastapi import FastAPI, Request, HTTPException
@@ -556,6 +557,7 @@ def create_app(directory, background=True):
         models = []
         try:
             async with httpx.AsyncClient(
+                transport=CheckedAsyncTransport(),
                 timeout=10, trust_env=False, follow_redirects=False
             ) as client:
                 headers = (

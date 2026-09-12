@@ -5,6 +5,7 @@ import time
 from pathlib import Path
 from urllib.parse import urlsplit
 import httpx
+from .network import CheckedAsyncTransport
 from .collect import Collector
 from .models import Source, check_url
 from .store import Store
@@ -48,6 +49,7 @@ async def forward(path, receiver, source_id, token, directory, once=False):
         headers = {"Authorization": "Bearer " + token}
         try:
             async with httpx.AsyncClient(
+                transport=CheckedAsyncTransport(),
                 timeout=20, trust_env=False, follow_redirects=False
             ) as client:
 

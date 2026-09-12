@@ -35,7 +35,7 @@ async def test_lost_ack_retries_same_events_and_reclaims_sender_spool(
             raise httpx.ReadTimeout("lost ACK after receiver commit")
 
     monkeypatch.setattr(
-        httpx, "AsyncClient", lambda **kwargs: original(transport=LostAck(), **kwargs)
+        httpx, "AsyncClient", lambda **kwargs: original(transport=LostAck(), **{k: v for k, v in kwargs.items() if k != "transport"})
     )
     spool = tmp_path / "spool"
     with pytest.raises(RuntimeError):
@@ -46,7 +46,7 @@ async def test_lost_ack_retries_same_events_and_reclaims_sender_spool(
     assert json.loads(store.meta("health:" + source))["status"] == "ok"
     assert len(Store(spool).events(status="pending")) == 2
     monkeypatch.setattr(
-        httpx, "AsyncClient", lambda **kwargs: original(transport=transport, **kwargs)
+        httpx, "AsyncClient", lambda **kwargs: original(transport=transport, **{k: v for k, v in kwargs.items() if k != "transport"})
     )
     await forward(str(path), "http://localhost", source, "synthetic", spool, once=True)
     assert len(store.events()) == 2

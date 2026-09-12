@@ -3,6 +3,7 @@
 import json
 from urllib.parse import urlsplit
 import httpx
+from .network import CheckedAsyncTransport
 from .models import check_url
 from .store import Store, dumps
 from .telemetry_data import LinuxSampler, TelemetryConfig
@@ -26,6 +27,7 @@ async def forward_metrics(
         source = {"id": "metric-sender", "machine_id": machine}
         sampler = LinuxSampler()
         async with httpx.AsyncClient(
+                transport=CheckedAsyncTransport(),
             timeout=20, trust_env=False, follow_redirects=False
         ) as client:
 

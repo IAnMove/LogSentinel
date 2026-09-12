@@ -345,7 +345,7 @@ async def test_remote_sender_recovers_lost_ack_and_binds_spool(tmp_path, monkeyp
             raise httpx.ReadTimeout("ACK lost after commit")
 
     monkeypatch.setattr(
-        httpx, "AsyncClient", lambda **kw: original(transport=LostAck(), **kw)
+        httpx, "AsyncClient", lambda **kw: original(transport=LostAck(), **{k: v for k, v in kw.items() if k != "transport"})
     )
     spool = tmp_path / "spool"
     with pytest.raises(RuntimeError, match="retained"):
@@ -355,7 +355,7 @@ async def test_remote_sender_recovers_lost_ack_and_binds_spool(tmp_path, monkeyp
     assert app.state.telemetry.status(machine)["retained_samples"] == 1
     assert len(Store(spool).events()) == 1
     monkeypatch.setattr(
-        httpx, "AsyncClient", lambda **kw: original(transport=transport, **kw)
+        httpx, "AsyncClient", lambda **kw: original(transport=transport, **{k: v for k, v in kw.items() if k != "transport"})
     )
     await forward_metrics("http://localhost", machine, "synthetic", spool, once=True)
     assert app.state.telemetry.status(machine)["retained_samples"] == 2

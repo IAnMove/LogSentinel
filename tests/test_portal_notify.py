@@ -31,7 +31,7 @@ async def test_slack_bot_contract_and_safe_failures(
     monkeypatch.setattr(
         httpx,
         "AsyncClient",
-        lambda **kw: original(transport=httpx.MockTransport(handler), **kw),
+        lambda **kw: original(transport=httpx.MockTransport(handler), **{k: v for k, v in kw.items() if k != "transport"}),
     )
     store = Store(tmp_path)
     dest = Destination(
@@ -75,7 +75,7 @@ async def test_slack_legacy_webhook_accepts_plain_text(tmp_path, monkeypatch):
     monkeypatch.setattr(
         httpx,
         "AsyncClient",
-        lambda **kw: original(transport=httpx.MockTransport(handler), **kw),
+        lambda **kw: original(transport=httpx.MockTransport(handler), **{k: v for k, v in kw.items() if k != "transport"}),
     )
     dest = {"kind": "slack", "url": "https://synthetic.invalid/slack"}
     assert (
@@ -100,7 +100,7 @@ async def test_outgoing_contracts(tmp_path, monkeypatch, kind):
     monkeypatch.setattr(
         httpx,
         "AsyncClient",
-        lambda **kw: original(transport=httpx.MockTransport(handler), **kw),
+        lambda **kw: original(transport=httpx.MockTransport(handler), **{k: v for k, v in kw.items() if k != "transport"}),
     )
     dest = Destination(
         name="test",

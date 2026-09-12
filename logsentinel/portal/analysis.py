@@ -9,6 +9,7 @@ import time
 import regex
 from urllib.parse import urlsplit
 import httpx
+from .network import CheckedAsyncTransport
 from pydantic import ValidationError
 from .models import Verdict
 from .rules import redact, excluded, sanitize, protected_secrets
@@ -121,6 +122,7 @@ class ReviewClient:
         )
         try:
             async with httpx.AsyncClient(
+                transport=CheckedAsyncTransport(),
                 timeout=llm.timeout_seconds, follow_redirects=False, trust_env=False
             ) as client:
                 headers = (

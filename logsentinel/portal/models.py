@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 import ipaddress
+import socket
 from typing import Literal
 from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
@@ -134,7 +135,11 @@ def check_url(value):
     try:
         blocked = _blocked_ip(host)
     except ValueError:
-        blocked = False
+        # libc also accepts integer, hexadecimal, octal and shortened IPv4.
+        try:
+            blocked = _blocked_ip(socket.inet_ntoa(socket.inet_aton(host)))
+        except OSError:
+            blocked = False
     if blocked:
         raise ValueError("This URL points at a link-local or metadata address")
     return value

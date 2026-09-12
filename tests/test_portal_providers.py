@@ -40,7 +40,7 @@ def transport(monkeypatch):
     monkeypatch.setattr(
         httpx,
         "AsyncClient",
-        lambda **kwargs: original(transport=httpx.MockTransport(handle), **kwargs),
+        lambda **kwargs: original(transport=httpx.MockTransport(handle), **{k: v for k, v in kwargs.items() if k != "transport"}),
     )
     return seen
 
@@ -164,7 +164,7 @@ def test_model_list_discards_invalid_and_duplicate_names(
         "AsyncClient",
         lambda **kwargs: original(
             transport=httpx.MockTransport(lambda r: httpx.Response(200, json=body)),
-            **kwargs,
+            **{k: v for k, v in kwargs.items() if k != "transport"},
         ),
     )
     response = c.post(
@@ -184,7 +184,7 @@ def test_html_frontend_is_not_mistaken_for_a_model_server(client, monkeypatch):
             transport=httpx.MockTransport(
                 lambda r: httpx.Response(200, text="<!doctype html>BigPAPI")
             ),
-            **kwargs,
+            **{k: v for k, v in kwargs.items() if k != "transport"},
         ),
     )
     assert c.post("/api/model/info").status_code == 502
@@ -202,7 +202,7 @@ def test_malformed_provider_shapes_return_a_diagnostic_error(client, monkeypatch
         "AsyncClient",
         lambda **kwargs: original(
             transport=httpx.MockTransport(lambda r: httpx.Response(200, json=body)),
-            **kwargs,
+            **{k: v for k, v in kwargs.items() if k != "transport"},
         ),
     )
     response = c.post("/api/model/test", json={"llm": {"provider": "openai"}})

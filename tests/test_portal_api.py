@@ -405,7 +405,7 @@ def test_model_metadata_suggestion_uses_server_information(client, monkeypatch):
     monkeypatch.setattr(
         httpx,
         "AsyncClient",
-        lambda **kwargs: original(transport=httpx.MockTransport(handler), **kwargs),
+        lambda **kwargs: original(transport=httpx.MockTransport(handler), **{k: v for k, v in kwargs.items() if k != "transport"}),
     )
     before = s.settings().model_dump()
     result = c.post("/api/model/info").json()

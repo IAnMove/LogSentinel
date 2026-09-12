@@ -12,6 +12,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 import httpx
+from .network import CheckedTransport
 
 from .enroll import PACKAGE_VERSION, fingerprint
 
@@ -70,6 +71,7 @@ def claim(package, spool, client=None):
     receiver = package["receiver"].rstrip("/")
     owned = client is None
     client = client or httpx.Client(
+        transport=CheckedTransport(verify=verify),
         timeout=20, trust_env=False, follow_redirects=False, verify=verify
     )
     try:
