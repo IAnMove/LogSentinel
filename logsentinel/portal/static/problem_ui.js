@@ -60,6 +60,8 @@ function problemContextCard(p) {
       cooldown: ["En espera para no repetir el aviso", "Within notification cooldown"],
       queued: ["Entrega solicitada", "Delivery requested"],
       historical_backfill: ["Análisis de histórico: sin aviso automático", "Historical backfill: no automatic notification"],
+      verification_rejected: ["La verificación descartó el candidato", "Verification rejected the candidate"],
+      verification_uncertain: ["La verificación no pudo confirmar el candidato", "Verification could not confirm the candidate"],
       awaiting_verification: ["Pendiente de verificación", "Awaiting verification"],
       automatic_delivery_not_requested: ["Sin solicitud de envío automático", "Automatic delivery not requested"],
     };

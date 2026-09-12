@@ -239,7 +239,7 @@ def cases(held_out=False):
                 ),
                 disk,
             ],
-            [issue([1], ["storage", "reliability"])],
+            [issue([1], ["storage", "reliability"]), dict(issue([0], ["access", "application", "other", "security"], ("MEDIUM", "HIGH")), optional=True)],
         ),
         case(
             "unrelated_http_success_and_failure",
@@ -298,11 +298,13 @@ def score(case, result, *, combined=False):
             unsupported.append(index)
             continue
         matched.setdefault(hits[0], set()).add(origin)
+    required = {i for i, wanted in enumerate(expected) if not wanted.get("optional")}
     return dict(
-        passed=len(matched) == len(expected) and not unsupported,
-        expected=len(expected),
-        matched=len(matched),
-        unmatched=[i for i in range(len(expected)) if i not in matched],
+        passed=required.issubset(matched) and not unsupported,
+        expected=len(required),
+        matched=len(required.intersection(matched)),
+        optional_matched=len(set(matched) - required),
+        unmatched=sorted(required - set(matched)),
         unexpected_or_misattributed=unsupported,
     )
 
@@ -390,6 +392,8 @@ async def run(args):
         cfg.llm.model = args.model
     results = []
     captured = {}
+    from logsentinel.portal.build_info import running_build
+    build = running_build()
     original_post = httpx.AsyncClient.post
 
     async def capture_response(self, *positional, **kwargs):
@@ -409,6 +413,8 @@ async def run(args):
         client = ReviewClient(store)
         for variant in args.variants.split(","):
             for case in cases(args.held_out):
+                if getattr(args, "cases", None) and case["name"] not in args.cases.split(","):
+                    continue
                 config = cfg.model_copy(deep=True)
                 if variant == "triage":
                     config.llm.enable_thinking = config.triage_thinking
@@ -417,6 +423,7 @@ async def run(args):
                 )
                 print("START", variant, case["name"], flush=True)
                 started = time.monotonic()
+                started_wall = time.time()
                 captured.clear()
                 observed_store = store
                 try:
@@ -443,18 +450,22 @@ async def run(args):
                     row.update(passed=False, error=type(exc).__name__)
                     row["invalid_synthetic_response"] = captured.get("content")
                 row["seconds"] = round(time.monotonic() - started, 3)
-                with (
-                    observed_store if variant == "pipeline" else store
-                ).connect() as db:
-                    usage = db.execute(
-                        "SELECT input_tokens,output_tokens,detail FROM usage ORDER BY created DESC LIMIT 1"
-                    ).fetchone()
-                if usage:
-                    row["usage"] = dict(usage, detail=json.loads(usage["detail"]))
+                with observed_store.connect() as db:
+                    usages = db.execute(
+                        "SELECT duration,status,input_tokens,output_tokens,detail FROM usage WHERE created>=? ORDER BY created",
+                        (started_wall,),
+                    ).fetchall()
+                row["calls"] = [dict(u, detail=json.loads(u["detail"])) for u in usages]
+                row["usage"] = dict(
+                    calls=len(usages), input_tokens=sum(u["input_tokens"] or 0 for u in usages),
+                    output_tokens=sum(u["output_tokens"] or 0 for u in usages),
+                    model_call_seconds=sum(u["duration"] for u in usages),
+                )
                 results.append(row)
                 Path(args.output).write_text(
                     json.dumps(
                         dict(
+                            build=build,
                             model=cfg.llm.model,
                             context_tokens=cfg.context_tokens,
                             output_limit=cfg.llm.max_tokens,
@@ -478,5 +489,6 @@ if __name__ == "__main__":
     parser.add_argument("--output", required=True)
     parser.add_argument("--variants", default="triage,baseline")
     parser.add_argument("--held-out", action="store_true")
+    parser.add_argument("--cases", help="Comma separated synthetic case names")
     parser.add_argument("--model", help="Override only the model for a comparable synthetic run")
     sys.exit(0 if asyncio.run(run(parser.parse_args())) else 1)

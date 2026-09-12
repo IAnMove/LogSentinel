@@ -656,3 +656,21 @@ def test_known_iso_routine_template_keeps_resources_and_burst_shape():
     repeated = next(g for g in groups if g["count"] == 3)
     assert repeated["frequency"]["counts"] == [2, 0, 0, 1]
     assert len(repeated["examples"]) == 2
+
+
+@pytest.mark.asyncio
+async def test_independent_candidates_on_one_original_cannot_overwrite_each_other(queue):
+    store, machine, source = queue
+    configure(store, max_calls=2, verification="all")
+    store.ingest(source, [dict(origin="multi", message="Disk write failed; independent backup TLS error")])
+    analyzer = Analyzer(store)
+    async def reply(payload, **kw):
+        if "groups" in payload:
+            return {"findings": [dict(title=title, summary=title, category=category, severity="MEDIUM", evidence_ids=[payload["groups"][0]["id"]]) for title, category in (("Disk failure", "storage"), ("Backup TLS failure", "network"))]}
+        return {"assessments": [dict(candidate_id=c["candidate_id"], status="confirmed", severity="HIGH", evidence_ids=c["evidence_ids"], reason=c["title"]) for c in payload["candidates"]]}
+    analyzer.client.call = reply
+    assert (await analyzer.cycle())["errors"] == 0
+    problems = store.rows("problems")
+    assert len(problems) == 2
+    assert {p["title"] for p in problems} == {"Disk failure", "Backup TLS failure"}
+    assert all(p["severity"] == json.loads(p["data"])["severity"] == "HIGH" for p in problems)
