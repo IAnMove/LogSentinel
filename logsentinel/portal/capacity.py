@@ -36,10 +36,12 @@ def review_signature(cfg):
 def coverage_signal(hour):
     """Last-hour backlog vs review rate. Unreviewed is never a clean result."""
     events = hour.get("events") or 0
+    blocked = (hour.get("error") or 0) + (hour.get("oversized") or 0)
     backlog = (
         (hour.get("capacity") or 0)
         + (hour.get("pending") or 0)
         + (hour.get("queued") or 0)
+        + blocked
     )
     incoming = hour.get("incoming_per_minute") or 0
     covered = hour.get("covered_per_minute") or 0
@@ -48,7 +50,10 @@ def coverage_signal(hour):
         ratio >= 0.2
         or (incoming > 0 and covered * 2 < incoming and backlog >= 20)
     )
-    if not behind:
+    if blocked:
+        level = "critical" if behind and (ratio >= 0.5 or (incoming > 0 and covered * 5 < incoming)) else "warn"
+        reason = "review_blocked"
+    elif not behind:
         level, reason = "ok", "low_volume" if events < 20 else "keeping_up"
     elif ratio >= 0.5 or (incoming > 0 and covered * 5 < incoming):
         level, reason = "critical", "model_behind"
@@ -59,6 +64,7 @@ def coverage_signal(hour):
         reason=reason,
         events=events,
         backlog=backlog,
+        blocked=blocked,
         ratio=round(ratio, 3),
         incoming_per_minute=incoming,
         covered_per_minute=covered,

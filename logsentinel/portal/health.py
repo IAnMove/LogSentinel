@@ -176,7 +176,9 @@ class HealthMonitor:
             "coverage",
             local,
             signal["level"] != "ok",
-            "Log review is behind incoming volume",
+            "Log review is blocked by analysis errors or oversized events"
+            if signal["reason"] == "review_blocked"
+            else "Log review is behind incoming volume",
             dict(
                 signal,
                 meaning="Unreviewed events are not a clean security result. Capture can still be healthy.",

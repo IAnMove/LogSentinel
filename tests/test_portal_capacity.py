@@ -232,3 +232,39 @@ async def test_old_capacity_history_does_not_create_a_new_overload_warning(clien
     assert not s.events(status="capacity")
     assert len(s.events(status="compact")) == 2
     assert not s.rows("problems")
+
+
+@pytest.mark.parametrize("status", ["error", "oversized"])
+@pytest.mark.parametrize("count,level", [(1, "warn"), (100, "critical")])
+def test_blocked_reviews_never_show_green_even_at_low_volume(status, count, level):
+    signal = coverage_signal(dict(events=count, **{status: count}, incoming_per_minute=count / 60, covered_per_minute=0))
+    assert signal["level"] == level
+    assert signal["reason"] == "review_blocked"
+    assert signal["backlog"] == signal["blocked"] == count
+    assert signal["ratio"] == 1
+
+
+def test_uncovered_counts_do_not_double_count_policy_or_retry_states():
+    signal = coverage_signal(dict(events=100, reviewed=10, error=10, oversized=20, queued=5, pending=5, excluded=30, policy=20))
+    assert signal["backlog"] == 40
+    assert signal["blocked"] == 30
+    assert signal["level"] == "warn"
+    clean = coverage_signal(dict(events=100, reviewed=10, excluded=70, policy=20))
+    assert clean["level"] == "ok"
+    assert clean["backlog"] == 0
+
+
+def test_failed_and_oversized_events_show_in_api_without_breaking_liveness(client):
+    c, store = client
+    machine, source = machine_source(c)
+    now = time.time()
+    event(store, source, "failed", now - 10, "error")
+    event(store, source, "large", now - 10, "oversized")
+    event(store, source, "old-error", now - 4000, "error")
+    report = c.get("/api/capacity").json()
+    assert report["signal"]["level"] == "warn"
+    assert report["signal"]["blocked"] == report["signal"]["backlog"] == 2
+    assert report["error"] == report["oversized"] == 1
+    check = next(c for c in c.app.state.health.tick()["checks"] if c["key"] == "coverage")
+    assert check["bad"] and not check["liveness"]
+    assert c.get("/healthz").status_code == 200

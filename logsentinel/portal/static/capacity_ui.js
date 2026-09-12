@@ -97,7 +97,12 @@ async function mountCapacitySummary(root, machine = scope) {
     const signal = r.signal || {};
     const banner = el(
       "p",
-      signal.level === "critical"
+      signal.reason === "review_blocked"
+        ? bilingual(
+            "La revisión está incompleta: hay eventos con errores de análisis o que no caben en el contexto. Revisa Actividad y el presupuesto de entrada.",
+            "Review is incomplete: some events have analysis errors or exceed the input budget. Check Activity and the input budget.",
+          )
+        : signal.level === "critical"
         ? bilingual(
             "La revisión va muy por detrás de lo que entra. Lo no revisado no es un resultado limpio.",
             "Review is far behind incoming logs. Unreviewed is not a clean result.",
@@ -125,7 +130,11 @@ async function mountCapacitySummary(root, machine = scope) {
           coverageNumber(r.pending) +
           bilingual(" pendientes · ", " waiting · ") +
           coverageNumber(r.capacity) +
-          bilingual(" en la cola histórica", " in the historical queue"),
+          bilingual(" en la cola histórica · ", " in the historical queue · ") +
+          coverageNumber(r.error) +
+          bilingual(" con error · ", " with errors · ") +
+          coverageNumber(r.oversized) +
+          bilingual(" no caben en el contexto", " exceed the input budget"),
       ),
     );
     p.append(
