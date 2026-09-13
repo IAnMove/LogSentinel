@@ -61,6 +61,10 @@ Los servidores LLM fuera de loopback requieren activar la autorización de enví
 
 ## Enviar desde otro equipo
 
+Para el recorrido por HTTPS con certificado local, cuenta limitada, paquete de
+alta y servicio emisor, sigue la [guía de equipos remotos](GUIA_EQUIPOS.md).
+El ejemplo siguiente usa un túnel SSH como alternativa.
+
 En el portal crea una fuente **Recepción remota**, actívala y genera su token. Para mantener el receptor privado, en el emisor abre un túnel hacia el servidor:
 
 ```bash

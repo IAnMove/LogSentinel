@@ -98,6 +98,10 @@ with tempfile.TemporaryDirectory(prefix="sentinel-guidance-") as directory:
             assert page.locator("[name=input_budget]").input_value() == "3000"
             page.get_by_role("button", name="Descartar cambios del formulario").click()
             assert page.locator("[name=input_budget]").input_value() == "12000"
+            page.get_by_text("Límites de recepción remota", exact=True).click()
+            page.get_by_label("MiB por fuente y hora", exact=True).fill("128")
+            page.get_by_label("Eventos por fuente y hora", exact=True).fill("10000")
+            assert store.settings().sender_mb_per_hour == 256
             page.get_by_label("Perfil a preparar").select_option("small")
             page.get_by_role("button", name="Preparar este perfil sin guardar").click()
             page.get_by_role("button", name="Guardar ajustes", exact=True).click()
@@ -106,6 +110,8 @@ with tempfile.TemporaryDirectory(prefix="sentinel-guidance-") as directory:
             assert store.settings().input_budget == 3000
             assert store.settings().llm == cfg.llm
             assert store.settings().enabled and store.settings().verification == "important"
+            assert store.settings().sender_mb_per_hour == 128
+            assert store.settings().sender_events_per_hour == 10000
             page.get_by_label("Language / Idioma").select_option("en")
             nav.get_by_role("button", name="Rules", exact=True).click()
             card = page.locator(".guide-card").filter(has=page.get_by_role("heading", name="Successful systemd timers", exact=True))

@@ -1033,6 +1033,8 @@ function settingsView(root) {
     "number",
     c.disk_limit_mb,
   );
+  add("sender_mb_per_hour", bilingual("MiB por fuente y hora", "MiB per source per hour"), "number", c.sender_mb_per_hour);
+  add("sender_events_per_hour", bilingual("Eventos por fuente y hora", "Events per source per hour"), "number", c.sender_events_per_hour);
   add(
     "remote_allowed",
     t("Autorizar enviar contexto al servidor remoto configurado"),
@@ -1149,6 +1151,15 @@ function settingsView(root) {
     bilingual("Cuánto histórico guardar", "How much history to keep"),
     ["retention_days", "disk_limit_mb"],
   );
+  const senderLimits = guideFields(
+    f,
+    bilingual("Límites de recepción remota", "Remote reception limits"),
+    ["sender_mb_per_hour", "sender_events_per_hour"],
+  );
+  senderLimits.append(el("p", bilingual(
+    "Cada fuente tiene su propio contador; estos límites se aplican a todas las fuentes remotas. Si se agotan, el emisor conserva el lote y espera. La cuota de disco del central sigue siendo compartida.",
+    "Each source has its own counter; these limits apply to all remote sources. When exhausted, the sender retains its batch and waits. The central disk quota is still shared.",
+  ), "field-help"));
   const submit = el("button", t("Guardar ajustes"));
   const savedDraft = JSON.stringify(formData(f)),
     savedConnection = JSON.stringify(llmFormSettings(f, c).llm),
