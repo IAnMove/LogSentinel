@@ -63,22 +63,10 @@ Los servidores LLM fuera de loopback requieren activar la autorización de enví
 
 Para el recorrido por HTTPS con certificado local, cuenta limitada, paquete de
 alta y servicio emisor, sigue la [guía de equipos remotos](GUIA_EQUIPOS.md).
-El ejemplo siguiente usa un túnel SSH como alternativa.
-
-En el portal crea una fuente **Recepción remota**, actívala y genera su token. Para mantener el receptor privado, en el emisor abre un túnel hacia el servidor:
-
-```bash
-ssh -N -L 9876:127.0.0.1:8765 usuario@servidor
-```
-
-En otra terminal del emisor, instala LogSentinel y ejecuta:
-
-```bash
-read -rs LOGSENTINEL_PUSH_TOKEN
-export LOGSENTINEL_PUSH_TOKEN
-logsentinel forward /ruta/app.log --receiver http://127.0.0.1:9876 \
-  --source-id ID_DEL_PORTAL --spool ~/.local/share/logsentinel/emisor-app
-```
+También hay un [encargo listo para otro Codex](CODEX_CLIENTE.md), con los archivos
+que debe entregar el central y las comprobaciones que debe realizar el cliente.
+El emisor utiliza el receptor separado del panel. Puede alcanzarlo directamente
+por HTTPS en la LAN o mediante un túnel SSH, manteniendo la validación TLS.
 
 El emisor mantiene IDs y cola locales. El receptor confirma solo después de persistir; un ACK perdido se puede reintentar sin duplicar eventos retenidos. Cada archivo necesita su propio spool. `--once` envía un lote para pruebas. No reutilices un spool para otra ruta. La cuota llena impide avanzar el cursor; conserva los archivos originales hasta resolverla. El emisor no configura SSH ni un proxy TLS automáticamente.
 
