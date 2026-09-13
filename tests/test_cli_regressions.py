@@ -10,6 +10,47 @@ from logsentinel.core.engine import SentinelEngine
 from logsentinel.core.models import LLMVerdict, LogEntry
 
 
+def test_forward_accepts_private_token_file_without_printing_it(tmp_path, monkeypatch):
+    from importlib import import_module
+    sender = import_module("logsentinel.portal.forward")
+    call = AsyncMock()
+    monkeypatch.setattr(sender, "forward", call)
+    token = tmp_path / "private token"
+    token.write_text("synthetic-private-credential\n")
+    result = CliRunner().invoke(cli.app, [
+        "forward", "/var/log/app.log", "--receiver", "https://central.invalid:8767",
+        "--source-id", "source1", "--spool", str(tmp_path / "spool"),
+        "--token-file", str(token), "--once",
+    ])
+    assert result.exit_code == 0, result.exception
+    assert "synthetic-private-credential" not in result.output
+    assert call.await_args.args[3] == "synthetic-private-credential"
+    assert call.await_args.args[-1] is True
+
+
+def test_enroll_prints_a_quoted_forward_command_not_a_shell_secret(tmp_path, monkeypatch):
+    import json
+    import shlex
+    from logsentinel.portal import enrollment_client
+    spool = tmp_path / "spool with spaces; literal"
+    token_path = str(spool / "push-token")
+    monkeypatch.setattr(enrollment_client, "claim", lambda *_: dict(
+        source_id="s1", receiver="https://central.invalid:8767", token_path=token_path,
+        ca_path="", fingerprint="",
+    ))
+    package = tmp_path / "package.json"
+    package.write_text(json.dumps({}))
+    # Keep Rich from wrapping the executable command for the assertion.
+    monkeypatch.setattr(cli.console, "width", 1000)
+    result = CliRunner().invoke(cli.app, ["enroll", str(package), "--spool", str(spool)])
+    assert result.exit_code == 0, result.exception
+    command = next(line.strip() for line in result.output.splitlines() if line.strip().startswith("logsentinel forward"))
+    words = shlex.split(command)
+    assert words[words.index("--token-file") + 1] == token_path
+    assert words[words.index("--spool") + 1] == str(spool)
+    assert "$(cat" not in command
+
+
 def test_portal_never_prints_bootstrap_credential_to_service_logs(tmp_path, monkeypatch):
     import uvicorn
     from logsentinel.portal.store import Store

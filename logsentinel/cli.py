@@ -760,12 +760,19 @@ def forward_command(path: str, receiver: str = typer.Option(..., "--receiver"),
                     source_id: str = typer.Option(..., "--source-id"),
                     spool: str = typer.Option(..., "--spool"),
                     token_env: str = typer.Option("LOGSENTINEL_PUSH_TOKEN", "--token-env"),
+                    token_file: Optional[str] = typer.Option(None, "--token-file", help="Owner-readable credential file written by enroll"),
                     once: bool = typer.Option(False, "--once")) -> None:
     """Forward a file through HTTPS or an SSH tunnel, keeping unacknowledged events."""
     from logsentinel.portal.forward import forward
-    token = os.environ.get(token_env)
+    if token_file:
+        try:
+            token = Path(token_file).expanduser().read_text().strip()
+        except OSError:
+            raise typer.BadParameter("Cannot read --token-file; check the path and service account permissions") from None
+    else:
+        token = os.environ.get(token_env)
     if not token:
-        raise typer.BadParameter("Set the sender token in the selected environment variable")
+        raise typer.BadParameter("Give --token-file from enroll or set the selected token environment variable")
     asyncio.run(forward(path, receiver, source_id, token, spool, once))
 
 
@@ -834,9 +841,13 @@ def enroll_command(
     if result.get("ca_path"):
         console.print("Trusted certificate stored in:", result["ca_path"], markup=False)
     console.print("[cyan]Start forwarding with:[/cyan]")
+    import shlex
     console.print(
-        f"  LOGSENTINEL_PUSH_TOKEN=$(cat {result['token_path']}) logsentinel forward /path/app.log "
-        f"--receiver {result['receiver']} --source-id {result['source_id']} --spool {spool}"
+        "  " + shlex.join([
+            "logsentinel", "forward", "/path/app.log", "--receiver", result["receiver"],
+            "--source-id", result["source_id"], "--spool", str(Path(spool).expanduser()),
+            "--token-file", result["token_path"],
+        ]), markup=False,
     )
 
 

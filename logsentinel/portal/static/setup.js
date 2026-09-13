@@ -888,8 +888,8 @@ function senderSetupGuide(source) {
           "On the central, check that the ingest listener is running and that the client can reach its HTTPS address. This is separate from the portal address.",
         ),
         bilingual(
-          "Genera el paquete de alta en la terminal del central. Sustituye las rutas y CENTRAL por tus valores; --data-dir debe señalar los datos de este portal. Si usas una CA privada, indica su certificado con --ca-cert.",
-          "Generate the enrollment package in the central’s terminal. Replace paths and CENTRAL with your values; --data-dir must point to this portal’s data. For a private CA, provide its certificate with --ca-cert.",
+          "Genera el paquete de alta en la terminal del central. Sustituye las rutas y CENTRAL por tus valores; --data-dir debe señalar los datos de este portal. El paquete HTTPS necesita el certificado de confianza con --ca-cert, nunca la clave privada.",
+          "Generate the enrollment package in the central’s terminal. Replace paths and CENTRAL with your values; --data-dir must point to this portal’s data. The HTTPS package needs its trusted certificate with --ca-cert, never the private key.",
         ),
       ],
     ),
@@ -897,7 +897,7 @@ function senderSetupGuide(source) {
       "pre",
       "logsentinel enrollment-package --source-id " +
         source.id +
-        " --receiver https://CENTRAL:8767 --data-dir /RUTA/DEL/PORTAL --out cliente.json",
+        " --receiver https://CENTRAL:8767 --ca-cert /RUTA/ca.pem --data-dir /RUTA/DEL/PORTAL --out cliente.json",
     ),
     howTo(bilingual("Después", "Then"), [
       bilingual(

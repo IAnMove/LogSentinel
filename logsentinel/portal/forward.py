@@ -47,9 +47,11 @@ async def forward(path, receiver, source_id, token, directory, once=False):
             )
         heartbeat_due = 0
         headers = {"Authorization": "Bearer " + token}
+        ca_path = store.directory / "receiver-ca.pem"
+        verify = str(ca_path) if ca_path.exists() else True
         try:
             async with httpx.AsyncClient(
-                transport=CheckedAsyncTransport(),
+                transport=CheckedAsyncTransport(verify=verify),
                 timeout=20, trust_env=False, follow_redirects=False
             ) as client:
 
