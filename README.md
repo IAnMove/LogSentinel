@@ -63,12 +63,20 @@ Los servidores LLM fuera de loopback requieren activar la autorización de enví
 
 Para el recorrido por HTTPS con certificado local, cuenta limitada, paquete de
 alta y servicio emisor, sigue la [guía de equipos remotos](GUIA_EQUIPOS.md).
+Con el repositorio y el alta entregada por el central, en un Linux con systemd:
+
+```bash
+sudo ./setup-client.sh --package /ruta/alta.json
+```
+
+Instala el emisor con una cuenta sin login. Por defecto envía el journal desde
+las entradas nuevas; no instala un modelo ni importa todo el historial.
 También hay un [encargo listo para otro Codex](CODEX_CLIENTE.md), con los archivos
 que debe entregar el central y las comprobaciones que debe realizar el cliente.
 El emisor utiliza el receptor separado del panel. Puede alcanzarlo directamente
 por HTTPS en la LAN o mediante un túnel SSH, manteniendo la validación TLS.
 
-El emisor mantiene IDs y cola locales. El receptor confirma solo después de persistir; un ACK perdido se puede reintentar sin duplicar eventos retenidos. Cada archivo necesita su propio spool. `--once` envía un lote para pruebas. No reutilices un spool para otra ruta. La cuota llena impide avanzar el cursor; conserva los archivos originales hasta resolverla. El emisor no configura SSH ni un proxy TLS automáticamente.
+El emisor mantiene IDs y cola locales. El receptor confirma solo después de persistir; un ACK perdido se puede reintentar sin duplicar eventos retenidos. Cada archivo o journal necesita su propio spool. `--once` envía un lote para pruebas. No reutilices un spool para otra fuente. La cuota llena impide avanzar el cursor; conserva los archivos originales hasta resolverla. El emisor no configura SSH ni un proxy TLS automáticamente.
 
 ## Rotación, límites y notificaciones
 
