@@ -27,6 +27,10 @@ MAX_REQUEST_BYTES = 4_000_000
 def register_ingest(app, store):
     """Attach the sender-facing routes to an app."""
 
+    @app.get("/ingest-info")
+    def ingest_info():
+        return {"version": 1, "formats": ["text", "journal"]}
+
     def push_source(id, request):
         token = request.headers.get("authorization", "").removeprefix("Bearer ")
         expected = store.meta("push:" + id)
@@ -75,6 +79,11 @@ def register_ingest(app, store):
     async def ingest(id: str, request: Request):
         source = push_source(id, request)
         body = await request.json()
+        if not isinstance(body, dict):
+            raise HTTPException(400, "Send an events object")
+        log_format = body.get("format", "text")
+        if log_format not in ("text", "journal"):
+            raise HTTPException(400, "Unsupported log format")
         items = body.get("events", [])
         if not isinstance(items, list) or not 1 <= len(items) <= 500:
             raise HTTPException(400, "Send 1–500 events")
@@ -88,7 +97,19 @@ def register_ingest(app, store):
                 or len(item["raw"].encode()) > 256_000
             ):
                 raise HTTPException(400, "Invalid event")
-            entries.append(normalize(item["raw"], "remote", item["id"]))
+            if log_format == "journal":
+                from logsentinel.collectors.journald import JournaldCollector
+                from logsentinel.config import JournaldSourceConfig
+
+                try:
+                    entry = JournaldCollector(JournaldSourceConfig())._parse_json_line(item["raw"])
+                except (ValueError, TypeError, AttributeError, RecursionError):
+                    entry = None
+                if entry is None:
+                    raise HTTPException(400, "Invalid journal event")
+                entries.append(dict(entry.model_dump(mode="json"), origin=item["id"]))
+            else:
+                entries.append(normalize(item["raw"], "remote", item["id"]))
         offered = sum(len(item["raw"].encode()) for item in items)
         retry_after = store.charge_sender_quota(
             source["id"], offered, len(items), store.settings()

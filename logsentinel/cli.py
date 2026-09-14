@@ -756,14 +756,18 @@ def portal(data_dir: str = typer.Option("~/.local/share/logsentinel/portal", "--
 
 
 @app.command(name="forward")
-def forward_command(path: str, receiver: str = typer.Option(..., "--receiver"),
+def forward_command(path: Optional[str] = typer.Argument(None), receiver: str = typer.Option(..., "--receiver"),
                     source_id: str = typer.Option(..., "--source-id"),
                     spool: str = typer.Option(..., "--spool"),
                     token_env: str = typer.Option("LOGSENTINEL_PUSH_TOKEN", "--token-env"),
                     token_file: Optional[str] = typer.Option(None, "--token-file", help="Owner-readable credential file written by enroll"),
-                    once: bool = typer.Option(False, "--once")) -> None:
-    """Forward a file through HTTPS or an SSH tunnel, keeping unacknowledged events."""
+                    once: bool = typer.Option(False, "--once"),
+                    journal: bool = typer.Option(False, "--journal", help="Read the systemd journal instead of a file"),
+                    new_only: bool = typer.Option(False, "--new-only", help="Start a new spool at the current end; existing cursors are preserved")) -> None:
+    """Forward a file or journal through HTTPS, keeping unacknowledged events."""
     from logsentinel.portal.forward import forward
+    if bool(path) == bool(journal):
+        raise typer.BadParameter("Select one file path or --journal")
     if token_file:
         try:
             token = Path(token_file).expanduser().read_text().strip()
@@ -773,7 +777,8 @@ def forward_command(path: str, receiver: str = typer.Option(..., "--receiver"),
         token = os.environ.get(token_env)
     if not token:
         raise typer.BadParameter("Give --token-file from enroll or set the selected token environment variable")
-    asyncio.run(forward(path, receiver, source_id, token, spool, once))
+    options = {"journal": journal, "new_only": new_only} if journal or new_only else {}
+    asyncio.run(forward(path, receiver, source_id, token, spool, once, **options))
 
 
 @app.command(name="metrics-forward")

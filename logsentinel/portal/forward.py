@@ -12,7 +12,7 @@ from .store import Store
 from .sender import blocking, run_workers, spool_lock, status
 
 
-async def forward(path, receiver, source_id, token, directory, once=False):
+async def forward(path, receiver, source_id, token, directory, once=False, *, journal=False, new_only=False):
     check_url(receiver)
     if urlsplit(receiver).scheme != "https" and urlsplit(receiver).hostname not in (
         "localhost",
@@ -20,23 +20,28 @@ async def forward(path, receiver, source_id, token, directory, once=False):
         "::1",
     ):
         raise ValueError("Use HTTPS or a loopback SSH tunnel")
+    if bool(path) == bool(journal):
+        raise ValueError("Select one file path or --journal")
     store = Store(directory)
     # Bind relative CLI paths to this working directory on first use. Upgrades of
     # legacy relative-path spools must run from their original working directory.
-    path = str(Path(path).expanduser().absolute())
+    path = "" if journal else str(Path(path).expanduser().absolute())
     existing = store.get("source", "sender")
-    if existing and str(Path(existing["path"]).expanduser().absolute()) != path:
+    kind = "journald" if journal else "file"
+    if existing and (existing["kind"] != kind or (not journal and str(Path(existing["path"]).expanduser().absolute()) != path)):
         raise ValueError("This spool belongs to another path")
-    with spool_lock(store, ["logs", receiver.rstrip("/"), source_id, path]):
+    identity = ["journal", receiver.rstrip("/"), source_id] if journal else ["logs", receiver.rstrip("/"), source_id, path]
+    with spool_lock(store, identity):
         collector = Collector(store)
         source = store.get("source", "sender")
         if source is None:
             model = Source(
-                name="Forwarded file",
+                name="Forwarded journal" if journal else "Forwarded file",
                 machine_id="sender",
+                kind=kind,
                 path=path,
                 enabled=True,
-                history=True,
+                history=not new_only,
             )
             store.put("source", model.model_dump(), "sender")
             source = store.get("source", "sender")
@@ -46,6 +51,7 @@ async def forward(path, receiver, source_id, token, directory, once=False):
                 "source", {k: v for k, v in source.items() if k != "id"}, "sender"
             )
         heartbeat_due = 0
+        journal_supported = False
         headers = {"Authorization": "Bearer " + token}
         ca_path = store.directory / "receiver-ca.pem"
         verify = str(ca_path) if ca_path.exists() else True
@@ -62,9 +68,11 @@ async def forward(path, receiver, source_id, token, directory, once=False):
                         raise OSError("Collector reported an error")
 
                 async def deliver():
-                    nonlocal heartbeat_due
+                    nonlocal heartbeat_due, journal_supported
                     rows = store.events(source_id="sender", status="pending", limit=100)
                     payload, size = {"events": []}, 0
+                    if journal:
+                        payload["format"] = "journal"
                     for event in rows:
                         item = {
                             "id": event["id"],
@@ -76,6 +84,13 @@ async def forward(path, receiver, source_id, token, directory, once=False):
                         payload["events"].append(item)
                         size += cost
                     try:
+                        if journal and not journal_supported:
+                            capabilities = await client.get(receiver.rstrip("/") + "/ingest-info")
+                            capabilities.raise_for_status()
+                            info = capabilities.json()
+                            if not isinstance(info, dict) or not isinstance(info.get("formats"), list) or "journal" not in info["formats"]:
+                                raise ValueError("The receiver needs journal ingestion support")
+                            journal_supported = True
                         if payload["events"]:
                             response = await client.post(
                                 receiver.rstrip("/") + "/ingest/" + source_id,
