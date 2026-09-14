@@ -726,6 +726,16 @@ function objectForm(kind, o) {
       o.multiline,
     );
     add(
+      "ssh_rejection_notify_seconds",
+      bilingual("Intervalo compartido para avisos de rechazos SSH (segundos; 0 desactiva)", "Shared interval for SSH rejection notifications (seconds; 0 disables)"),
+      "number",
+      o.ssh_rejection_notify_seconds ?? 0,
+    );
+    f.append(el("p", bilingual(
+      "Por fuente y destino, aunque cambien la IP, el usuario o el problema. Conserva los logs y el análisis; permite aumentos de gravedad y otros mensajes SSH. No implica que fail2ban haya bloqueado al origen.",
+      "Per source and destination, even when IP, user or problem changes. Keeps logs and analysis; allows severity increases and other SSH messages. Does not imply a fail2ban block."
+    ), "wide subtle"));
+    add(
       "max_batch_bytes",
       t("Máximo de bytes por lote de lectura"),
       "number",

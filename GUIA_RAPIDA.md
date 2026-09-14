@@ -40,3 +40,16 @@ Estos filtros y perfiles ajustan la revisión de logs. No ejecutan reparaciones 
 **Configurar avisos**
 
 Ve a **Notificaciones**, añade un destino y sigue la guía del proveedor para encontrar cada dato. Guardar no envía una prueba. Usa «Enviar prueba» y comprueba el resultado. En cada problema puedes abrir «Por qué se notificó o no» para distinguir severidad insuficiente, silencio, espera, fallo y entrega.
+
+Si un servidor recibe muchos intentos SSH, edita su fuente en **Fuentes** y ajusta
+«Intervalo compartido para avisos de rechazos SSH»: `3600` permite un aviso por
+hora, por fuente y destino, salvo aumento de gravedad; `900`, cada 15 minutos.
+`0` conserva la frecuencia normal por problema. El límite reconoce mensajes
+completos de rechazo de sshd y se comparte aunque cambien IP, usuario, puerto o
+problema. Conserva los originales y su análisis. Los accesos exitosos, los
+mensajes desconocidos, las evidencias mezcladas y los hallazgos CRITICAL quedan
+fuera de esa reducción. «Por qué se notificó o no» explica cuándo se aplica.
+
+Tener fail2ban activo no informa por sí solo a LogSentinel de qué IP ha bloqueado.
+Si solo envías `auth.log`, el registro separado de fail2ban no llega al central.
+La reducción de avisos no declara el ataque mitigado ni da por seguro el equipo.

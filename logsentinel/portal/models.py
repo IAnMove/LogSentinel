@@ -65,6 +65,7 @@ class Source(Model):
     )
     context_minutes: int = Field(default=5, ge=0, le=60)
     heartbeat_timeout_seconds: int = Field(default=0, ge=0, le=86400)
+    ssh_rejection_notify_seconds: int = Field(default=0, ge=0, le=86400)
 
     @model_validator(mode="after")
     def valid_path(self):

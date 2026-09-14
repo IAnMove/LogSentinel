@@ -58,6 +58,7 @@ function problemContextCard(p) {
       below_minimum_severity: ["Severidad por debajo del mínimo del destino", "Below destination minimum severity"],
       muted_by_rule: ["Silenciado por regla", "Muted by rule"],
       cooldown: ["En espera para no repetir el aviso", "Within notification cooldown"],
+      ssh_rejection_cooldown: ["Rechazos SSH: otro aviso de esta fuente ya cubre el intervalo configurado", "SSH rejections: another notification from this source covers the configured interval"],
       queued: ["Entrega solicitada", "Delivery requested"],
       historical_backfill: ["Análisis de histórico: sin aviso automático", "Historical backfill: no automatic notification"],
       verification_rejected: ["La verificación descartó el candidato", "Verification rejected the candidate"],

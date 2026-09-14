@@ -71,7 +71,9 @@ class Store:
             CREATE TABLE IF NOT EXISTS usage(id TEXT PRIMARY KEY,job_id TEXT,machine_id TEXT,source_ids TEXT,kind TEXT,created REAL,input_tokens INTEGER,output_tokens INTEGER,duration REAL,status TEXT,detail TEXT);
             CREATE TABLE IF NOT EXISTS deliveries(id TEXT PRIMARY KEY,destination_id TEXT,problem_id TEXT,payload TEXT,status TEXT,attempts INTEGER,created REAL,updated REAL,next_try REAL,error TEXT);
             CREATE TABLE IF NOT EXISTS notification_decisions(problem_id TEXT REFERENCES problems(id) ON DELETE CASCADE,destination_id TEXT,updated REAL,reason TEXT,delivery_id TEXT,PRIMARY KEY(problem_id,destination_id));
+            CREATE TABLE IF NOT EXISTS notification_subjects(problem_id TEXT PRIMARY KEY REFERENCES problems(id) ON DELETE CASCADE,source_id TEXT NOT NULL,kind TEXT NOT NULL);
             CREATE INDEX IF NOT EXISTS deliveries_due ON deliveries(status,next_try);
+            CREATE INDEX IF NOT EXISTS deliveries_destination_created ON deliveries(destination_id,created);
             CREATE TABLE IF NOT EXISTS audit(id INTEGER PRIMARY KEY,created REAL,action TEXT,object_id TEXT,detail TEXT);
             CREATE TABLE IF NOT EXISTS metrics(source_id TEXT,key TEXT,value INTEGER,PRIMARY KEY(source_id,key));
             CREATE TABLE IF NOT EXISTS sender_quota(source_id TEXT PRIMARY KEY,window_start REAL,bytes INTEGER,events INTEGER);

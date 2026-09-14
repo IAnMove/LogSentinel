@@ -72,8 +72,10 @@ with tempfile.TemporaryDirectory(prefix="sentinel-browser-") as d:
             page.get_by_label("Máquina", exact=True).select_option(machine)
             page.get_by_label("Ruta (archivo o carpeta)", exact=True).fill(str(source))
             page.get_by_label("Importar histórico al iniciar").check()
+            page.get_by_label("Intervalo compartido para avisos de rechazos SSH (segundos; 0 desactiva)").fill("3600")
             page.get_by_role("button", name="Guardar", exact=True).click()
             page.get_by_text("Configuración guardada.", exact=True).wait_for()
+            assert app.state.store.objects("source")[0]["ssh_rejection_notify_seconds"] == 3600
             page.get_by_role("button", name="Leer ahora", exact=True).click()
             page.get_by_text("1 eventos nuevos.", exact=False).wait_for()
             page.get_by_role("button", name="Resumen", exact=True).click()

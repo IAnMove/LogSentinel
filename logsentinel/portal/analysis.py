@@ -296,6 +296,11 @@ def interleave_services(events, offset=0):
 
 def grouping_key(event):
     """Group repeats of the same event even when PIDs, IPs or LLM category differ."""
+    from .ssh_notifications import rejection_form
+
+    rejection = rejection_form(event)
+    if rejection:
+        return (event.get("source_id") or "", "sshd", "ssh-rejection:" + rejection)
     text = event.get("message") or ""
     text = regex.sub(r"\b(?:\d{1,3}\.){3}\d{1,3}\b", "#ip", text)
     text = regex.sub(r"\[\d+\]", "[#]", text)
@@ -417,6 +422,9 @@ class Analyzer:
         self, machine, finding, ids, *, status="open", notify=True, fingerprint=None, detector=None, notification_reason=None
     ):
         events = self.store.events(ids=ids, limit=5000)
+        from .ssh_notifications import subject_for
+
+        rejection_source = subject_for(events, ids)
         # Deterministic origin signatures, not LLM prose, decide grouping.
         keys = sorted({grouping_key(e) for e in events})
         fp = fingerprint or hashlib.sha256(dumps(keys).encode()).hexdigest()
@@ -485,6 +493,13 @@ class Analyzer:
                 "INSERT INTO revisions VALUES(?,?,?,?)",
                 (uid(), id, now, dumps(finding)),
             )
+            if rejection_source:
+                db.execute(
+                    "INSERT OR REPLACE INTO notification_subjects VALUES(?,?,?)",
+                    (id, rejection_source, "ssh_rejections"),
+                )
+            else:
+                db.execute("DELETE FROM notification_subjects WHERE problem_id=?", (id,))
         from .notify import enqueue, record_decision
 
         if notify:

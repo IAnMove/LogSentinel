@@ -77,6 +77,20 @@ def enqueue(store, problem_id, event_type="problem.updated"):
     }
     machine = store.get("machine", problem["machine_id"])
     payload["machine"] = redact(machine["name"] if machine else "Unknown")
+    # This subject was derived from all original evidence while saving the finding.
+    # It is separate from LLM prose and survives verification rewriting that prose.
+    with store.connect() as db:
+        subject = db.execute(
+            "SELECT source_id FROM notification_subjects WHERE problem_id=? AND kind='ssh_rejections'",
+            (problem_id,),
+        ).fetchone()
+    source = store.get("source", subject[0]) if subject else None
+    repeat_seconds = (source or {}).get("ssh_rejection_notify_seconds", 0)
+    if repeat_seconds and event_type == "problem.updated" and problem["severity"] != "CRITICAL":
+        payload["notification_group"] = "ssh_rejections:" + hashlib.sha256(
+            dumps([problem["machine_id"], subject[0]]).encode()
+        ).hexdigest()
+        payload["repeat_interval_seconds"] = repeat_seconds
     destinations = store.objects("destination")
     with store.connect() as db:
         db.execute("DELETE FROM notification_decisions WHERE problem_id=? AND destination_id=''", (problem_id,))
@@ -109,7 +123,19 @@ def enqueue(store, problem_id, event_type="problem.updated"):
                 == event_type
                 and RANK[json.loads(recent[0])["severity"]] >= RANK[problem["severity"]]
             )
-            reason = "muted_by_rule" if muted else "cooldown" if cooldown else "queued"
+            grouped = None
+            if payload.get("notification_group"):
+                grouped = db.execute(
+                    "SELECT payload FROM deliveries WHERE destination_id=? AND created>? "
+                    "AND status NOT IN ('muted','failed','cancelled') "
+                    "AND json_extract(payload,'$.notification_group')=? "
+                    "AND json_extract(payload,'$.severity') IN ('MEDIUM','HIGH','LOW') "
+                    "ORDER BY created DESC LIMIT 1",
+                    (dest["id"], time.time() - repeat_seconds, payload["notification_group"]),
+                ).fetchone()
+            grouped_cooldown = bool(grouped and RANK[json.loads(grouped[0])["severity"]] >= RANK[problem["severity"]])
+            reason = "muted_by_rule" if muted else "ssh_rejection_cooldown" if grouped_cooldown else "cooldown" if cooldown else "queued"
+            suppressed = muted or cooldown or grouped_cooldown
             id = uid()
             message = dict(payload, delivery_id=id)
             db.execute(
@@ -119,12 +145,12 @@ def enqueue(store, problem_id, event_type="problem.updated"):
                     dest["id"],
                     problem_id,
                     dumps(message),
-                    "muted" if muted or cooldown else "pending",
+                    "muted" if suppressed else "pending",
                     0,
                     time.time(),
                     time.time(),
                     time.time(),
-                    reason if muted or cooldown else None,
+                    reason if suppressed else None,
                 ),
             )
             record_decision(store, problem_id, reason, dest["id"], id, connection=db)
@@ -149,6 +175,13 @@ class Outbox:
         )
         problem = "Problema" if spanish else "Problem"
         text = f"[{payload.get('severity','INFO')}] {payload.get('machine','LogSentinel')}\n{payload.get('title',title)}\n{payload.get('summary',summary)}\n{problem}: {payload.get('problem_id','test')}"
+        if payload.get("notification_group", "").startswith("ssh_rejections:"):
+            minutes = payload["repeat_interval_seconds"] / 60
+            text += (
+                f"\nRechazos SSH: intervalo entre avisos de {minutes:g} min, salvo aumento de gravedad. Los originales siguen en el portal. No confirma un bloqueo por fail2ban."
+                if spanish else
+                f"\nSSH rejections: {minutes:g} min between notifications unless severity increases. Originals remain in the portal. This does not confirm a fail2ban block."
+            )
         text = redact(text, (dest.get("token"), dest.get("secret")))
         kind = dest["kind"]
         if kind == "file":
