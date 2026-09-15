@@ -18,6 +18,8 @@ from logsentinel.portal.ingest import create_ingest_app
 from logsentinel.portal.models import Machine, Source
 from logsentinel.portal.store import Store
 
+pytestmark = pytest.mark.usefixtures("idle_sender_disk")
+
 
 def certificate(folder):
     folder.mkdir()

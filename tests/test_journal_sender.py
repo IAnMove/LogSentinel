@@ -13,6 +13,7 @@ from logsentinel.portal.models import Machine, Source
 from logsentinel.portal.store import Store
 
 REAL_CLIENT = httpx.AsyncClient
+pytestmark = pytest.mark.usefixtures("idle_sender_disk")
 
 
 @pytest.fixture

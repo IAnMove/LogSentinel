@@ -9,6 +9,8 @@ from logsentinel.portal.forward import forward
 from logsentinel.portal.models import Machine, Source
 from logsentinel.portal.store import Store
 
+pytestmark = pytest.mark.usefixtures("idle_sender_disk")
+
 
 @pytest.mark.asyncio
 async def test_lost_ack_retries_same_events_and_reclaims_sender_spool(
