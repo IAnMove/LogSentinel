@@ -86,6 +86,7 @@ def check_omarchy_sync(page, screenshots):
     page.screenshot(path=str(screenshots / "omarchy-night.png"), full_page=True)
 
     page.get_by_role("button", name="Model and analysis", exact=True).click()
+    page.get_by_text("Change connection or model", exact=True).click()
     page.get_by_label("Model", exact=True).select_option("manual")
     model = page.locator('input[name="model"]')
     model.fill("draft-survives-desktop-switch")
@@ -369,6 +370,7 @@ with tempfile.TemporaryDirectory(prefix="sentinel-themes-") as directory:
             page.get_by_role("button", name="View metrics and configure").click()
             page.get_by_role("img").first.wait_for()
             page.get_by_role("button", name="Model and analysis", exact=True).click()
+            page.get_by_text("Change connection or model", exact=True).click()
             page.get_by_label("Model", exact=True).select_option("manual")
             model = page.locator('input[name="model"]')
             model.fill("unsaved-model-choice")
