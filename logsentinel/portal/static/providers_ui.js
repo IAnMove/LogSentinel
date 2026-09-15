@@ -76,6 +76,7 @@ function llmModelPicker(form, cfg) {
     status = el("p", "", "subtle");
   status.setAttribute("role", "status");
   let models = [],
+    manualSelected = false,
     revision = 0,
     timer;
   const manualLabel = () =>
@@ -90,12 +91,13 @@ function llmModelPicker(form, cfg) {
       option.value = "model:" + index;
       choice.append(option);
     });
-    const selected = models.indexOf(input.value);
+    const selected = manualSelected ? -1 : models.indexOf(input.value);
     choice.value = selected >= 0 ? "model:" + selected : "manual";
     manualField.hidden = selected >= 0;
   }
   choice.onchange = () => {
     const manual = choice.value === "manual";
+    manualSelected = manual;
     manualField.hidden = !manual;
     if (manual) input.focus();
     else {
@@ -161,7 +163,7 @@ function llmModelPicker(form, cfg) {
             "El servidor no publica modelos. Puedes introducir el ID manualmente.",
             "The server publishes no models. You can enter the ID manually.",
           );
-      if (models.length && choice.value === "manual" && input.value)
+      if (models.length && input.value && !models.includes(input.value))
         status.textContent +=
           " " +
           bilingual(

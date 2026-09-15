@@ -97,8 +97,20 @@ with tempfile.TemporaryDirectory(prefix="sentinel-providers-") as directory:
             page.get_by_role("button", name="Refresh models", exact=True).click()
             page.get_by_label("Model", exact=True).select_option(label="balanced-alias")
             page.get_by_label("Configured effective context").fill("8192")
+            # An in-flight list refresh must not undo the user's manual mode.
+            listing = "**/api/model/info?models_only=true"
+            pending_list = []
+            page.route(listing, lambda route: pending_list.append(route))
+            with page.expect_request(listing):
+                page.get_by_role("button", name="Refresh models", exact=True).click()
             page.get_by_label("Model", exact=True).select_option("manual")
+            assert pending_list
+            for route in pending_list:
+                route.fulfill(status=200, json={"models": ["balanced-alias"]})
+            page.get_by_text("1 models available.", exact=False).wait_for()
+            assert page.get_by_label("Model", exact=True).input_value() == "manual"
             page.get_by_label("Model ID (manual)", exact=True).fill("manual-route")
+            page.unroute(listing)
             assert store.settings().llm.model == cfg.llm.model
             seen.clear()
             for preset in [
@@ -133,7 +145,6 @@ with tempfile.TemporaryDirectory(prefix="sentinel-providers-") as directory:
                 else:
                     route.continue_()
 
-            listing = "**/api/model/info?models_only=true"
             page.route(listing, hold_old_server)
             page.get_by_label("Server URL", exact=True).fill("http://127.0.0.1:9988")
             page.wait_for_timeout(800)
