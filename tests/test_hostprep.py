@@ -3,6 +3,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from click.utils import strip_ansi
 from typer.testing import CliRunner
 
 from logsentinel import cli, hostprep
@@ -121,4 +122,4 @@ def test_the_command_shows_the_plan_and_touches_nothing_without_apply(logs, monk
 def test_the_command_needs_something_to_grant(tmp_path):
     result = CliRunner().invoke(cli.app, ["prepare-host", "--account", "agent"])
     assert result.exit_code != 0
-    assert "--source" in result.output
+    assert "--source" in strip_ansi(result.output)
