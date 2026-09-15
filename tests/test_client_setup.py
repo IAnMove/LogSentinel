@@ -105,3 +105,18 @@ def test_managed_directory_rejects_writable_parent_before_creating_child(tmp_pat
     parent=tmp_path/'unsafe';parent.mkdir();parent.chmod(0o777)
     with pytest.raises(ValueError):setup.managed_directory(parent/'new')
     assert not (parent/'new').exists()
+
+
+def test_reusing_enrollment_command_cannot_bypass_safe_upgrade(package,tmp_path,monkeypatch):
+    from types import SimpleNamespace
+    desired=setup.selection('logs',package)
+    units=tmp_path/'units';units.mkdir()
+    (units/'logsentinel-client-logs.service').write_text('existing service')
+    monkeypatch.setattr(setup,'UNITS',units)
+    monkeypatch.setattr(setup,'validate_existing',lambda *_:dict(desired))
+    calls=[]
+    monkeypatch.setattr(setup,'upgrade_client',lambda args,old,runtime:calls.append((args.name,old,runtime)))
+    monkeypatch.setattr(setup,'receiver_check',lambda *_:pytest.fail('upgrade must not enroll or depend on expired package'))
+    runtime=tmp_path/'runtime'
+    setup.configure(SimpleNamespace(name='logs'),desired,package,runtime)
+    assert calls==[('logs',desired,runtime)]

@@ -180,7 +180,10 @@ User={desired['account']}
 Group={desired['account']}
 ExecStart={runtime}/bin/python -m logsentinel.client_setup run --config {config_path}
 Restart=on-failure
-RestartSec=5
+RestartSec=60
+Nice=10
+IOWeight=10
+IOSchedulingClass=idle
 UMask=0077
 NoNewPrivileges=yes
 CapabilityBoundingSet=
@@ -240,6 +243,10 @@ def configure(args, desired, package, runtime):
     config_path = CONFIG/(args.name+'.json')
     old = validate_existing(config_path, desired)
     unit = UNITS/('logsentinel-client-'+args.name+'.service')
+    if old and unit.exists():
+        # Re-running the original enrollment command is also an upgrade. It must
+        # not bypass the coherent backup or restart a deliberately stopped unit.
+        return upgrade_client(args, old, runtime)
     spool = Path(desired['spool'])
     account = desired['account']
     if not old and (unit.exists() or spool.exists()):
@@ -352,23 +359,111 @@ def run_sender(config_path, once=False):
     cfg=json.loads(Path(config_path).read_text())
     token=(Path(cfg['spool'])/'push-token').read_text().strip()
     asyncio.run(forward(cfg['path'],cfg['receiver'],cfg['source_id'],token,cfg['spool'],once,
-                        journal=cfg['journal'],new_only=cfg['new_only']))
+                        journal=cfg['journal'],new_only=cfg['new_only'],limits=cfg.get('limits')))
+
+
+def backup_sender(config_path, target):
+    """Runs as the sender account; root never opens a sender-controlled database."""
+    import sqlite3
+    cfg=json.loads(Path(config_path).read_text())
+    source=Path(cfg['spool'])/'sentinel.db'
+    with sqlite3.connect(source.as_uri()+'?mode=ro',uri=True,timeout=3) as db, sqlite3.connect(target) as dest:
+        db.backup(dest,pages=256,sleep=.05)
+
+
+def upgrade_client(args, desired, runtime):
+    """Install a new runtime without enrolling again or resuming a stopped service."""
+    config_path=CONFIG/(args.name+'.json')
+    validate_existing(config_path,desired)
+    unit=UNITS/('logsentinel-client-'+args.name+'.service')
+    if not unit.is_file() or unit.is_symlink() or unit.stat().st_uid != 0 or unit.stat().st_mode & 0o022:
+        raise ValueError('La unidad existente debe estar protegida por root.')
+    entry=pwd.getpwnam(desired['account'])
+    if entry.pw_uid==0 or entry.pw_shell not in ('/usr/sbin/nologin','/sbin/nologin','/bin/false'):
+        raise ValueError('La cuenta del emisor debe seguir siendo una cuenta limitada.')
+    spool=Path(desired['spool'])
+    if spool.is_symlink() or not spool.is_dir() or spool.stat().st_uid != entry.pw_uid:
+        raise ValueError('La cola existente no tiene su propietario esperado.')
+    was_active=subprocess.run(['systemctl','is-active','--quiet',unit.name]).returncode==0
+    command('systemctl','stop',unit.name)
+    from .portal.sender_safety import io_pressure
+    pressure=io_pressure()
+    if pressure is not None and pressure>=25:
+        raise ValueError('El disco sigue bajo presión de E/S. Cliente detenido; repite la actualización cuando se estabilice.')
+    # Budget the coherent backup and the additive index before touching the unit.
+    size=sum(p.stat().st_size for p in spool.glob('sentinel.db*') if p.is_file())
+    if shutil.disk_usage(INSTALL).free < size*2 + 256*1024**2:
+        raise ValueError('Falta espacio para copia y actualización. El cliente queda detenido y conserva su cola.')
+    if shutil.disk_usage(spool).free < size + 256*1024**2:
+        raise ValueError('Falta espacio en el volumen de la cola para adaptar el índice. El cliente queda detenido; no se elimina evidencia.')
+    backup=INSTALL/('backup-'+args.name+'-'+str(time.time_ns()))
+    backup.mkdir(mode=0o710)
+    os.chown(backup,0,entry.pw_gid)
+    previous=unit.read_bytes()
+    (backup/'service.before').write_bytes(previous)
+    shutil.copyfile(config_path,backup/'config.before.json')
+    (backup/'config.before.json').chmod(0o600)
+    target=backup/'sentinel.db'
+    fd=os.open(target,os.O_CREAT|os.O_EXCL|os.O_WRONLY,0o600)
+    os.fchown(fd,entry.pw_uid,entry.pw_gid);os.close(fd)
+    try:
+        low_priority=['nice','-n','10']
+        if shutil.which('ionice'):
+            low_priority+=['ionice','-c','3']
+        command('runuser','-u',desired['account'],'--',*low_priority,runtime/'bin/python','-m','logsentinel.client_setup','backup','--config',config_path,'--target',target)
+        os.chown(target,0,0)
+        command('runuser','-u',desired['account'],'--',*low_priority,runtime/'bin/python','-m','logsentinel.client_setup','migrate','--config',config_path)
+        unit.write_text(unit_text(config_path,runtime,desired));unit.chmod(0o644)
+        command('systemd-analyze','verify',unit,stdout=subprocess.DEVNULL)
+        command('systemctl','daemon-reload')
+        if was_active:
+            command('systemctl','start',unit.name)
+            command('systemctl','is-active','--quiet',unit.name)
+    except BaseException:
+        # Do not replace a live queue with its backup: new durable events may exist.
+        subprocess.run(['systemctl','stop',unit.name],capture_output=True)
+        unit.write_bytes(previous)
+        subprocess.run(['systemctl','daemon-reload'],capture_output=True)
+        print('Actualización incompleta: cliente detenido; cola intacta. Copia:',backup,file=sys.stderr)
+        raise
+    finally:
+        os.chown(target,0,0)
+        backup.chmod(0o700)
+    print('Cliente actualizado. Runtime:',runtime)
+    print('Copia coherente:',backup)
+    print('Se conservan configuración, credenciales, CA, cursor y cola.')
+    print('Servicio:', 'activo; obedecerá la pausa del central' if was_active else 'sigue detenido; no se ha reanudado')
 
 
 def main(argv=None):
     argv=list(sys.argv[1:] if argv is None else argv)
-    if argv and argv[0] in ('run','grant'):
+    if argv and argv[0] in ('run','grant','backup','migrate'):
         parser=argparse.ArgumentParser()
-        parser.add_argument('action');parser.add_argument('--config',required=True);parser.add_argument('--once',action='store_true')
+        parser.add_argument('action');parser.add_argument('--config',required=True);parser.add_argument('--once',action='store_true');parser.add_argument('--target')
         args=parser.parse_args(argv)
         if args.action=='run':
             return run_sender(args.config,args.once)
+        if args.action=='backup':
+            if not args.target:
+                raise ValueError('Falta la ruta de copia.')
+            return backup_sender(args.config,args.target)
+        if args.action=='migrate':
+            from .portal.store import Store
+            from .portal.sender import spool_lock
+            cfg=json.loads(Path(args.config).read_text())
+            store=Store(cfg['spool'])
+            binding=json.loads(store.meta('sender_binding'))
+            with spool_lock(store,binding):
+                store.prepare_sender()
+            return
         path=Path(args.config)
         if path.parent!=CONFIG or path.is_symlink() or path.stat().st_uid!=0 or path.stat().st_mode & 0o022:
             raise ValueError('La configuración de permisos debe estar protegida por root.')
         return grant_file(json.loads(path.read_text()))
     parser=argparse.ArgumentParser(description='Configura un emisor Linux. Por defecto: journal y solo entradas nuevas.')
-    parser.add_argument('--package',required=True,help='JSON de alta generado por el central')
+    mode=parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument('--package',help='JSON de alta generado por el central')
+    mode.add_argument('--upgrade',action='store_true',help='Actualiza una instalación existente sin nueva alta; conserva su estado detenido/activo')
     parser.add_argument('--name',default='logs',help='Nombre de esta instalación (por defecto: logs)')
     parser.add_argument('--file',help='Un archivo en lugar del journal')
     parser.add_argument('--logrotate-config',help='Configuración de rotación del archivo, con un único postrotate')
@@ -378,14 +473,25 @@ def main(argv=None):
     args=parser.parse_args(argv)
     if sys.platform!='linux' or sys.version_info<(3,10):
         raise ValueError('Se requiere Linux con systemd y Python 3.10 o posterior.')
-    args.package=str(Path(args.package).expanduser().absolute())
-    package=read_package(args.package)
-    desired=selection(args.name,package,args.file,args.include_history)
+    if args.upgrade:
+        if not re.fullmatch(r'[a-z][a-z0-9-]{0,19}',args.name):
+            raise ValueError('Nombre de instalación inválido.')
+        config_path=CONFIG/(args.name+'.json')
+        if config_path.is_symlink() or config_path.stat().st_uid!=0 or config_path.stat().st_mode & 0o022:
+            raise ValueError('La configuración existente debe estar protegida por root.')
+        desired=json.loads(config_path.read_text())
+        expected=selection(args.name,desired,None if desired['journal'] else desired['path'],not desired['new_only'])
+        validate_existing(config_path,expected)
+        package=None
+    else:
+        args.package=str(Path(args.package).expanduser().absolute())
+        package=read_package(args.package)
+        desired=selection(args.name,package,args.file,args.include_history)
     validate_existing(CONFIG/(args.name+'.json'),desired)
     print('Receptor:',desired['receiver'],'\nLogs:',desired['path'] or 'journal del sistema (todos los servicios)')
     print('Cuenta sin login:',desired['account'],'\nInicio:', 'con histórico' if args.include_history else 'solo entradas nuevas; se conservan cursores existentes',flush=True)
     if args.plan:
-        print('Plan: instalar Python aislado, conceder lectura, canjear el alta HTTPS y activar un servicio emisor. No se ha cambiado nada.')
+        print('Plan: actualizar runtime con copia coherente; conservar identidad y estado del servicio. No se ha cambiado nada.' if args.upgrade else 'Plan: instalar Python aislado, conceder lectura, canjear el alta HTTPS y activar un servicio emisor. No se ha cambiado nada.')
         return
     if os.geteuid()!=0:
         raise ValueError('Ejecuta el mismo comando con sudo. El emisor funcionará después sin root.')
@@ -399,7 +505,10 @@ def main(argv=None):
     runtime=Path(sys.prefix)
     if runtime.parent!=INSTALL or not (runtime/'ready').is_file():
         raise ValueError('Usa setup-client.sh desde el repositorio para preparar el instalador.')
-    configure(args,desired,package,runtime)
+    if args.upgrade:
+        upgrade_client(args,desired,runtime)
+    else:
+        configure(args,desired,package,runtime)
 
 
 if __name__=='__main__':
@@ -410,7 +519,10 @@ if __name__=='__main__':
         sys.exit(130)
     except Exception as exc:
         # Never print an enrollment object, token or remote response body in logs.
-        if isinstance(exc,ValueError) and not isinstance(exc,json.JSONDecodeError):
+        if sys.argv[1:2]==['run']:
+            from .portal.sender_safety import error_detail
+            print('Error operativo del cliente: '+json.dumps(error_detail(exc))+'. Cola y cursor conservados.',file=sys.stderr)
+        elif isinstance(exc,ValueError) and not isinstance(exc,json.JSONDecodeError):
             print(str(exc),file=sys.stderr)
         else:
             print('No se completó la configuración ('+type(exc).__name__+'). La cola se conserva; revisa el último paso mostrado.',file=sys.stderr)

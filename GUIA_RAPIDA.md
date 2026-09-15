@@ -37,6 +37,11 @@ Selecciona el ámbito arriba, pulsa «Ver ejemplos antes de aplicar» y revisa l
 
 Estos filtros y perfiles ajustan la revisión de logs. No ejecutan reparaciones en las máquinas vigiladas.
 
+Si un cliente acumula pendientes o aumenta la actividad de disco, consulta
+[Protección y recuperación del cliente](CLIENTES_RECUPERACION.md). Incluye la
+actualización desde 1.0.0 sin nueva alta, los límites automáticos y cómo conservar
+la cola durante una pausa.
+
 **Configurar avisos**
 
 Ve a **Notificaciones**, añade un destino y sigue la guía del proveedor para encontrar cada dato. Guardar no envía una prueba. Usa «Enviar prueba» y comprueba el resultado. En cada problema puedes abrir «Por qué se notificó o no» para distinguir severidad insuficiente, silencio, espera, fallo y entrega.
