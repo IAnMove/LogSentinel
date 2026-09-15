@@ -77,7 +77,7 @@ def test_enrolled_sender_uses_saved_ca_and_retains_queue_when_trust_fails(tmp_pa
         with pytest.raises(RuntimeError, match="spool retained"):
             asyncio.run(forward(str(logfile), url, sid, token, spool, once=True))
         assert len(store.events()) == 1
-        assert len(Store(spool).events(status="pending")) == 1
+        assert len(Store(spool).events(status="pending")) == 0  # No capture without valid authenticated control.
         (spool / "receiver-ca.pem").write_text(cert.read_text())
         asyncio.run(forward(str(logfile), url, sid, token, spool, once=True))
         assert len(store.events()) == 2

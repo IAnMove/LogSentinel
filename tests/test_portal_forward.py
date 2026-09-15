@@ -31,8 +31,10 @@ async def test_lost_ack_retries_same_events_and_reclaims_sender_spool(
 
     class LostAck(httpx.AsyncBaseTransport):
         async def handle_async_request(self, request):
-            await transport.handle_async_request(request)
-            raise httpx.ReadTimeout("lost ACK after receiver commit")
+            response = await transport.handle_async_request(request)
+            if request.url.path.startswith('/ingest/'):
+                raise httpx.ReadTimeout("lost ACK after receiver commit")
+            return response
 
     monkeypatch.setattr(
         httpx, "AsyncClient", lambda **kwargs: original(transport=LostAck(), **{k: v for k, v in kwargs.items() if k != "transport"})

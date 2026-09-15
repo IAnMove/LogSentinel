@@ -166,6 +166,7 @@ class MachineLifecycle:
                 machine.pop("id")
                 machine["monitoring_paused"] = paused
                 self.store.put("machine", machine, machine_id)
+                self.store.audit('machine_monitoring', machine_id, dumps(dict(paused=paused, actor='authenticated_operator')))
                 for source in self.store.objects("source"):
                     if source["machine_id"] == machine_id:
                         self.store.set_meta(

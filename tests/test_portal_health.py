@@ -10,6 +10,16 @@ from logsentinel.portal.app import create_app
 from logsentinel.portal.capacity import capacity_report
 
 
+def test_explicit_sender_failure_is_checked_without_heartbeat_timeout(client):
+    c, store = client
+    machine, source = machine_source(c)
+    store.set_meta('health:'+source,json.dumps(dict(status='error',heartbeat=time.time(),error='Sender capture failed')))
+    checks=c.app.state.health.conditions()
+    assert next(check for check in checks if check['key']=='source:'+source)['bad']
+    store.set_meta('health:'+source,json.dumps(dict(status='ok',heartbeat=time.time())))
+    assert not next(check for check in c.app.state.health.conditions() if check['key']=='source:'+source)['bad']
+
+
 def test_quiet_sources_are_healthy_but_explicit_heartbeats_expire_and_recover(
     client, monkeypatch
 ):

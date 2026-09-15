@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "logsentinel"
-version = "1.0.0"
+version = "1.0.1"
 description = "Intelligent Linux log monitoring and security sentinel powered by local LLMs with adaptive memory"
 readme = "README.md"
 requires-python = ">=3.10"

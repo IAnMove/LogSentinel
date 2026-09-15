@@ -96,12 +96,12 @@ class HealthMonitor:
             health = json.loads(self.store.meta("health:" + source["id"]) or "{}")
             remote = source["kind"] == "push"
             timeout = source.get("heartbeat_timeout_seconds", 0) if remote else 60
-            if remote and not timeout:
+            if remote and not timeout and not health:
                 continue  # A quiet log is not evidence of a broken sender.
             last = health.get("heartbeat", health.get("checked"))
             since = float(self.store.meta("health_since:source:" + source["id"]) or now)
             self.store.set_meta("health_since:source:" + source["id"], str(since))
-            stale = now - max(last or since, since) > timeout
+            stale = bool(timeout) and now - max(last or since, since) > timeout
             add(
                 "source:" + source["id"],
                 source["machine_id"],

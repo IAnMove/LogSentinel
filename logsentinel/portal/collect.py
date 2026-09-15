@@ -11,6 +11,7 @@ import shutil
 import subprocess
 import time
 import threading
+from .journal_stream import read_journal
 from contextlib import nullcontext
 from pathlib import Path
 import httpx
@@ -103,11 +104,11 @@ class Collector:
             self.handles.clear()
             self.retired.clear()
 
-    def poll(self, source):
+    def poll(self, source, strict=False):
         with self.lock:
-            return self._poll(source)
+            return self._poll(source, strict)
 
-    def _poll(self, source):
+    def _poll(self, source, strict=False):
         machine = self.store.get("machine", source["machine_id"])
         if (
             not source["enabled"]
@@ -172,11 +173,15 @@ class Collector:
                         item["handle"].close()
                         self.retired.remove(item)
                         self.store.metric(source["id"], "rotation_watch_closed", 1)
+            if strict:
+                return total
             self.store.set_meta(
                 "health:" + source["id"],
                 dumps({"status": "ok", "checked": time.time(), "new_events": total}),
             )
         except Exception as exc:
+            if strict:
+                raise
             self.store.set_meta(
                 "health:" + source["id"],
                 dumps(
@@ -348,36 +353,21 @@ class Collector:
         cursor = self.store.cursor(source["id"], "journal") or {}
         cmd = ["journalctl", "--no-pager", "-o", "json"]
         if cursor.get("cursor"):
-            cmd += ["--after-cursor", cursor["cursor"]]
+            # Include the saved record to verify that retention did not erase it.
+            cmd += ["--cursor", cursor["cursor"]]
         elif not source.get("history"):
             cmd += ["-n", "1"]
-        # Timeout/output bounded using a temporary spool, not communicate on unlimited output.
-        import tempfile
-
-        with tempfile.TemporaryFile() as output, tempfile.TemporaryFile() as err:
-            proc = subprocess.Popen(cmd, stdout=output, stderr=err)
-            deadline = time.monotonic() + 3
-            while (
-                proc.poll() is None
-                and time.monotonic() < deadline
-                and output.tell() < source["max_batch_bytes"]
-            ):
-                time.sleep(0.02)
-            if proc.poll() is None:
-                proc.terminate()
-            try:
-                proc.wait(timeout=2)
-            except subprocess.TimeoutExpired:
-                proc.kill()
-                proc.wait()
-            if proc.returncode not in (0, -15):
-                raise OSError("journalctl failed; check journal permissions/cursor")
-            output.seek(0)
-            raw = output.read(source["max_batch_bytes"])
+        # The inclusive cursor record is verification overhead, not new work.
+        # Reserve a second bounded record so a large saved line cannot starve
+        # the next record on every poll.
+        budget = source['max_batch_bytes']
+        raw, limited = read_journal(cmd, budget * (2 if cursor.get('cursor') else 1))
         collector = JournaldCollector(JournaldSourceConfig())
         entries = []
         last = None
         skipped = 0
+        cursor_verified = not bool(cursor.get("cursor"))
+        used = 0
         for line in raw.splitlines(keepends=True):
             if not line.endswith(b"\n"):
                 break
@@ -394,6 +384,15 @@ class Collector:
             if not isinstance(mark, str) or not mark:
                 skipped += 1
                 continue
+            if not cursor_verified:
+                if mark != cursor['cursor']:
+                    raise ValueError("Journal cursor unavailable: possible retention gap; cursor preserved")
+                cursor_verified = True
+                continue
+            if used + len(line) > budget:
+                limited = True
+                break
+            used += len(line)
             last = mark
             e = collector._parse_json_line(text)
             if e:
@@ -402,6 +401,8 @@ class Collector:
                 )
         if skipped:
             self.store.metric(source["id"], "journal_skipped", skipped)
+        if limited and not last:
+            raise ValueError("Journal record exceeds capture byte limit; cursor preserved")
         if last:
             if not cursor and not source.get("history"):
                 entries = []

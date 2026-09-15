@@ -669,7 +669,7 @@ function objectView(root) {
                     : t("Pausado")) +
                   (S.health[obj.id]?.error
                     ? " · " + S.health[obj.id].error
-                    : ""),
+                    : "") + senderHealthSummary(S.health[obj.id]),
               ),
               actions(...b),
             ];
@@ -677,6 +677,29 @@ function objectView(root) {
     ),
   );
   if (edit !== null) root.append(objectForm(kind, edit));
+}
+function senderHealthSummary(health) {
+  if (!health || health.sender_pending === undefined) return "";
+  const sender = health.sender || {};
+  const labels = {
+    machine_paused: ["Captura pausada por el central", "Capture paused by receiver"],
+    source_disabled: ["Fuente desactivada", "Source disabled"],
+    queue_high_water: ["Captura frenada: cola saturada", "Capture held: queue high water"],
+    queue_full: ["Cola sin capacidad", "Queue capacity reached"],
+    disk_io_pressure: ["Pausa para proteger el disco", "Paused to protect disk I/O"],
+    disk_free_reserve: ["Pausa por espacio libre insuficiente", "Paused: low free disk space"],
+    journal_retention_gap: ["Hueco de cobertura: cursor del journal no disponible", "Coverage gap: journal cursor unavailable"],
+    control_unavailable: ["Sin autorización reciente del receptor", "Receiver control lease unavailable"],
+  };
+  const code = sender.capture_code || sender.delivery_code;
+  const label = labels[code];
+  let text = " · " + bilingual("Cola del cliente: ", "Client queue: ") + health.sender_pending;
+  if (sender.quota_bytes)
+    text += " · " + Math.round(sender.used_bytes / 1048576) + "/" + Math.round(sender.quota_bytes / 1048576) + " MiB";
+  if (code) text += " · " + (label ? bilingual(...label) : code);
+  if (sender.build) text += " · v" + sender.build;
+  if (health.heartbeat) text += " · " + bilingual("Último estado: ", "Last status: ") + stamp(health.heartbeat);
+  return text;
 }
 function objectForm(kind, o) {
   const p = panel(o.id ? t("Editar configuración") : t("Nueva configuración")),

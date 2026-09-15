@@ -326,9 +326,37 @@ class Store:
         }
 
     def size(self):
-        return sum(
-            p.stat().st_size for p in self.directory.glob("sentinel.db*") if p.is_file()
-        )
+        size = 0
+        for path in self.directory.glob('sentinel.db*'):
+            try:
+                if path.is_file():
+                    size += path.stat().st_size
+            except FileNotFoundError:
+                pass  # The last SQLite reader can remove a checkpointed WAL.
+        return size
+
+    def storage_usage(self):
+        """Physical allocation and reusable SQLite space; no scan or compaction."""
+        with self.connect() as db:
+            page_size = db.execute("PRAGMA page_size").fetchone()[0]
+            free_pages = db.execute("PRAGMA freelist_count").fetchone()[0]
+        import shutil
+        allocated = self.size()
+        reusable = free_pages * page_size
+        return dict(allocated_bytes=allocated, reusable_bytes=reusable,
+                    used_bytes=max(0, allocated - reusable),
+                    quota_bytes=self.settings().disk_limit_mb * 1024**2,
+                    disk_free_bytes=shutil.disk_usage(self.directory).free)
+
+    def prepare_sender(self):
+        """One-time indexed migration and count, including legacy durable queues."""
+        with self.connect() as db:
+            db.execute("CREATE INDEX IF NOT EXISTS events_segment ON events(segment_id,status)")
+            if not db.execute("SELECT 1 FROM meta WHERE key='sender_pending_count'").fetchone():
+                db.execute("INSERT INTO meta SELECT 'sender_pending_count',CAST(count(*) AS TEXT) FROM events WHERE status='pending'")
+
+    def sender_pending(self):
+        return int(self.meta("sender_pending_count") or 0)
 
     def ingest(self, source, entries, cursor_path=None, cursor=None):
         """Origin IDs are stable source positions or sender event IDs, never message hashes."""
@@ -367,10 +395,11 @@ class Store:
                 unique.append(dict(item, id=uid()))
             if unique:
                 raw = dumps(unique).encode()
-                if (
-                    self.size() + len(raw) * 2
-                    > self.settings().disk_limit_mb * 1024 * 1024
-                ):
+                usage = self.storage_usage()
+                if usage['disk_free_bytes'] < 32*1024**2 + len(raw)*2:
+                    import errno
+                    raise OSError(errno.ENOSPC, 'Storage free-space reserve reached; incoming data was not acknowledged')
+                if usage['used_bytes'] + len(raw) * 2 > usage['quota_bytes']:
                     raise OSError(
                         "Storage quota reached; incoming data was not acknowledged"
                     )
@@ -404,6 +433,7 @@ class Store:
                         ),
                     )
                 self._metric(db, source["id"], "events_ingested", len(unique))
+                db.execute("UPDATE meta SET value=CAST(value AS INTEGER)+? WHERE key='sender_pending_count'", (len(unique),))
                 self._metric(
                     db,
                     source["id"],
@@ -555,6 +585,11 @@ class Store:
         if not ids:
             return
         with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            if db.execute("SELECT 1 FROM meta WHERE key='sender_pending_count'").fetchone():
+                before = db.execute("SELECT count(*),coalesce(sum(status='pending'),0) FROM events WHERE id IN (" + ",".join("?" for _ in ids) + ")", ids).fetchone()
+                delta = (before[0] if status == 'pending' else 0) - before[1]
+                db.execute("UPDATE meta SET value=CAST(value AS INTEGER)+? WHERE key='sender_pending_count'", (delta,))
             db.executemany(
                 "UPDATE events SET status=? WHERE id=?", [(status, i) for i in ids]
             )
@@ -814,21 +849,27 @@ class Store:
                 self._segment_cache_bytes = 0
         return len(ids)
 
-    def discard_sent(self):
+    def discard_sent(self, event_ids=None):
         """Reclaim fully acknowledged sender segments without touching file cursors."""
         with self.connect() as db:
+            if event_ids is not None:
+                if not event_ids:
+                    return 0
+                scope = "id IN (SELECT segment_id FROM events WHERE id IN (" + ",".join("?" for _ in event_ids) + ")) AND "
+                params = list(event_ids)
+            else:
+                scope, params = "", []
             ids = [
                 r[0]
                 for r in db.execute(
-                    "SELECT id FROM segments WHERE NOT EXISTS (SELECT 1 FROM events WHERE segment_id=segments.id AND status!='sent')"
+                    "SELECT id FROM segments WHERE " + scope + "NOT EXISTS (SELECT 1 FROM events WHERE segment_id=segments.id AND status!='sent')", params
                 )
             ]
             for sid in ids:
                 db.execute("DELETE FROM events WHERE segment_id=?", (sid,))
                 db.execute("DELETE FROM segments WHERE id=?", (sid,))
-        if ids:
-            with self.connect() as db:
-                db.execute("VACUUM")
+        # Deleted pages are reused by subsequent inserts. Never rewrite an entire
+        # spool after a small acknowledgement; physical compaction is maintenance.
         return len(ids)
 
     def backup(self, target):

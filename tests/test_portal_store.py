@@ -170,28 +170,7 @@ def _journal_source(store):
 
 
 def _journalctl_output(payload):
-    def popen(cmd, stdout=None, stderr=None):
-        stdout.write(payload)
-        stdout.flush()
-
-        class Proc:
-            returncode = 0
-
-            def poll(self):
-                return 0
-
-            def terminate(self):
-                return None
-
-            def kill(self):
-                return None
-
-            def wait(self, timeout=None):
-                return 0
-
-        return Proc()
-
-    return popen
+    return lambda command, limit: (payload[:limit], len(payload) >= limit)
 
 
 def test_malformed_journal_line_does_not_stall_the_cursor(setup, monkeypatch):
@@ -204,7 +183,7 @@ def test_malformed_journal_line_does_not_stall_the_cursor(setup, monkeypatch):
         b"[1,2,3]\n"
         b'{"MESSAGE":"third","__CURSOR":"c3","SYSLOG_IDENTIFIER":"sshd"}\n'
     )
-    monkeypatch.setattr("logsentinel.portal.collect.subprocess.Popen", _journalctl_output(good))
+    monkeypatch.setattr("logsentinel.portal.collect.read_journal", _journalctl_output(good))
     collector = Collector(store)
     assert collector.journal(source) == 3
     assert [e["message"] for e in store.events()] == ["first", "second", "third"]
@@ -217,7 +196,7 @@ def test_malformed_journal_line_does_not_stall_the_cursor(setup, monkeypatch):
     assert skipped[0] == 2
 
     monkeypatch.setattr(
-        "logsentinel.portal.collect.subprocess.Popen",
+        "logsentinel.portal.collect.read_journal",
         _journalctl_output(b'{"not":"a log line"}\nnot-json\n'),
     )
     assert collector.journal(source) == 0

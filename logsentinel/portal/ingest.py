@@ -18,6 +18,22 @@ from fastapi.responses import JSONResponse
 from .store import dumps
 from .collect import normalize
 from .enroll import register_enrollment
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
+
+
+class SenderHeartbeat(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    ok: bool
+    pending: int = Field(ge=0, le=1000000000)
+    capture_code: str = Field(default="", max_length=80, pattern=r"^[A-Za-z0-9_]*$")
+    delivery_code: str = Field(default="", max_length=80, pattern=r"^[A-Za-z0-9_]*$")
+    allocated_bytes: int = Field(default=0, ge=0, le=10**15)
+    used_bytes: int = Field(default=0, ge=0, le=10**15)
+    quota_bytes: int = Field(default=0, ge=0, le=10**15)
+    disk_free_bytes: int = Field(default=0, ge=0, le=10**15)
+    io_pressure_percent: float | None = Field(default=None, ge=0, le=100)
+    build: str = Field(default="", max_length=80, pattern=r"^[A-Za-z0-9_.-]*$")
+
 
 # Senders batch up to 500 events of 256 KB, but a well-behaved batch stays far
 # below this; it bounds what one unauthenticated request can make us buffer.
@@ -31,7 +47,7 @@ def register_ingest(app, store):
     def ingest_info():
         return {"version": 1, "formats": ["text", "journal"]}
 
-    def push_source(id, request):
+    def push_source(id, request, allow_paused=False):
         token = request.headers.get("authorization", "").removeprefix("Bearer ")
         expected = store.meta("push:" + id)
         if not expected or not hmac.compare_digest(
@@ -39,41 +55,72 @@ def register_ingest(app, store):
         ):
             raise HTTPException(401)
         source = store.get("source", id)
-        if not source or source["kind"] != "push" or not source["enabled"]:
-            raise HTTPException(409, "Source disabled")
-        if not store.monitoring_active(source["machine_id"]):
-            raise HTTPException(
-                409, "Machine monitoring is paused; retain and retry events"
-            )
+        if not source or source["kind"] != "push":
+            raise HTTPException(401)
+        if not allow_paused:
+            state = control_state(source)
+            if not state["delivery_allowed"]:
+                raise HTTPException(
+                    409,
+                    dict(
+                        code=state["state"],
+                        message="Retain queued events and pause capture",
+                    ),
+                    headers={"Retry-After": "30"},
+                )
         return source
+
+    def control_state(source):
+        state = "active"
+        if not source["enabled"]:
+            state = "source_disabled"
+        elif not store.monitoring_active(source["machine_id"]):
+            state = "machine_paused"
+        return dict(
+            version=1,
+            state=state,
+            capture_allowed=state == "active",
+            delivery_allowed=state == "active",
+            retry_after=30,
+        )
+
+    @app.get("/sender-control/{id}")
+    def sender_control(id: str, request: Request):
+        return control_state(push_source(id, request, allow_paused=True))
 
     @app.post("/heartbeat/{id}")
     async def heartbeat(id: str, request: Request):
-        push_source(id, request)
+        source = push_source(id, request, allow_paused=True)
         body = await request.json()
-        if (
-            not isinstance(body, dict)
-            or type(body.get("ok")) is not bool
-            or type(body.get("pending")) is not int
-            or not 0 <= body["pending"] <= 1000000000
-            or set(body) != {"ok", "pending"}
-        ):
+        try:
+            state = SenderHeartbeat.model_validate(body)
+        except ValidationError:
             raise HTTPException(
                 400, "Send ok (boolean) and pending (non-negative integer)"
             )
+        control = control_state(source)
         old = json.loads(store.meta("health:" + id) or "{}")
         old.update(
             heartbeat=time.time(),
-            status="ok" if body["ok"] else "error",
+            status=(
+                "paused"
+                if not control["capture_allowed"]
+                else ("ok" if state.ok else "error")
+            ),
             sender_pending=body["pending"],
             error=(
                 ""
-                if body["ok"]
-                else "Sender capture failed; inspect its spool and permissions"
+                if state.ok or not control["capture_allowed"]
+                else "Sender needs attention: "
+                + (state.capture_code or state.delivery_code or "capture_failed")
             ),
         )
+        old["sender"] = state.model_dump(
+            exclude={"ok", "pending"}, exclude_defaults=True
+        )
+        old["control"] = control["state"]
         store.set_meta("health:" + id, dumps(old))
-        return {"ok": True}
+        return {"ok": True, "control": control}
 
     @app.post("/ingest/{id}")
     async def ingest(id: str, request: Request):
@@ -102,7 +149,9 @@ def register_ingest(app, store):
                 from logsentinel.config import JournaldSourceConfig
 
                 try:
-                    entry = JournaldCollector(JournaldSourceConfig())._parse_json_line(item["raw"])
+                    entry = JournaldCollector(JournaldSourceConfig())._parse_json_line(
+                        item["raw"]
+                    )
                 except (ValueError, TypeError, AttributeError, RecursionError):
                     entry = None
                 if entry is None:
@@ -135,6 +184,7 @@ def register_ingest(app, store):
             "acknowledged": [item["id"] for item in items],
             "quota": store.sender_quota(source["id"], store.settings()),
         }
+
 
 def create_ingest_app(store, telemetry=None):
     """Build a listener carrying reception and nothing else."""

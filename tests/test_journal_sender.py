@@ -33,21 +33,17 @@ async def test_journal_skips_history_and_preserves_metadata_and_cursor(central, 
     app, store, sid = central
     lines=[dict(__CURSOR='c0', MESSAGE='old event', SYSLOG_IDENTIFIER='old-service', PRIORITY='6')]
 
-    class Journal:
-        returncode=0
-        def __init__(self, cmd, stdout, stderr):
-            if '--after-cursor' in cmd:
-                index=next(i for i,e in enumerate(lines) if e['__CURSOR']==cmd[cmd.index('--after-cursor')+1])
-                chosen=lines[index+1:]
-            elif '-n' in cmd:
-                chosen=lines[-1:]
-            else:
-                chosen=lines
-            stdout.write(''.join(json.dumps(e)+'\n' for e in chosen).encode())
-        def poll(self): return 0
-        def wait(self, **kwargs): return 0
+    def journal(cmd, limit):
+        if '--cursor' in cmd:
+            index=next(i for i,e in enumerate(lines) if e['__CURSOR']==cmd[cmd.index('--cursor')+1])
+            chosen=lines[index:]
+        elif '-n' in cmd:
+            chosen=lines[-1:]
+        else:
+            chosen=lines
+        return ''.join(json.dumps(e)+'\n' for e in chosen).encode(), False
 
-    monkeypatch.setattr(collect.subprocess,'Popen',Journal)
+    monkeypatch.setattr(collect,'read_journal',journal)
     spool=tmp_path/'spool'
     await forward(None,'http://localhost',sid,'synthetic',spool,once=True,journal=True,new_only=True)
     assert store.events()==[]

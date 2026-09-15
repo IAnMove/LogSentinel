@@ -918,10 +918,17 @@ def spool_status(spool: str = typer.Option(..., "--spool")) -> None:
     if not path.is_file():
         raise typer.BadParameter("Spool database does not exist")
     with sqlite3.connect(path.as_uri() + "?mode=ro", uri=True) as db:
-        counts = dict(db.execute("SELECT status,count(*) FROM events GROUP BY status"))
+        count = db.execute("SELECT value FROM meta WHERE key='sender_pending_count'").fetchone()
+        counts = dict(pending=int(count[0]) if count else None)
         oldest = db.execute("SELECT min(received) FROM events WHERE status='pending'").fetchone()[0]
-        workers = {key: json.loads(value) for key, value in db.execute("SELECT key,value FROM meta WHERE key IN ('sender_capture','sender_delivery','sender_quarantine')")}
-    print(json.dumps(dict(counts=counts, oldest_pending=oldest, workers=workers), indent=2))
+        workers = {key: json.loads(value) for key, value in db.execute("SELECT key,value FROM meta WHERE key IN ('sender_capture','sender_delivery','sender_quarantine','sender_control')")}
+        cfg=json.loads(db.execute("SELECT value FROM meta WHERE key='settings'").fetchone()[0])
+        page_size=db.execute('PRAGMA page_size').fetchone()[0]
+        reusable=db.execute('PRAGMA freelist_count').fetchone()[0]*page_size
+        legacy=json.loads((db.execute("SELECT value FROM meta WHERE key='health:sender'").fetchone() or ['{}'])[0])
+    from logsentinel.portal.rules import redact
+    allocated=sum(p.stat().st_size for p in path.parent.glob('sentinel.db*') if p.is_file())
+    print(json.dumps(dict(counts=counts, counts_note='Pending counter; null means legacy queue not yet migrated. No full event scan.', oldest_pending=oldest, workers=workers, allocated_bytes=allocated,reusable_bytes=reusable,quota_bytes=cfg['disk_limit_mb']*1024**2,legacy_capture_error=redact(str(legacy.get('error','')))[:300]), indent=2))
 
 
 @app.command(name="restore")
