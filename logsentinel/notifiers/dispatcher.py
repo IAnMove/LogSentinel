@@ -13,6 +13,24 @@ from logsentinel.notifiers.file import FileNotifier
 from logsentinel.notifiers.slack import SlackNotifier
 from logsentinel.notifiers.telegram import TelegramNotifier
 from logsentinel.notifiers.webhook import WebhookNotifier
+from logsentinel.redact import redact
+
+
+def scrubbed(alert: Alert) -> Alert:
+    """A copy of the alert with recognisable credentials hidden.
+
+    Everything a channel receives leaves the machine or lands on a screen. The
+    log lines and the model's prose can both quote a password or a token.
+    """
+    copy = alert.model_copy(deep=True)
+    verdict = copy.verdict
+    verdict.title, verdict.summary = redact(verdict.title), redact(verdict.summary)
+    for name in ("recommended_action", "reasoning"):
+        if getattr(verdict, name):
+            setattr(verdict, name, redact(getattr(verdict, name)))
+    for entry in copy.incident.entries:
+        entry.message, entry.raw = redact(entry.message), redact(entry.raw)
+    return copy
 
 
 class NotificationDispatcher:
@@ -42,9 +60,11 @@ class NotificationDispatcher:
         if not alert.verdict.severity.is_at_least(self.min_severity):
             return []
 
+        outgoing = scrubbed(alert)
+
         async def send_one(notifier):
             try:
-                return await asyncio.wait_for(notifier.send(alert), self.timeout_seconds)
+                return await asyncio.wait_for(notifier.send(outgoing), self.timeout_seconds)
             except Exception:
                 return False
 

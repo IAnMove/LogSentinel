@@ -18,9 +18,19 @@ class LLMClient:
         self.base_url = config.base_url.rstrip("/")
         self.openai_base_url = self.base_url if self.base_url.endswith("/v1") else f"{self.base_url}/v1"
 
+    @staticmethod
+    def _client(timeout: float) -> httpx.AsyncClient:
+        """No proxy variables, no redirects, no cloud metadata addresses."""
+        from logsentinel.portal.network import CheckedAsyncTransport
+
+        return httpx.AsyncClient(
+            transport=CheckedAsyncTransport(), timeout=timeout,
+            trust_env=False, follow_redirects=False,
+        )
+
     async def check_health(self) -> Dict[str, Any]:
         """Check connection to the LLM backend and list available models."""
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        async with self._client(10.0) as client:
             if self.config.provider == "ollama":
                 try:
                     resp = await client.get(f"{self.base_url}/api/tags")
@@ -113,7 +123,7 @@ class LLMClient:
             },
         }
 
-        async with httpx.AsyncClient(timeout=self.config.timeout_seconds) as client:
+        async with self._client(self.config.timeout_seconds) as client:
             resp = await client.post(endpoint, json=payload)
             resp.raise_for_status()
             data = resp.json()
@@ -141,7 +151,7 @@ class LLMClient:
             "response_format": {"type": "json_object"},
         }
 
-        async with httpx.AsyncClient(timeout=self.config.timeout_seconds) as client:
+        async with self._client(self.config.timeout_seconds) as client:
             resp = await client.post(endpoint, json=payload, headers=headers)
             resp.raise_for_status()
             data = resp.json()

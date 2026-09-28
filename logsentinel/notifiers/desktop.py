@@ -59,6 +59,7 @@ class DesktopNotifier(BaseNotifier):
             "-a", "LogSentinel",
             "-i", icon,
             "-t", str(self.config.expire_time_ms),
+            "--",  # text written by the model must not be read as an option
             title,
             body,
         ]

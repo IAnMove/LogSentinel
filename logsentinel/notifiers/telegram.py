@@ -3,10 +3,9 @@
 from __future__ import annotations
 import html
 from typing import Optional
-import httpx
 from logsentinel.config import TelegramNotifierConfig
 from logsentinel.core.models import Alert, Severity
-from logsentinel.notifiers.base import BaseNotifier
+from logsentinel.notifiers.base import BaseNotifier, outbound_client
 
 
 class TelegramNotifier(BaseNotifier):
@@ -71,7 +70,7 @@ class TelegramNotifier(BaseNotifier):
         }
 
         try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
+            async with outbound_client(10.0) as client:
                 resp = await client.post(url, json=payload)
                 return resp.status_code == 200
         except Exception:
@@ -87,7 +86,7 @@ class TelegramNotifier(BaseNotifier):
             "parse_mode": "HTML",
         }
         try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
+            async with outbound_client(10.0) as client:
                 resp = await client.post(url, json=payload)
                 return resp.status_code == 200
         except Exception:
