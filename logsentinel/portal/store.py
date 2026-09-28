@@ -29,6 +29,27 @@ def uid():
 
 QUOTA_WINDOW = 3600.0
 
+# Databases created before versioned migrations report version 1 and already
+# have the base schema below; each later step adds to it and is applied to old
+# and new databases alike, inside one transaction with its version bump.
+SCHEMA_VERSION = 2
+MIGRATIONS = {
+    2: (
+        # Deleting an event cascaded into signal_hits with a full table scan
+        # per event because only (signal, event_id) and the window index exist.
+        "CREATE INDEX IF NOT EXISTS signal_hits_event ON signal_hits(event_id)",
+        "CREATE INDEX IF NOT EXISTS events_segment ON events(segment_id,status)",
+        # Token statistics, timing and capacity read the newest usage rows.
+        "CREATE INDEX IF NOT EXISTS usage_created ON usage(created)",
+        "CREATE INDEX IF NOT EXISTS usage_job ON usage(job_id)",
+    ),
+}
+
+
+def schema_version(db):
+    row = db.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()
+    return int(row[0]) if row else None
+
 
 def dumps(value):
     return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
@@ -79,14 +100,19 @@ class Store:
             CREATE TABLE IF NOT EXISTS sender_quota(source_id TEXT PRIMARY KEY,window_start REAL,bytes INTEGER,events INTEGER);
             """
             )
-            version = db.execute(
-                "SELECT value FROM meta WHERE key='schema_version'"
-            ).fetchone()
-            if version and version[0] != "1":
+            version = schema_version(db)
+            if version is not None and version > SCHEMA_VERSION:
                 raise RuntimeError(
                     "Unsupported schema version; restore with a compatible version"
                 )
             db.execute("INSERT OR IGNORE INTO meta VALUES('schema_version','1')")
+            for target in range(max(version or 1, 1) + 1, SCHEMA_VERSION + 1):
+                for statement in MIGRATIONS[target]:
+                    db.execute(statement)
+                db.execute(
+                    "UPDATE meta SET value=? WHERE key='schema_version'", (str(target),)
+                )
+                db.commit()
             db.execute(
                 "INSERT OR IGNORE INTO meta VALUES('settings',?)",
                 (dumps(Settings().model_dump()),),
@@ -176,6 +202,11 @@ class Store:
 
     def set_meta(self, key, value):
         with self.connect() as db:
+            # Workers record their status on every tick; an unchanged value
+            # must not cost a synchronous commit.
+            row = db.execute("SELECT value FROM meta WHERE key=?", (key,)).fetchone()
+            if row is not None and row[0] == value:
+                return
             db.execute("INSERT OR REPLACE INTO meta VALUES(?,?)", (key, value))
 
     def settings(self):
@@ -351,7 +382,6 @@ class Store:
     def prepare_sender(self):
         """One-time indexed migration and count, including legacy durable queues."""
         with self.connect() as db:
-            db.execute("CREATE INDEX IF NOT EXISTS events_segment ON events(segment_id,status)")
             if not db.execute("SELECT 1 FROM meta WHERE key='sender_pending_count'").fetchone():
                 db.execute("INSERT INTO meta SELECT 'sender_pending_count',CAST(count(*) AS TEXT) FROM events WHERE status='pending'")
 

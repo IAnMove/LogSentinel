@@ -943,7 +943,10 @@ def restore_backup(backup: str, data_dir: str = typer.Option(..., "--data-dir"))
     with sqlite3.connect(source.as_uri()+"?mode=ro", uri=True) as conn:
         if conn.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
             raise typer.BadParameter("Backup integrity check failed")
-        if conn.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()[0] != '1':
+        from logsentinel.portal.store import SCHEMA_VERSION, schema_version
+
+        found = schema_version(conn)
+        if found is None or found > SCHEMA_VERSION:
             raise typer.BadParameter("Unsupported backup schema")
     target.mkdir(mode=0o700, parents=True)
     shutil.copyfile(source, target / "sentinel.db")
