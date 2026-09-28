@@ -186,3 +186,22 @@ def test_lines_without_a_zone_use_the_machine_timezone(folder):
     stamps = {e["message"]: e["timestamp"] for e in store.events()}
     assert stamps["local time"].startswith("2026-01-15T09:00:00")
     assert stamps["explicit utc"].startswith("2026-01-15T10:00:00")
+
+
+@pytest.mark.parametrize(
+    "suffix, compress",
+    [
+        (".gz", gzip.compress),
+        (".xz", __import__("lzma").compress),
+        (".bz2", __import__("bz2").compress),
+    ],
+)
+def test_a_truncated_archive_is_a_readable_error_not_a_crash(folder, suffix, compress):
+    store, source, logs = folder
+    archive = logs / ("cut.log" + suffix)
+    archive.write_bytes(compress(b"a line of text\n" * 20000)[:-40])
+    collector = Collector(store)
+    assert collector.file(source, archive) == 0  # the first sight only records its stamp
+    with pytest.raises(ValueError, match="truncated or corrupt"):
+        for _ in range(40):  # each poll reads one batch; the cut is at the end
+            collector.file(source, archive)

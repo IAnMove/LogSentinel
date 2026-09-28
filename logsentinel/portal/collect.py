@@ -4,6 +4,7 @@ from __future__ import annotations
 import gzip
 import bz2
 import lzma
+import zlib
 import hashlib
 import json
 import os
@@ -386,40 +387,47 @@ class Collector:
         used = 0
         done = False
         zone = machine_zone(self.store, source)
-        with opener(path, "rb") as f:
-            f.seek(offset)
-            while used < source["max_batch_bytes"] and len(entries) < 1000:
-                begin = f.tell()
-                if compressed and begin >= MAX_EXPANDED_BYTES:
-                    done = True
-                    break
-                line = f.readline(MAX_LINE + 1)
-                if not line:
-                    done = True
-                    break
-                if len(line) > MAX_LINE:
-                    raise ValueError(
-                        "Event exceeds 256 KB; change source format or explicit source limit policy"
-                    )
-                if compressed and begin + len(line) > MAX_EXPANDED_BYTES:
-                    done = True
-                    f.seek(begin)
-                    break
-                if not line.endswith(b"\n") and not compressed:
-                    f.seek(begin)
-                    break
-                text = line.decode("utf-8", errors="replace").rstrip("\r\n")
-                if source.get("multiline") and text.startswith((" ", "\t")) and entries:
-                    entries[-1]["message"] += "\n" + text
-                    entries[-1]["raw"] += "\n" + text
-                elif text:
-                    entries.append(normalize(text, key, f"{generation}:{begin}", zone))
-                used += len(line)
-            end = f.tell()
-            tail = ""
-            if not compressed:
-                f.seek(max(0, end - 64))
-                tail = hashlib.sha256(f.read(min(64, end))).hexdigest()
+        try:
+            with opener(path, "rb") as f:
+                f.seek(offset)
+                while used < source["max_batch_bytes"] and len(entries) < 1000:
+                    begin = f.tell()
+                    if compressed and begin >= MAX_EXPANDED_BYTES:
+                        done = True
+                        break
+                    line = f.readline(MAX_LINE + 1)
+                    if not line:
+                        done = True
+                        break
+                    if len(line) > MAX_LINE:
+                        raise ValueError(
+                            "Event exceeds 256 KB; change source format or explicit source limit policy"
+                        )
+                    if compressed and begin + len(line) > MAX_EXPANDED_BYTES:
+                        done = True
+                        f.seek(begin)
+                        break
+                    if not line.endswith(b"\n") and not compressed:
+                        f.seek(begin)
+                        break
+                    text = line.decode("utf-8", errors="replace").rstrip("\r\n")
+                    if source.get("multiline") and text.startswith((" ", "\t")) and entries:
+                        entries[-1]["message"] += "\n" + text
+                        entries[-1]["raw"] += "\n" + text
+                    elif text:
+                        entries.append(normalize(text, key, f"{generation}:{begin}", zone))
+                    used += len(line)
+                end = f.tell()
+                tail = ""
+                if not compressed:
+                    f.seek(max(0, end - 64))
+                    tail = hashlib.sha256(f.read(min(64, end))).hexdigest()
+        except (EOFError, lzma.LZMAError, zlib.error, gzip.BadGzipFile) as exc:
+            # A cut-off or damaged archive is a fact about that file, not a
+            # crash: readers treat ValueError as "this source cannot be read".
+            raise ValueError(
+                "Compressed source is truncated or corrupt: " + type(exc).__name__
+            ) from None
         cursor = {
             "identity": sig,
             "generation": generation,
