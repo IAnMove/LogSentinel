@@ -7,14 +7,28 @@ from logsentinel.config import PrefilterConfig
 from logsentinel.core.models import Category, LogEntry
 
 
+def compile_keyword(keyword: str):
+    """A keyword is literal text, except when it uses ".*" or ".+".
+
+    The shipped defaults include 'audit.*denied'; escaping every keyword made
+    that one match only the literal characters and so never match a log line.
+    """
+    if ".*" in keyword or ".+" in keyword:
+        try:
+            return re.compile(keyword, re.IGNORECASE)
+        except re.error:
+            pass
+    return re.compile(re.escape(keyword), re.IGNORECASE)
+
+
 class PreFilter:
     """Evaluates whether a log entry is worthy of analysis and derives signatures."""
 
     def __init__(self, config: PrefilterConfig):
         self.config = config
-        self._sec_patterns = [re.compile(re.escape(k), re.IGNORECASE) for k in config.security_keywords]
-        self._err_patterns = [re.compile(re.escape(k), re.IGNORECASE) for k in config.error_keywords]
-        self._noise_patterns = [re.compile(re.escape(k), re.IGNORECASE) for k in config.noise_keywords]
+        self._sec_patterns = [compile_keyword(k) for k in config.security_keywords]
+        self._err_patterns = [compile_keyword(k) for k in config.error_keywords]
+        self._noise_patterns = [compile_keyword(k) for k in config.noise_keywords]
 
     def should_analyze(self, entry: LogEntry) -> Tuple[bool, Optional[Category]]:
         """Determine if a log entry needs LLM analysis or can be safely skipped."""
@@ -34,24 +48,17 @@ class PreFilter:
             if pattern.search(raw_text):
                 return False, None
 
-        # 2. Syslog priority check (Emergency, Alert, Critical, Error)
+        # 2. Syslog priority check (Emergency, Alert, Critical, Error). Security
+        # keywords already returned above, so only errors reach this point.
         if entry.priority is not None and entry.priority <= 3:
-            for pattern in self._sec_patterns:
-                if pattern.search(raw_text):
-                    return True, Category.SECURITY
             return True, Category.SYSTEM_ERROR
 
-        # 3. Security keyword check
-        for pattern in self._sec_patterns:
-            if pattern.search(raw_text):
-                return True, Category.SECURITY
-
-        # 4. Error keyword check
+        # 3. Error keyword check
         for pattern in self._err_patterns:
             if pattern.search(raw_text):
                 return True, Category.SYSTEM_ERROR
 
-        # 5. Specific security service checks
+        # 4. Specific security service checks
         sec_services = {"sshd", "ssh", "sudo", "su", "fail2ban", "ufw", "audit", "pam"}
         if entry.service.lower() in sec_services:
             if any(term in msg_lower for term in ("failed", "invalid", "error", "session", "denied", "violation")):

@@ -29,13 +29,24 @@ class ResponseParser:
                 return cleaned[end + len("</think>"):].strip()
         return cleaned
 
-    @staticmethod
-    def extract_json_str(text: str) -> Optional[str]:
+    FENCE = re.compile(r"```(?:json)?\s*(.*?)\s*```", re.DOTALL)
+
+    @classmethod
+    def unwrap(cls, text: str) -> str:
+        """One leading reasoning block and one fence around the whole document.
+
+        Both pipelines use this, so what counts as a well-formed reply cannot
+        drift between them. Truncated JSON is never repaired and nothing is
+        extracted from surrounding prose.
+        """
+        candidate = cls.strip_thinking_tokens(text)
+        fenced = cls.FENCE.fullmatch(candidate)
+        return fenced.group(1).strip() if fenced else candidate
+
+    @classmethod
+    def extract_json_str(cls, text: str) -> Optional[str]:
         """Unwrap only a complete fence enclosing the entire document."""
-        candidate = text.strip()
-        fenced = re.fullmatch(r"```(?:json)?\s*(.*?)\s*```", candidate, flags=re.DOTALL)
-        if fenced:
-            candidate = fenced.group(1).strip()
+        candidate = cls.unwrap(text)
         if candidate.startswith("{") and candidate.endswith("}"):
             return candidate
         return None

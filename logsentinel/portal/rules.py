@@ -75,7 +75,7 @@ def matches(rule, event, problem_id=""):
             str(metadata.get("systemd_user_unit") or "").casefold(),
         }
     if rule["kind"] == "ip":
-        return MemoryMatcher._matches_ip(event.get("message", ""), rule["pattern"])
+        return MemoryMatcher.matches_ip(event.get("message", ""), rule["pattern"])
     return bool(
         regex.search(
             rule["pattern"],

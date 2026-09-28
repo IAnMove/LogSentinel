@@ -12,6 +12,7 @@ from urllib.parse import urlsplit
 import httpx
 from .network import CheckedAsyncTransport
 from pydantic import ValidationError
+from logsentinel.llm.parser import ResponseParser
 from .models import Verdict
 from .rules import redact, excluded, sanitize, protected_secrets
 from .store import dumps, uid
@@ -239,17 +240,9 @@ class ReviewClient:
                     inp = None
                 if type(out) is not int:
                     out = None
-                raw = raw.strip()
-                if raw.startswith("<think>") and "</think>" in raw:
-                    raw = raw.split("</think>", 1)[1].strip()
-                # Some compatible servers still wrap valid JSON in Markdown
-                # despite format=json. Unwrap only a complete fenced document;
-                # never repair truncated JSON or extract a fragment from prose.
-                fenced = regex.fullmatch(
-                    r"```(?:json)?\s*\n(.*?)\n```", raw, flags=regex.DOTALL
-                )
-                if fenced:
-                    raw = fenced[1].strip()
+                # Some compatible servers still wrap valid JSON in Markdown or
+                # a reasoning block despite format=json; see ResponseParser.unwrap.
+                raw = ResponseParser.unwrap(raw)
                 result = sanitize(json.loads(raw), secrets)
                 if (
                     kind in ("analysis", "investigation", "diagnostic")
