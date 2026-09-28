@@ -818,7 +818,9 @@ def enrollment_package(
     except ValueError as refusal:
         raise typer.BadParameter(str(refusal))
     target = Path(out).expanduser()
-    fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
+    # O_CREAT keeps the mode of a file that already existed, which can be world-readable.
+    os.fchmod(fd, 0o600)
     with os.fdopen(fd, "w") as handle:
         json.dump(package, handle, indent=2)
     console.print(f"[green]\u2713 Package written to:[/green] {target}")

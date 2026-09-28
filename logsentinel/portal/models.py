@@ -12,6 +12,7 @@ from logsentinel.config import LLMConfig
 METADATA_HOSTS = {
     "metadata.google.internal",
     "metadata.goog",
+    "metadata.azure.com",
     "instance-data",
 }
 METADATA_NETWORKS = (
@@ -20,6 +21,9 @@ METADATA_NETWORKS = (
     ipaddress.ip_network("0.0.0.0/8"),
     ipaddress.ip_network("255.255.255.255/32"),
     ipaddress.ip_network("100.100.100.200/32"),
+    # Azure's wire server and AWS's IPv6 metadata endpoint.
+    ipaddress.ip_network("168.63.129.16/32"),
+    ipaddress.ip_network("fd00:ec2::254/128"),
 )
 
 
