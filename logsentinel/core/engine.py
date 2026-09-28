@@ -25,6 +25,13 @@ from logsentinel.memory.store import MemoryStore
 from logsentinel.notifiers.dispatcher import NotificationDispatcher
 
 
+# Analysis calls a model for up to two minutes. Incidents wait in a bounded
+# queue for a few workers so collectors keep reading meanwhile; only a full
+# queue (a backlog of ANALYSIS_BACKLOG incidents) makes ingestion wait.
+ANALYSIS_WORKERS = 2
+ANALYSIS_BACKLOG = 200
+
+
 class SentinelEngine:
     """The main orchestration engine for LogSentinel."""
 
@@ -48,9 +55,14 @@ class SentinelEngine:
             default_file_path=config.app.get_resolved_alerts_path(),
         )
 
+        # Until start() there is no queue: incidents are processed inline, which
+        # is what callers that drive the engine directly rely on.
+        self._incidents: Optional[asyncio.Queue] = None
+        self._analysis_tasks: List[asyncio.Task] = []
+        self._analysis_error: Optional[BaseException] = None
         self.aggregator = LogAggregator(
             config.aggregator,
-            on_incident_ready=self.process_incident,
+            on_incident_ready=self._hand_over,
         )
 
         self.journald_collector = JournaldCollector(config.sources.journald)
@@ -62,6 +74,10 @@ class SentinelEngine:
     async def start(self) -> None:
         """Start real-time monitoring and processing pipelines."""
         self._running = True
+        self._incidents = asyncio.Queue(ANALYSIS_BACKLOG)
+        self._analysis_tasks = [
+            asyncio.create_task(self._analyse_forever()) for _ in range(ANALYSIS_WORKERS)
+        ]
         await self.aggregator.start()
 
         # Start journald collector task if enabled
@@ -79,6 +95,8 @@ class SentinelEngine:
         tasks = list(self._collector_tasks)
         if self.aggregator._ticker_task is not None:
             tasks.append(self.aggregator._ticker_task)
+        if self._analysis_error is not None:
+            raise RuntimeError(f"Analysis failed: {self._analysis_error}") from self._analysis_error
         for task in tasks:
             if task.done() and not task.cancelled():
                 error = task.exception()
@@ -97,6 +115,35 @@ class SentinelEngine:
         await self.journald_collector.stop()
         await self.file_collector.stop()
         await self.aggregator.stop()
+        # The final flush queued its incidents: analyse them before the workers go.
+        if self._incidents is not None:
+            await self._incidents.join()
+            for task in self._analysis_tasks:
+                task.cancel()
+            await asyncio.gather(*self._analysis_tasks, return_exceptions=True)
+            self._incidents, self._analysis_tasks = None, []
+
+    async def _hand_over(self, incident: Incident) -> None:
+        """Aggregator callback: queue the incident once workers are running."""
+        if self._incidents is None:
+            await self.process_incident(incident)
+        else:
+            await self._incidents.put(incident)
+
+    async def _analyse_forever(self) -> None:
+        while True:
+            incident = await self._incidents.get()
+            try:
+                await self.process_incident(incident)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                # Keep the first failure for raise_if_failed, as a collector
+                # that died used to be, and keep working through the queue.
+                if self._analysis_error is None:
+                    self._analysis_error = exc
+            finally:
+                self._incidents.task_done()
 
     async def _run_journald_collector(self) -> None:
         try:
