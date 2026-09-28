@@ -23,7 +23,21 @@ Also correct severity: HIGH for failed operations (writes, OOM-aborted work, exh
 Return raw JSON {"assessments":[{"candidate_id":"c0","status":"confirmed|unsupported|uncertain","severity":"LOW|MEDIUM|HIGH|CRITICAL","evidence_ids":["e0"],"reason":"one concise factual sentence"}]}. Assess each candidate exactly once. Unrelated issues must not cancel each other. Do not invent evidence or actions."""
 
 
+PROVIDER_RETRY_LIMIT = 100
+
+
 class ReviewQueue:
+    @staticmethod
+    def provider_unreachable(exc):
+        """Failures that say nothing about the batch: nobody answered, or the
+        service is down, refusing credentials or shedding load. A read timeout
+        or a 500 may be caused by the batch itself and keeps counting."""
+        if isinstance(exc, (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout)):
+            return True
+        return isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code in (
+            401, 403, 429, 502, 503, 504
+        )
+
     def __init__(self, analyzer):
         self.analyzer, self.store = analyzer, analyzer.store
 
@@ -911,6 +925,22 @@ class ReviewQueue:
             )
             if shared:
                 self.analyzer.provider_failed = True
+                if self.provider_unreachable(exc) and batch.get("provider_failures", 0) < PROVIDER_RETRY_LIMIT:
+                    # The model never saw this batch, so the outage must not
+                    # use up its attempts: it would end as failed and need a
+                    # manual retry once the provider comes back.
+                    batch["provider_failures"] = batch.get("provider_failures", 0) + 1
+                    batch["retry_at"] = time.time() + min(300, 5 * 2 ** min(6, batch["provider_failures"]))
+                    if phase == "triage":
+                        with self.store.connect() as db:
+                            db.execute(
+                                "UPDATE jobs SET attempts=max(0,attempts-1) WHERE id=?",
+                                (job,),
+                            )
+                    elif phase.startswith("verification"):
+                        batch["verification_attempts"] = max(
+                            0, batch.get("verification_attempts", 0) - 1
+                        )
             else:
                 with self.store.connect() as db:
                     attempts = db.execute("SELECT attempts FROM jobs WHERE id=?", (job,)).fetchone()[0]

@@ -208,6 +208,51 @@ async def test_late_detector_signal_alerts_only_when_recent_and_severe(queue):
 
 
 @pytest.mark.asyncio
+async def test_provider_outage_does_not_spend_the_attempts_of_a_batch(queue, monkeypatch):
+    store, machine, source = queue
+    configure(store, max_calls=1)
+    store.ingest(source, [dict(origin="a", message="disk write failed", service="app")])
+    analyzer = Analyzer(store)
+    calls = []
+
+    async def model(payload, **kwargs):
+        calls.append(1)
+        if len(calls) <= 5:
+            raise httpx.ConnectError("provider is down")
+        return {"findings": []}
+
+    analyzer.client.call = model
+    clock = [time.time()]
+    monkeypatch.setattr(time, "time", lambda: clock[0])
+    for _ in range(8):
+        clock[0] += 900
+        await analyzer.cycle()
+    job = store.rows("jobs")[0]
+    assert len(calls) == 6
+    assert job["status"] == "done"
+    assert job["attempts"] == 1
+
+
+@pytest.mark.asyncio
+async def test_read_timeouts_still_count_because_the_batch_may_be_the_cause(queue, monkeypatch):
+    store, machine, source = queue
+    configure(store, max_calls=1)
+    store.ingest(source, [dict(origin="a", message="disk write failed", service="app")])
+    analyzer = Analyzer(store)
+
+    async def model(payload, **kwargs):
+        raise httpx.ReadTimeout("model never answered")
+
+    analyzer.client.call = model
+    clock = [time.time()]
+    monkeypatch.setattr(time, "time", lambda: clock[0])
+    for _ in range(5):
+        clock[0] += 900
+        await analyzer.cycle()
+    assert store.rows("jobs")[0]["status"] == "failed"
+
+
+@pytest.mark.asyncio
 async def test_unverified_notice_says_so_in_the_message(tmp_path, monkeypatch):
     requests = []
 
