@@ -30,7 +30,8 @@ class SessionAuth:
             return None
         with self.lock:
             current = self.store.meta("admin_token")
-            if not hmac.compare_digest(credential, current):
+            # Compare bytes: str comparison raises on non-ASCII input.
+            if not hmac.compare_digest(credential.encode(), current.encode()):
                 return None
             session = secrets.token_urlsafe(32)
             self.sessions[session] = time.time() + 86400

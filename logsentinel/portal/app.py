@@ -18,6 +18,7 @@ from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from pydantic import ValidationError
 
+from .limits import BodyLimit
 from .store import BACKUPS_KEPT, Store, dumps, uid
 from .auth import SessionAuth
 from .models import Machine, Source, Destination, Rule, Settings, merge_destination
@@ -247,6 +248,8 @@ def create_app(directory, background=True):
             {"status": state}, status_code=200 if state == "ok" else 503
         )
 
+    app.add_middleware(BodyLimit)
+
     @app.middleware("http")
     async def guard(request, call_next):
         host = request.url.hostname
@@ -254,18 +257,6 @@ def create_app(directory, background=True):
             return JSONResponse(
                 {"detail": "Untrusted host; use a loopback SSH tunnel"}, status_code=400
             )
-        # Streaming body limit also protects requests without Content-Length.
-        if request.method in ("POST", "PUT", "PATCH"):
-            parts = []
-            size = 0
-            async for chunk in request.stream():
-                size += len(chunk)
-                if size > 4_000_000:
-                    return JSONResponse(
-                        {"detail": "Request exceeds 4 MB"}, status_code=413
-                    )
-                parts.append(chunk)
-            request._body = b"".join(parts)
         path = request.url.path
         now = time.time()
         await asyncio.to_thread(auth.prune)
@@ -342,9 +333,12 @@ def create_app(directory, background=True):
         if len(old) >= 10:
             raise HTTPException(429, "Try again later")
         token = body.get("token", "")
-        attempts[ip] = old + [now]
         session = await asyncio.to_thread(auth.login, token)
         if session is None:
+            # Only failures spend the budget, so signing in never locks the
+            # operator out; reaching the panel through a tunnel makes every
+            # client share one address, hence the low ceiling on failures.
+            attempts[ip] = old + [now]
             raise HTTPException(401, "Invalid access key")
         result = JSONResponse({"ok": True})
         result.set_cookie(
