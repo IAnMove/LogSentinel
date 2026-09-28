@@ -79,17 +79,36 @@ def test_an_expired_code_is_refused(central):
 
 def test_guessing_is_capped_and_reveals_no_source(central):
     store, reception, source = central
-    issue_package(store, source, "http://localhost")
+    package = issue_package(store, source, "http://localhost")
     for _ in range(12):
         assert reception.post(
             "/enroll", json={"source_id": source, "code": "wrong"}
         ).status_code == 401
-    # Attempts are spent, so even the real code no longer works.
+    # The address that ground against the endpoint is spent, even with the real code.
     with pytest.raises(KeyError, match="Too many"):
-        redeem(store, source, "irrelevant")
+        redeem(store, source, package["code"], client="testclient")
     unknown = reception.post("/enroll", json={"source_id": "no-such-source", "code": "x"})
     assert unknown.status_code == 401
     assert "source" not in unknown.json()["detail"].lower()
+
+
+def test_a_flood_from_one_address_cannot_burn_the_code_of_the_real_sender(central):
+    store, reception, source = central
+    package = issue_package(store, source, "http://localhost")
+    for _ in range(40):
+        with pytest.raises(KeyError):
+            redeem(store, source, "wrong", client="198.51.100.9")
+    assert redeem(store, source, package["code"], client="203.0.113.7")
+
+
+def test_a_flood_of_addresses_cannot_grow_the_stored_record_without_bound(central):
+    store, reception, source = central
+    package = issue_package(store, source, "http://localhost")
+    for i in range(200):
+        with pytest.raises(KeyError):
+            redeem(store, source, "wrong", client=f"198.51.100.{i}")
+    assert len(json.loads(store.meta("enroll:" + source))["failures"]) <= 51
+    assert redeem(store, source, package["code"], client="203.0.113.7")
 
 
 def test_the_credential_earned_can_actually_deliver(central, tmp_path):
