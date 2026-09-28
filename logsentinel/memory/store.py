@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 from contextlib import closing
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import json
+import os
 from pathlib import Path
 import sqlite3
 from typing import Any, Dict, List, Optional
@@ -26,14 +27,24 @@ class MemoryStore:
         self.db_path = Path(db_path).expanduser().resolve()
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._init_db()
+        # Alerts quote log lines and rules describe the machine: owner only.
+        for suffix in ("", "-wal", "-shm"):
+            try:
+                os.chmod(str(self.db_path) + suffix, 0o600)
+            except FileNotFoundError:
+                pass
 
     def _get_connection(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(str(self.db_path))
+        # A second process (a CLI command beside the daemon) waits for the lock
+        # instead of failing after sqlite's default five seconds.
+        conn = sqlite3.connect(str(self.db_path), timeout=15)
         conn.row_factory = sqlite3.Row
         return conn
 
     def _init_db(self) -> None:
         """Create database tables if they do not exist."""
+        with closing(self._get_connection()) as conn:
+            conn.execute("PRAGMA journal_mode=WAL")
         with closing(self._get_connection()) as conn, conn:
             cursor = conn.cursor()
             cursor.execute("""
@@ -221,6 +232,12 @@ class MemoryStore:
             cursor.execute(query, params)
             rows = cursor.fetchall()
             return [self._row_to_alert(r) for r in rows]
+
+    def prune_alerts(self, older_than_days: int) -> int:
+        """Alerts quote log lines; keep them for a bounded time, not forever."""
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=older_than_days)).isoformat()
+        with closing(self._get_connection()) as conn, conn:
+            return conn.execute("DELETE FROM alerts WHERE created_at < ?", (cutoff,)).rowcount
 
     def update_alert_status(self, alert_id: str, status: AlertStatus, feedback: Optional[str] = None) -> bool:
         """Update an alert's status and feedback."""

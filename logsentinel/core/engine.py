@@ -74,6 +74,8 @@ class SentinelEngine:
     async def start(self) -> None:
         """Start real-time monitoring and processing pipelines."""
         self._running = True
+        if self.config.memory.enabled:
+            self.memory_store.prune_alerts(self.config.memory.alert_retention_days)
         self._incidents = asyncio.Queue(ANALYSIS_BACKLOG)
         self._analysis_tasks = [
             asyncio.create_task(self._analyse_forever()) for _ in range(ANALYSIS_WORKERS)

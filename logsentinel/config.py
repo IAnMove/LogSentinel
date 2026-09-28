@@ -181,6 +181,7 @@ class MemoryConfig(BaseModel):
     enabled: bool = True
     max_semantic_rules_in_prompt: int = Field(default=15, ge=0)
     auto_learn_from_feedback: bool = True
+    alert_retention_days: int = Field(default=90, ge=1)
 
 
 class BehaviorConfig(BaseModel):
@@ -241,6 +242,10 @@ class Config(BaseModel):
         path.parent.mkdir(parents=True, exist_ok=True)
         # Convert pydantic model to dict
         data = self.model_dump()
-        with open(path, "w", encoding="utf-8") as f:
+        # The file holds API keys and notification tokens: owner only, also when
+        # it already existed with wider permissions.
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
             yaml.dump(data, f, default_flow_style=False, sort_keys=False)
         return path

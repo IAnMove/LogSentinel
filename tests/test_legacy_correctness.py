@@ -76,3 +76,73 @@ def test_ip_matching_has_a_public_name_and_keeps_the_old_one():
 )
 def test_both_pipelines_unwrap_replies_the_same_way(reply, expected):
     assert ResponseParser.unwrap(reply) == expected
+
+
+def test_legacy_files_that_hold_logs_and_secrets_are_owner_only(tmp_path):
+    import asyncio
+    import stat
+
+    from logsentinel.config import Config, FileNotifierConfig
+    from logsentinel.notifiers.file import FileNotifier
+
+    store = MemoryStore(tmp_path / "state" / "memory.db")
+    store.add_rule(MemoryRule(rule_type=MemoryRuleType.SERVICE, content="cron"))
+    assert stat.S_IMODE(store.db_path.stat().st_mode) == 0o600
+    with store._get_connection() as conn:
+        assert conn.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
+
+    settings = tmp_path / "config.yaml"
+    settings.write_text("old")
+    settings.chmod(0o644)
+    Config().save(settings)
+    assert stat.S_IMODE(settings.stat().st_mode) == 0o600
+
+    alerts = tmp_path / "alerts.jsonl"
+    alerts.write_text("")
+    alerts.chmod(0o644)
+    notifier = FileNotifier(FileNotifierConfig(enabled=True, path=str(alerts)), alerts)
+    assert asyncio.run(notifier.test())
+    assert stat.S_IMODE(alerts.stat().st_mode) == 0o600
+
+
+def test_old_alerts_expire_and_recent_ones_stay(tmp_path):
+    from datetime import datetime, timedelta, timezone
+
+    from logsentinel.core.models import Alert, LLMVerdict
+
+    store = MemoryStore(tmp_path / "memory.db")
+    old = Alert(incident=Incident(service="x", signature="s"), verdict=LLMVerdict(title="old", summary="s"),
+                created_at=datetime.now(timezone.utc) - timedelta(days=200))
+    new = Alert(incident=Incident(service="x", signature="s"), verdict=LLMVerdict(title="new", summary="s"))
+    store.save_alert(old)
+    store.save_alert(new)
+    assert store.prune_alerts(90) == 1
+    assert [a.verdict.title for a in store.list_alerts()] == ["new"]
+
+
+@pytest.mark.asyncio
+async def test_tail_keeps_the_head_of_a_runaway_line_and_moves_on(tmp_path, monkeypatch):
+    import asyncio
+
+    from logsentinel.collectors.file_tailer import MAX_LINE_BYTES, FileTailerCollector
+    from logsentinel.config import FileSourceConfig
+
+    path = tmp_path / "synthetic.log"
+    path.write_text("history\n")
+    collector = FileTailerCollector(FileSourceConfig(paths=[str(path)]))
+    tick = 0
+
+    async def advance(_):
+        nonlocal tick
+        tick += 1
+        if tick == 1:
+            with path.open("ab") as f:
+                f.write(b"H" * (MAX_LINE_BYTES * 3) + b"\nnext line\n")
+        else:
+            await collector.stop()
+
+    monkeypatch.setattr(asyncio, "sleep", advance)
+    messages = [e.message async for e in collector.stream()]
+    assert len(messages) == 2
+    assert len(messages[0]) <= MAX_LINE_BYTES and messages[0].startswith("HHH")
+    assert messages[1] == "next line"

@@ -13,6 +13,9 @@ from logsentinel.core.models import LogEntry, LogSourceType
 from logsentinel.collectors.base import BaseCollector
 
 
+MAX_LINE_BYTES = 256_000
+
+
 class FileTailerCollector(BaseCollector):
     """Tails one or more log files and yields LogEntry objects."""
 
@@ -43,7 +46,14 @@ class FileTailerCollector(BaseCollector):
             # Byte offsets stay valid even when UTF-8 characters span writes.
             while True:
                 position = handle.tell()
-                line = handle.readline()
+                # One runaway line must not become one runaway allocation.
+                line = handle.readline(MAX_LINE_BYTES + 1)
+                if len(line) > MAX_LINE_BYTES and not line.endswith(b"\n"):
+                    while True:  # keep the head as the event and drop the rest of the line
+                        rest = handle.readline(MAX_LINE_BYTES)
+                        if not rest or rest.endswith(b"\n"):
+                            break
+                    line = line[:MAX_LINE_BYTES] + b"\n"
                 if not line.endswith(b"\n"):
                     handle.seek(position)
                     break
