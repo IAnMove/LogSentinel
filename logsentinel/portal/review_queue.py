@@ -10,6 +10,7 @@ import time
 
 from .batch_budget import batch_budget, input_ceiling
 from .compaction import compact, public_group, representation
+from .freshness import SEVERE, happened_recently, live_cutoff, newest_instant
 from .models import Settings, Verdict
 from .injection import looks_like_instruction
 from .rules import excluded, redact, sanitize, protected_secrets
@@ -152,7 +153,7 @@ class ReviewQueue:
     def prepare(self, machine, cfg, rotation):
         from .analysis import interleave_services
 
-        cutoff = time.time() - max(300, cfg.interval_seconds * 2)
+        cutoff = live_cutoff(cfg.interval_seconds)
         prefer_history = rotation % 5 == 4
         with self.store.connect() as db:
             sources = [
@@ -557,6 +558,45 @@ class ReviewQueue:
                 raise ValueError("Verification requires a bounded factual reason")
         return result
 
+    def newsworthy(self, problem, batch, severity=None):
+        """Live evidence always alerts; severe findings also alert when a backlog
+        or an outage delayed the review but the events are still recent."""
+        evidence = problem["evidence"]
+        if not batch["historical"] and set(evidence).intersection(
+            batch.get("live_ids", batch["selected"])
+        ):
+            return True
+        severity = severity or problem["finding"]["severity"]
+        return severity in SEVERE and happened_recently(
+            newest_instant(self.store, evidence)
+        )
+
+    def alert(self, batch, problems):
+        """Enqueue notifications once per problem; enqueue is safe to replay."""
+        from .notify import enqueue
+
+        alerted = set(batch.get("alerted", []))
+        for problem in problems:
+            if problem["id"] in alerted:
+                continue
+            enqueue(self.store, problem["id"])
+            alerted.add(problem["id"])
+        batch["alerted"] = sorted(alerted)
+
+    def alert_unverified(self, batch, problems):
+        """A severe finding the model could not verify is still shown to the
+        operator, marked as preliminary, instead of staying silent."""
+        pending = []
+        for problem in problems:
+            with self.store.connect() as db:
+                row = db.execute(
+                    "SELECT severity,status FROM problems WHERE id=?", (problem["id"],)
+                ).fetchone()
+            if row and row["status"] != "resolved" and row["severity"] in SEVERE:
+                if self.newsworthy(problem, batch, row["severity"]):
+                    pending.append(problem)
+        self.alert(batch, pending)
+
     def finish_triage(self, job, batch, cfg, machine):
         verdict = Verdict.model_validate(batch["result"])
         refs = {"g" + str(i): g["event_ids"] for i, g in enumerate(batch["groups"])}
@@ -611,6 +651,13 @@ class ReviewQueue:
                 self.save(job, batch)
                 return
         batch["phase"] = "done"
+        # Notify before the final save: a crash between the two replays this
+        # step and the outbox cooldown absorbs the repeat, whereas the other
+        # order could lose the alert.
+        if needs_verification:
+            self.alert_unverified(batch, problems)
+        else:
+            self.alert(batch, [p for p in problems if self.newsworthy(p, batch)])
         self.save(
             job,
             batch,
@@ -621,14 +668,6 @@ class ReviewQueue:
                 else None
             ),
         )
-        if not batch["historical"] and not needs_verification:
-            from .notify import enqueue
-
-            for problem in problems:
-                if set(problem["evidence"]).intersection(
-                    batch.get("live_ids", batch["selected"])
-                ):
-                    enqueue(self.store, problem["id"])
 
     def finish_verification(self, job, batch, cfg):
         result = self.validate_verification(batch["verification_result"], batch)
@@ -679,16 +718,12 @@ class ReviewQueue:
                     "UPDATE events SET status='reviewed' WHERE status='compact' AND id IN (SELECT value FROM json_each(?)) AND NOT EXISTS (SELECT 1 FROM review_parts p WHERE p.event_id=events.id)",
                     (dumps(original_ids),),
                 )
-            if (
-                not batch["historical"]
-                and assessment["status"] == "confirmed"
-                and set(problem["evidence"]).intersection(
-                    batch.get("live_ids", batch["selected"])
-                )
-            ):
-                from .notify import enqueue
-
-                enqueue(self.store, problem["id"])
+            if assessment["status"] == "confirmed":
+                if self.newsworthy(problem, batch, data["severity"]):
+                    self.alert(batch, [problem])
+            elif assessment["status"] == "uncertain" and data["severity"] in SEVERE:
+                if self.newsworthy(problem, batch, data["severity"]):
+                    self.alert(batch, [problem])
         batch.update(
             assessed=sorted(assessed), uncertain=partial, verification_attempts=0
         )
@@ -704,6 +739,10 @@ class ReviewQueue:
                 self.save(job, batch)
                 return
             partial = True
+            self.alert_unverified(
+                batch,
+                [p for i, p in enumerate(batch["problems"]) if i not in assessed],
+            )
         batch["phase"] = "done"
         self.save(
             job,
@@ -878,16 +917,17 @@ class ReviewQueue:
                 batch["retry_at"] = time.time() + min(300, 5 * 2 ** min(6, max(attempts, batch.get("verification_attempts", 0))))
             error = safe_error(exc, (cfg.llm.api_key,))
             if phase.startswith("verification"):
-                self.save(
-                    job,
-                    batch,
-                    (
-                        "partial"
-                        if batch.get("verification_attempts", 0) >= 3
-                        else "retry"
-                    ),
-                    error,
-                )
+                gave_up = batch.get("verification_attempts", 0) >= 3
+                if gave_up:
+                    self.alert_unverified(
+                        batch,
+                        [
+                            p
+                            for i, p in enumerate(batch["problems"])
+                            if i not in batch.get("assessed", [])
+                        ],
+                    )
+                self.save(job, batch, "partial" if gave_up else "retry", error)
             else:
                 with self.store.connect() as db:
                     attempts = db.execute("SELECT attempts FROM jobs WHERE id=?", (job,)).fetchone()[0]

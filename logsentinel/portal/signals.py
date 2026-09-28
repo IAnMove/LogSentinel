@@ -3,10 +3,10 @@
 from __future__ import annotations
 import regex
 import hashlib
-from datetime import datetime
 
 from .store import dumps
 
+from .freshness import SEVERE, event_instant
 from .rules import excluded
 
 
@@ -91,16 +91,6 @@ def signal_batches(analyzer, limit, machine_id=None, events=None):
             yield machine["id"], pending
 
 
-def event_instant(event):
-    try:
-        value = datetime.fromisoformat(str(event.get("timestamp") or "").replace("Z", "+00:00"))
-        if value.tzinfo is not None:
-            return value.timestamp()
-    except (ValueError, OverflowError):
-        pass
-    return event["received"]
-
-
 def window_evidence(store, machine_id, spec, hits, rules):
     """Retain hit identities so model batches and restarts cannot reset a burst."""
     policy = hashlib.sha256(dumps([r for r in rules if r["action"] == "exclude"]).encode()).hexdigest()
@@ -142,6 +132,7 @@ def window_evidence(store, machine_id, spec, hits, rules):
 
 
 def apply_signals(analyzer, limit=500, *, machine_id=None, events=None, notify=True):
+    """notify is True, False, or "severe": only HIGH/CRITICAL signals may alert."""
     store = analyzer.store
     spanish = store.settings().language == "es"
     created = 0
@@ -176,6 +167,8 @@ def apply_signals(analyzer, limit=500, *, machine_id=None, events=None, notify=T
 
 def save_signal(analyzer, machine_id, spec, hits, spanish, source_id="", *, notify=True):
     idx = 0 if spanish else 1
+    if notify == "severe":
+        notify = spec["severity"] in SEVERE
     analyzer.save_finding(
         machine_id,
         {

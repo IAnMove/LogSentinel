@@ -17,6 +17,7 @@ from .rules import matches, redact, sanitize
 from .store import uid, dumps
 
 RANK = {"LOW": 1, "MEDIUM": 2, "HIGH": 3, "CRITICAL": 4}
+UNVERIFIED = ("preliminary", "uncertain")
 
 # Only these local messages may be exposed; never echo a remote response body.
 SLACK_ERRORS = {
@@ -72,6 +73,7 @@ def enqueue(store, problem_id, event_type="problem.updated"):
         "summary": redact(problem["data"]["summary"]),
         "severity": problem["severity"],
         "count": problem["count"],
+        "verification_status": problem["data"].get("verification_status", ""),
         "first_seen": problem["first_seen"],
         "last_seen": problem["last_seen"],
     }
@@ -175,6 +177,12 @@ class Outbox:
         )
         problem = "Problema" if spanish else "Problem"
         text = f"[{payload.get('severity','INFO')}] {payload.get('machine','LogSentinel')}\n{payload.get('title',title)}\n{payload.get('summary',summary)}\n{problem}: {payload.get('problem_id','test')}"
+        if payload.get("verification_status") in UNVERIFIED:
+            text += (
+                "\nSin verificar: el modelo no pudo comprobar este hallazgo con los originales."
+                if spanish
+                else "\nUnverified: the model could not check this finding against the originals."
+            )
         if payload.get("notification_group", "").startswith("ssh_rejections:"):
             minutes = payload["repeat_interval_seconds"] / 60
             text += (
