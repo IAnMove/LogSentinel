@@ -65,6 +65,36 @@ def read_package(path):
     return package
 
 
+def ca_fingerprint(pem):
+    return 'sha256:' + hashlib.sha256(ssl.PEM_cert_to_DER_cert(pem)).hexdigest()
+
+
+def normalize_fingerprint(text):
+    value = str(text).strip().lower()
+    value = value.removeprefix('sha256:').replace(':', '').replace(' ', '')
+    if not re.fullmatch(r'[0-9a-f]{64}', value):
+        raise ValueError('Una huella SHA-256 tiene 64 dígitos hexadecimales.')
+    return 'sha256:' + value
+
+
+def confirm_ca(package, expected=None, interactive=False):
+    """The package names the receiver and the CA to trust, so it cannot vouch
+    for itself: whoever swaps the file also swaps the fingerprint inside it.
+    The operator compares it with what the central printed, out of band."""
+    actual = ca_fingerprint(package['ca_certificate'])
+    print('Receptor:', package['receiver'])
+    print('Huella del certificado del central:', actual, flush=True)
+    if not expected and interactive:
+        expected = input('Pega la huella que mostró el central para confirmarla: ')
+    if not expected:
+        raise ValueError('Indica --ca-fingerprint con la huella que mostró el central al crear el alta '
+                         '(o ejecuta el instalador en un terminal para pegarla). Sin ella no se puede saber '
+                         'si el archivo de alta fue sustituido.')
+    if normalize_fingerprint(expected) != actual:
+        raise ValueError('La huella no coincide con la del central. No uses este archivo de alta.')
+    return actual
+
+
 def selection(name, package, file=None, history=False):
     if not re.fullmatch(r'[a-z][a-z0-9-]{0,19}', name):
         raise ValueError('El nombre debe tener 1–20 letras minúsculas, números o guiones y empezar por letra.')
@@ -303,7 +333,9 @@ def configure(args, desired, package, runtime):
         try:
             print('Canjeando el alta y guardando la credencial privada...', flush=True)
             result = subprocess.run(['runuser', '-u', account, '--', str(runtime/'bin/logsentinel'),
-                                     'enroll', str(staged), '--spool', str(spool)], capture_output=True, text=True)
+                                     'enroll', str(staged), '--spool', str(spool),
+                                     '--ca-fingerprint', ca_fingerprint(package['ca_certificate'])],
+                                    capture_output=True, text=True)
             if result.returncode:
                 raise ValueError('No se pudo canjear el alta. Comprueba la conexión; si el código caducó o ya se usó, genera otro en el central.')
         finally:
@@ -468,6 +500,7 @@ def main(argv=None):
     parser.add_argument('--file',help='Un archivo en lugar del journal')
     parser.add_argument('--logrotate-config',help='Configuración de rotación del archivo, con un único postrotate')
     parser.add_argument('--include-history',action='store_true',help='Importar también historial en una instalación nueva')
+    parser.add_argument('--ca-fingerprint',help='Huella SHA-256 del certificado del central, tal como la mostró al crear el alta')
     parser.add_argument('--plan',action='store_true',help='Mostrar el recorrido sin instalar ni enviar nada')
     parser.add_argument('--prepared',action='store_true',help=argparse.SUPPRESS)
     args=parser.parse_args(argv)
@@ -490,6 +523,8 @@ def main(argv=None):
     validate_existing(CONFIG/(args.name+'.json'),desired)
     print('Receptor:',desired['receiver'],'\nLogs:',desired['path'] or 'journal del sistema (todos los servicios)')
     print('Cuenta sin login:',desired['account'],'\nInicio:', 'con histórico' if args.include_history else 'solo entradas nuevas; se conservan cursores existentes',flush=True)
+    if package and args.plan:
+        print('Huella del certificado del central:',ca_fingerprint(package['ca_certificate']),'\nComprueba que coincide con la que mostró el central antes de instalar.')
     if args.plan:
         print('Plan: actualizar runtime con copia coherente; conservar identidad y estado del servicio. No se ha cambiado nada.' if args.upgrade else 'Plan: instalar Python aislado, conceder lectura, canjear el alta HTTPS y activar un servicio emisor. No se ha cambiado nada.')
         return
@@ -498,6 +533,10 @@ def main(argv=None):
     os.umask(0o022)
     if not Path('/run/systemd/system').is_dir():
         raise ValueError('Este instalador necesita systemd ejecutándose como gestor del sistema.')
+    if package:
+        confirmed=confirm_ca(package,args.ca_fingerprint,interactive=sys.stdin.isatty() and not args.prepared)
+        if not args.ca_fingerprint:
+            argv+=['--ca-fingerprint',confirmed]
     if not args.prepared:
         repo=Path(__file__).resolve().parents[1]
         runtime=bootstrap(repo)

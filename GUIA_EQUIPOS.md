@@ -11,8 +11,15 @@ de esta versión y el archivo privado `alta.json` que entrega el central.
 Dentro del repositorio, ejecuta:
 
 ```bash
-sudo ./setup-client.sh --package /ruta/alta.json
+sudo ./setup-client.sh --package /ruta/alta.json --ca-fingerprint sha256:HUELLA
 ```
+
+`HUELLA` es la huella del certificado que mostró el central al crear el alta
+(véase «dar de alta cada fuente»). El archivo de alta dice qué receptor y qué
+autoridad debe creer el cliente; si alguien lo sustituyera por el camino, su
+huella interna coincidiría con la de su propio certificado. Por eso el instalador
+la compara con la que le das tú, obtenida por otro canal. Sin `--ca-fingerprint`,
+en un terminal te pide pegarla; en un script se detiene.
 
 El instalador prepara un entorno Python aislado, crea la cuenta sin login
 `ls-logs`, le permite leer el journal, comprueba el certificado del central,
@@ -23,7 +30,7 @@ Root se usa para instalar; el servicio funciona después con la cuenta limitada.
 En Debian/Ubuntu puede instalar `python3-venv` si falta; se necesita acceso al
 repositorio de paquetes Python durante la primera instalación.
 
-Para ver lo que hará sin cambiar nada:
+Para ver lo que hará sin cambiar nada (muestra la huella para que la compares):
 
 ```bash
 ./setup-client.sh --package /ruta/alta.json --plan
@@ -114,7 +121,10 @@ logsentinel enrollment-package --data-dir /RUTA/DEL/PORTAL \
   --ca-cert /RUTA/ca.pem --out alta.json
 ```
 
-Entrega `alta.json` por un canal de confianza. Contiene la dirección, el
+El comando imprime `Certificate fingerprint: sha256:…`. Comunica esa huella al
+cliente por un canal distinto del que lleva `alta.json` (a viva voz, otro chat,
+tu gestor de contraseñas): quien tenga las dos cosas puede comprobar que el
+archivo no fue sustituido. Entrega `alta.json` por un canal de confianza. Contiene la dirección, el
 certificado público y un código de un solo uso, válido una hora por defecto.
 No entregues la clave privada TLS ni la clave del portal. Cada fuente tiene su
 credencial revocable; puedes emitir otra alta si caduca la anterior.
@@ -125,7 +135,8 @@ que sus logs se estén monitorizando.
 
 **CLI manual**
 
-`logsentinel enroll alta.json --spool /ruta/cola` solo canjea el alta.
+`logsentinel enroll alta.json --spool /ruta/cola --ca-fingerprint sha256:HUELLA`
+solo canjea el alta, tras comprobar la huella.
 `logsentinel forward --journal --new-only --receiver https://CENTRAL:8767
 --source-id ID --spool /ruta/cola --token-file /ruta/cola/push-token` envía el
 journal; para un archivo, sustituye `--journal` por su ruta. Sin `--new-only`,

@@ -11,7 +11,11 @@ entradas nuevas. No necesitamos un modelo ni un portal en este cliente.
 1. Lee GUIA_EQUIPOS.md. Comprueba Linux, systemd y Python 3.10 o posterior.
 2. Ejecuta ./setup-client.sh --package /ruta/alta.json --plan. Comprueba que
    el receptor coincide con el central acordado; es distinto del servidor LLM.
-3. Ejecuta sudo ./setup-client.sh --package /ruta/alta.json. El script instala
+   Compara la huella que muestra con la que el operador del central te haya
+   dado por otro canal. Si no la tienes, detente y pídesela: no la copies del
+   propio alta.json.
+3. Ejecuta sudo ./setup-client.sh --package /ruta/alta.json --ca-fingerprint
+   sha256:HUELLA con la huella del operador. El script instala
    el entorno aislado, crea la cuenta limitada, prepara permisos, canjea el
    alta HTTPS y activa el servicio. No imprimas códigos ni tokens y no
    desactives la validación del certificado.
@@ -30,7 +34,8 @@ Si es Windows nativo, explica que este emisor aún no captura sus eventos.
 
 El operador del central prepara la conectividad HTTPS, crea una máquina y una
 fuente de recepción remota por emisor y genera el alta según
-[GUIA_EQUIPOS.md](GUIA_EQUIPOS.md). El código caduca en una hora por defecto.
+[GUIA_EQUIPOS.md](GUIA_EQUIPOS.md); también te entrega la huella del certificado
+que imprime `enrollment-package`. El código caduca en una hora por defecto.
 La CA privada y la clave del portal se quedan en el central.
 
 En una LAN se expone únicamente el receptor HTTPS, con certificado para su

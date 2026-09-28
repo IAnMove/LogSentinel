@@ -833,11 +833,38 @@ def enrollment_package(
 def enroll_command(
     package_file: str = typer.Argument(..., help="Package written by the central"),
     spool: str = typer.Option(..., "--spool", help="Directory holding this sender's queue and credential"),
+    ca_fingerprint: Optional[str] = typer.Option(
+        None, "--ca-fingerprint",
+        help="SHA-256 fingerprint of the central's certificate, as 'enrollment-package' printed it there",
+    ),
 ) -> None:
     """Redeem an onboarding package and store this sender's credential."""
     import json
+    import sys
     from logsentinel.portal.enrollment_client import claim
     package = json.loads(Path(package_file).expanduser().read_text())
+    if package.get("ca_certificate"):
+        # The package says which receiver and CA to trust, so it must not vouch
+        # for itself: a swapped file would carry a matching fingerprint.
+        from logsentinel.portal.enroll import fingerprint, normalize_fingerprint
+        try:
+            actual = fingerprint(package["ca_certificate"])
+        except (ValueError, TypeError):
+            raise typer.BadParameter("The package certificate is not readable PEM")
+        console.print("Certificate fingerprint in the package:", actual, markup=False)
+        if not ca_fingerprint and sys.stdin.isatty():
+            ca_fingerprint = typer.prompt("Paste the fingerprint printed on the central")
+        if not ca_fingerprint:
+            raise typer.BadParameter(
+                "Pass --ca-fingerprint with the value 'enrollment-package' printed on the central"
+            )
+        try:
+            expected = normalize_fingerprint(ca_fingerprint)
+        except ValueError as refusal:
+            raise typer.BadParameter(str(refusal))
+        if expected != actual:
+            console.print("[red]The certificate is not the one the central printed. Do not use this package.[/red]")
+            raise typer.Exit(1)
     try:
         result = claim(package, Path(spool).expanduser())
     except ValueError as refusal:

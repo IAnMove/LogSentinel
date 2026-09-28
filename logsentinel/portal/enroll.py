@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import re
 import secrets
 import ssl
 import time
@@ -32,6 +33,15 @@ def fingerprint(certificate_pem):
     return "sha256:" + hashlib.sha256(
         ssl.PEM_cert_to_DER_cert(certificate_pem)
     ).hexdigest()
+
+
+def normalize_fingerprint(text):
+    """Accept sha256:ab12..., SHA256:AB:12:... or bare hex, as tools print them."""
+    value = str(text).strip().lower().removeprefix("sha256:")
+    value = value.replace(":", "").replace(" ", "")
+    if not re.fullmatch(r"[0-9a-f]{64}", value):
+        raise ValueError("A SHA-256 fingerprint has 64 hexadecimal digits")
+    return "sha256:" + value
 
 
 def issue_package(store, source_id, receiver, certificate_pem="", validity=DEFAULT_VALIDITY):

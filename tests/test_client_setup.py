@@ -120,3 +120,51 @@ def test_reusing_enrollment_command_cannot_bypass_safe_upgrade(package,tmp_path,
     runtime=tmp_path/'runtime'
     setup.configure(SimpleNamespace(name='logs'),desired,package,runtime)
     assert calls==[('logs',desired,runtime)]
+
+
+def test_plan_shows_the_certificate_fingerprint_to_compare(package,tmp_path,monkeypatch,capsys):
+    path=tmp_path/'alta.json';path.write_text(json.dumps(package))
+    monkeypatch.setattr(setup,'CONFIG',tmp_path/'config')
+    setup.main(['--package',str(path),'--plan'])
+    assert setup.ca_fingerprint(package['ca_certificate']) in capsys.readouterr().out
+
+
+@pytest.mark.parametrize('style',[str,lambda f:f.upper().replace('SHA256:','sha256:'),lambda f:f.removeprefix('sha256:'),
+                                  lambda f:':'.join(f.removeprefix('sha256:')[i:i+2] for i in range(0,64,2)).upper()])
+def test_the_fingerprint_can_be_given_in_any_common_format(package,style):
+    actual=setup.ca_fingerprint(package['ca_certificate'])
+    assert setup.confirm_ca(package,style(actual))==actual
+
+
+def test_a_swapped_package_is_refused_even_though_its_own_fingerprint_matches(package):
+    with pytest.raises(ValueError,match='no coincide'):setup.confirm_ca(package,'sha256:'+'0'*64)
+
+
+def test_without_a_fingerprint_a_script_cannot_proceed(package):
+    with pytest.raises(ValueError,match='--ca-fingerprint'):setup.confirm_ca(package,None,interactive=False)
+
+
+def test_a_terminal_operator_pastes_the_fingerprint_from_the_central(package,monkeypatch):
+    actual=setup.ca_fingerprint(package['ca_certificate'])
+    monkeypatch.setattr('builtins.input',lambda *_:actual)
+    assert setup.confirm_ca(package,None,interactive=True)==actual
+    monkeypatch.setattr('builtins.input',lambda *_:'sha256:'+'f'*64)
+    with pytest.raises(ValueError,match='no coincide'):setup.confirm_ca(package,None,interactive=True)
+    monkeypatch.setattr('builtins.input',lambda *_:'not a fingerprint')
+    with pytest.raises(ValueError,match='64 dígitos'):setup.confirm_ca(package,None,interactive=True)
+
+
+def test_enroll_command_checks_the_fingerprint_before_redeeming(package,tmp_path,monkeypatch):
+    from typer.testing import CliRunner
+    from logsentinel import cli
+    from logsentinel.portal import enrollment_client
+    calls=[]
+    monkeypatch.setattr(enrollment_client,'claim',lambda *a:calls.append(a) or dict(
+        source_id='s',receiver='https://127.0.0.1:8767',token_path=str(tmp_path/'t'),ca_path='',fingerprint=''))
+    path=tmp_path/'alta.json';path.write_text(json.dumps(package))
+    run=lambda *extra:CliRunner().invoke(cli.app,['enroll',str(path),'--spool',str(tmp_path/'spool'),*extra])
+    assert run().exit_code!=0 and not calls
+    assert run('--ca-fingerprint','sha256:'+'0'*64).exit_code==1 and not calls
+    assert run('--ca-fingerprint','nonsense').exit_code!=0 and not calls
+    assert run('--ca-fingerprint',setup.ca_fingerprint(package['ca_certificate'])).exit_code==0
+    assert len(calls)==1

@@ -66,7 +66,7 @@ alta y servicio emisor, sigue la [guía de equipos remotos](GUIA_EQUIPOS.md).
 Con el repositorio y el alta entregada por el central, en un Linux con systemd:
 
 ```bash
-sudo ./setup-client.sh --package /ruta/alta.json
+sudo ./setup-client.sh --package /ruta/alta.json --ca-fingerprint sha256:HUELLA
 ```
 
 Instala el emisor con una cuenta sin login. Por defecto envía el journal desde
