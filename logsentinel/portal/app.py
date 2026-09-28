@@ -18,7 +18,7 @@ from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from pydantic import ValidationError
 
-from .store import Store, dumps, uid
+from .store import BACKUPS_KEPT, Store, dumps, uid
 from .auth import SessionAuth
 from .models import Machine, Source, Destination, Rule, Settings, merge_destination
 from .collect import Collector, discovery
@@ -1325,13 +1325,21 @@ def create_app(directory, background=True):
     async def backup():
         folder = store.directory / "backups"
         folder.mkdir(mode=0o700, exist_ok=True)
-        path = await asyncio.to_thread(
-            store.backup, folder / ("backup-" + uid() + ".db")
-        )
+        os.chmod(folder, 0o700)
+        try:
+            path = await asyncio.to_thread(
+                store.backup, folder / ("backup-" + uid() + ".db")
+            )
+        except ValueError as exc:
+            raise HTTPException(507, str(exc)) from None
+        removed = await asyncio.to_thread(store.rotate_backups, folder)
         store.audit("backup", path.name)
         return {
             "filename": path.name,
-            "message": "Backup contains original logs, the access key and configuration secrets. Stored locally with owner-only permissions. Rotate credentials after restore.",
+            "message": "Backup contains original logs, the access key and configuration secrets. Stored locally with owner-only permissions. Rotate credentials after restore. Only the "
+            + str(BACKUPS_KEPT)
+            + " newest backups are kept.",
+            "removed": removed,
         }
 
     @app.get("/api/templates/{kind}")

@@ -28,6 +28,17 @@ def uid():
 
 
 QUOTA_WINDOW = 3600.0
+# VACUUM rewrites the whole file while holding the write lock and needs about
+# as much free disk as the database itself. Freed pages are reused and already
+# count as free in the quota, so it only runs when it clearly pays for itself.
+VACUUM_MIN_RECLAIM = 256 * 1024**2
+VACUUM_MIN_FRACTION = 0.5
+VACUUM_DISK_MARGIN = 256 * 1024**2
+# Token statistics and the audit trail outlive the log evidence, but not forever.
+LEDGER_MIN_DAYS = 365
+BACKUPS_KEPT = 5
+FINAL_JOBS = ("done", "cancelled", "failed", "partial", "split")
+FINAL_DELIVERIES = ("delivered", "accepted", "failed", "muted", "cancelled", "unknown")
 
 # Databases created before versioned migrations report version 1 and already
 # have the base schema below; each later step adds to it and is applied to old
@@ -865,19 +876,46 @@ class Store:
                 db.execute("DELETE FROM segments WHERE id=?", (sid,))
             if ids:
                 self._metric(db, "", "segments_expired", len(ids))
+            # Only evidence and frozen requests used to expire; these tables
+            # grew for as long as the portal ran and counted against the quota.
+            ledger = time.time() - max(self.settings().retention_days, LEDGER_MIN_DAYS) * 86400
+            trimmed = db.execute(
+                "DELETE FROM jobs WHERE status IN (%s) AND updated<?" % ",".join("?" * len(FINAL_JOBS)),
+                (*FINAL_JOBS, cutoff),
+            ).rowcount
+            trimmed += db.execute(
+                "DELETE FROM deliveries WHERE status IN (%s) AND updated<?" % ",".join("?" * len(FINAL_DELIVERIES)),
+                (*FINAL_DELIVERIES, cutoff),
+            ).rowcount
+            trimmed += db.execute("DELETE FROM usage WHERE created<?", (ledger,)).rowcount
+            trimmed += db.execute("DELETE FROM audit WHERE created<?", (ledger,)).rowcount
         # Checkpoint after the cleanup transaction commits, including a cleanup
         # that deletes zero rows. SQLite rejects checkpointing our own writer.
         with self.connect() as db:
-            if ids:
+            if ids or trimmed:
                 db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-                db.execute("VACUUM")
             else:
                 db.execute("PRAGMA wal_checkpoint(PASSIVE)")
+        if ids or trimmed:
+            self.compact_if_worthwhile()
         if ids:
             with self._segment_cache_lock:
                 self._segment_cache.clear()
                 self._segment_cache_bytes = 0
         return len(ids)
+
+    def compact_if_worthwhile(self):
+        """VACUUM only when a large share of the file is reusable and the disk
+        can hold a second copy; otherwise leave the free pages for reuse."""
+        usage = self.storage_usage()
+        allocated, reusable = usage["allocated_bytes"], usage["reusable_bytes"]
+        if reusable < VACUUM_MIN_RECLAIM or reusable < allocated * VACUUM_MIN_FRACTION:
+            return False
+        if usage["disk_free_bytes"] < allocated + VACUUM_DISK_MARGIN:
+            return False
+        with self.connect() as db:
+            db.execute("VACUUM")
+        return True
 
     def discard_sent(self, event_ids=None):
         """Reclaim fully acknowledged sender segments without touching file cursors."""
@@ -906,7 +944,34 @@ class Store:
         target = Path(target)
         if target.exists():
             raise ValueError("Backup target already exists")
-        with self.connect() as db, sqlite3.connect(target) as dest:
-            db.backup(dest)
-        os.chmod(target, 0o600)
+        import shutil
+
+        if shutil.disk_usage(target.parent).free < self.size() + VACUUM_DISK_MARGIN:
+            raise ValueError("Not enough free disk space for a backup")
+        # Owner-only from the first byte, and never a half-written target.
+        partial = target.with_name(target.name + ".partial")
+        os.close(os.open(partial, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600))
+        try:
+            dest = sqlite3.connect(partial)
+            try:
+                with self.connect() as db:
+                    db.backup(dest)
+            finally:
+                dest.close()
+            os.replace(partial, target)
+        except BaseException:
+            partial.unlink(missing_ok=True)
+            raise
         return target
+
+    @staticmethod
+    def rotate_backups(folder, keep=BACKUPS_KEPT):
+        """Each backup holds every retained log, so they cannot pile up."""
+        found = sorted(
+            (p for p in Path(folder).glob("backup-*.db") if p.is_file()),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
+        for old in found[keep:]:
+            old.unlink(missing_ok=True)
+        return max(0, len(found) - keep)

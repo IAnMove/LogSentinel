@@ -462,6 +462,5 @@ class TelemetryStore:
                     ),
                 )
         if removed:
-            with self.store.connect() as db:
-                db.execute("VACUUM")
+            self.store.compact_if_worthwhile()
         return removed
