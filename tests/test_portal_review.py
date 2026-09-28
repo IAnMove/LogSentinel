@@ -41,8 +41,8 @@ def test_model_list_steps_remain_bounded_and_errors_do_not_echo_input():
     with pytest.raises(ValidationError) as exc:
         Finding(**finding, next_steps={"private-log-content": "secret"})
     assert "private-log-content" not in safe_error(exc.value)
-    with pytest.raises(ValidationError):
-        Finding(**finding, next_steps=["x" * 4001])
+    # The bound holds by clipping, so an over-long list no longer discards the batch.
+    assert len(Finding(**finding, next_steps=["x" * 4001]).next_steps) == 4000
 
 
 @pytest.mark.asyncio
