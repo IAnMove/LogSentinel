@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import os
 import logging
 from pathlib import Path
@@ -99,9 +99,15 @@ class FileTailerCollector(BaseCollector):
         self._running = False
 
     @staticmethod
-    def parse_log_line(raw_line: str, source_path: str = "file") -> LogEntry:
-        """Parse standard Linux syslog or raw log line into LogEntry."""
-        ts = datetime.now(timezone.utc)
+    def parse_log_line(raw_line: str, source_path: str = "file", tz=None) -> LogEntry:
+        """Parse standard Linux syslog or raw log line into LogEntry.
+
+        tz is the zone of the machine that wrote the line; it applies to
+        timestamps that carry none. Without it they are read as UTC.
+        """
+        zone = tz or timezone.utc
+        now = datetime.now(timezone.utc)
+        ts = now
         inferred = True
         payload = raw_line
         prefix = re.match(
@@ -114,21 +120,28 @@ class FileTailerCollector(BaseCollector):
             try:
                 parsed = datetime.fromisoformat(stamp.replace("Z", "+00:00"))
                 inferred = parsed.tzinfo is None
-                ts = parsed.replace(tzinfo=timezone.utc) if inferred else parsed.astimezone(timezone.utc)
+                ts = (parsed.replace(tzinfo=zone) if inferred else parsed).astimezone(timezone.utc)
             except ValueError:
                 pass
         elif legacy:
             stamp, payload = legacy.groups()
             # RFC3164 has neither year nor timezone: useful display time, never
-            # trustworthy behavioral evidence. Pick the nearest calendar year.
+            # trustworthy behavioral evidence. A log line is written in the
+            # past, so take the most recent year that does not put it in the
+            # future (allowing a day of clock skew). The nearest year put
+            # "Feb 10" seen in September into the following February.
+            local_year = now.astimezone(zone).year
             candidates = []
-            for year in (ts.year - 1, ts.year, ts.year + 1):
+            for year in range(local_year, local_year - 5, -1):
                 try:
-                    candidates.append(datetime.strptime(f"{year} {stamp}", "%Y %b %d %H:%M:%S").replace(tzinfo=timezone.utc))
+                    candidates.append(datetime.strptime(f"{year} {stamp}", "%Y %b %d %H:%M:%S").replace(tzinfo=zone))
                 except ValueError:
-                    pass
-            if candidates:
-                ts = min(candidates, key=lambda candidate: abs(candidate - ts))
+                    pass  # e.g. Feb 29 in a common year
+            plausible = [c for c in candidates if c <= now + timedelta(days=1)]
+            if plausible:
+                ts = max(plausible).astimezone(timezone.utc)
+            elif candidates:
+                ts = min(candidates).astimezone(timezone.utc)
 
         match = re.match(r"^([\w.\-]+)\s+([\w.\-/]+?)(?:\[(\d+)\])?:\s*(.*)$", payload) if prefix or legacy else None
         host, service, pid, message = None, Path(source_path).stem, None, raw_line

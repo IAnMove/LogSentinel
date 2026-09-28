@@ -149,3 +149,40 @@ def test_journal_records_without_a_message_are_counted_not_lost_silently(tmp_pat
     assert [e["message"] for e in store.events()] == ["fine"]
     with store.connect() as db:
         assert db.execute("SELECT value FROM metrics WHERE key='journal_skipped'").fetchone()[0] == 1
+
+
+def freeze_now(monkeypatch, moment):
+    from logsentinel.collectors import file_tailer
+
+    class Clock(file_tailer.datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return moment if tz is None else moment.astimezone(tz)
+
+    monkeypatch.setattr(file_tailer, "datetime", Clock)
+
+
+def test_syslog_lines_without_a_year_are_never_dated_in_the_future(monkeypatch):
+    from datetime import datetime, timezone
+
+    from logsentinel.collectors.file_tailer import FileTailerCollector
+
+    freeze_now(monkeypatch, datetime(2026, 9, 29, 12, 0, tzinfo=timezone.utc))
+    parse = FileTailerCollector.parse_log_line
+    assert parse("Feb 10 08:00:00 h sshd[1]: x").timestamp.isoformat().startswith("2026-02-10")
+    assert parse("Sep 29 11:59:00 h sshd[1]: x").timestamp.isoformat().startswith("2026-09-29")
+    assert parse("Dec 31 23:59:59 h sshd[1]: x").timestamp.isoformat().startswith("2025-12-31")
+    # A day of clock skew is tolerated; a leap day resolves to a leap year.
+    assert parse("Sep 30 09:00:00 h sshd[1]: x").timestamp.isoformat().startswith("2026-09-30")
+    assert parse("Feb 29 08:00:00 h sshd[1]: x").timestamp.isoformat().startswith("2024-02-29")
+
+
+def test_lines_without_a_zone_use_the_machine_timezone(folder):
+    store, source, logs = folder
+    machine = store.get("machine", source["machine_id"])
+    store.put("machine", dict(machine, timezone="Europe/Madrid"), machine["id"])
+    (logs / "app.log").write_text("2026-01-15 10:00:00 host app[1]: local time\n2026-01-15T10:00:00Z host app[1]: explicit utc\n")
+    Collector(store).poll(source)
+    stamps = {e["message"]: e["timestamp"] for e in store.events()}
+    assert stamps["local time"].startswith("2026-01-15T09:00:00")
+    assert stamps["explicit utc"].startswith("2026-01-15T10:00:00")

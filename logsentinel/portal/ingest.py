@@ -18,7 +18,7 @@ from fastapi.responses import JSONResponse
 
 from .limits import BodyLimit
 from .store import dumps
-from .collect import normalize
+from .collect import machine_zone, normalize
 from .enroll import register_enrollment
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
@@ -139,6 +139,7 @@ def register_ingest(app, store):
         if not isinstance(items, list) or not 1 <= len(items) <= 500:
             raise HTTPException(400, "Send 1–500 events")
         entries = []
+        zone = await asyncio.to_thread(machine_zone, store, source)
         for item in items:
             if (
                 not isinstance(item, dict)
@@ -162,7 +163,7 @@ def register_ingest(app, store):
                     raise HTTPException(400, "Invalid journal event")
                 entries.append(dict(entry.model_dump(mode="json"), origin=item["id"]))
             else:
-                entries.append(normalize(item["raw"], "remote", item["id"]))
+                entries.append(normalize(item["raw"], "remote", item["id"], zone))
         return await asyncio.to_thread(persist, id, source, items, entries)
 
     def persist(id, source, items, entries):

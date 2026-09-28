@@ -11,6 +11,8 @@ import shutil
 import subprocess
 import time
 import threading
+from datetime import timezone
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from .journal_stream import read_journal
 from contextlib import nullcontext
 from pathlib import Path
@@ -84,8 +86,17 @@ def discovery():
     }
 
 
-def normalize(line, path, origin):
-    entry = FileTailerCollector.parse_log_line(line, source_path=path)
+def machine_zone(store, source):
+    """Timezone of the machine that wrote a source, for lines that carry none."""
+    machine = store.get("machine", source["machine_id"]) or {}
+    try:
+        return ZoneInfo(machine.get("timezone") or "UTC")
+    except (ZoneInfoNotFoundError, ValueError):
+        return timezone.utc
+
+
+def normalize(line, path, origin, tz=None):
+    entry = FileTailerCollector.parse_log_line(line, source_path=path, tz=tz)
     return dict(entry.model_dump(mode="json"), origin=origin)
 
 
@@ -374,6 +385,7 @@ class Collector:
         entries = []
         used = 0
         done = False
+        zone = machine_zone(self.store, source)
         with opener(path, "rb") as f:
             f.seek(offset)
             while used < source["max_batch_bytes"] and len(entries) < 1000:
@@ -401,7 +413,7 @@ class Collector:
                     entries[-1]["message"] += "\n" + text
                     entries[-1]["raw"] += "\n" + text
                 elif text:
-                    entries.append(normalize(text, key, f"{generation}:{begin}"))
+                    entries.append(normalize(text, key, f"{generation}:{begin}", zone))
                 used += len(line)
             end = f.tell()
             tail = ""
