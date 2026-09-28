@@ -135,3 +135,32 @@ def test_upgrade_legacy_queue_preserves_identity_evidence_and_service_state(
     setup.upgrade_client(args, desired, runtime)
     assert len(list(install.glob("backup-*"))) == 2
     assert [(e["id"], e["origin"]) for e in store.events()] == expected
+
+
+def test_sender_unit_is_confined_and_systemd_accepts_it(tmp_path):
+    import shutil
+    import subprocess
+
+    desired = setup.selection("logs", dict(receiver="https://127.0.0.1:8767", source_id="s"))
+    text = setup.unit_text(Path("/etc/logsentinel-clients/logs.json"), Path("/opt/logsentinel-client/runtime-x"), desired)
+    for directive in (
+        "NoNewPrivileges=yes", "CapabilityBoundingSet=", "ProtectSystem=strict", "PrivateDevices=yes",
+        "ProtectKernelTunables=yes", "ProtectKernelModules=yes", "ProtectControlGroups=yes",
+        "RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK", "RestrictNamespaces=yes",
+        "RestrictSUIDSGID=yes", "LockPersonality=yes",
+    ):
+        assert directive in text
+    if not shutil.which("systemd-analyze"):
+        pytest.skip("systemd-analyze is not installed")
+    runnable = (
+        text.replace("User=" + desired["account"], "User=root")
+        .replace("Group=" + desired["account"], "Group=root")
+        .replace("ReadWritePaths=" + desired["spool"], "ReadWritePaths=" + str(tmp_path))
+    )
+    runnable = "\n".join(
+        "ExecStart=/bin/true" if line.startswith("ExecStart=") else line for line in runnable.splitlines()
+    )
+    unit = tmp_path / "logsentinel-client-test.service"
+    unit.write_text(runnable)
+    result = subprocess.run(["systemd-analyze", "verify", str(unit)], capture_output=True, text=True)
+    assert "Unknown key" not in result.stderr and "Unknown section" not in result.stderr, result.stderr
