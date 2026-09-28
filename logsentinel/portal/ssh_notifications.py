@@ -4,6 +4,15 @@ import ipaddress
 import re
 
 
+# OpenSSH 9.8 moved authentication into separate sshd-session and sshd-auth
+# processes, and that is the identifier the journal records for these lines.
+SSHD_SERVICES = frozenset({"sshd", "sshd-session", "sshd-auth"})
+
+
+def is_sshd(service):
+    return (service or "").casefold().removesuffix(".service") in SSHD_SERVICES
+
+
 _USER = r"[^\s\x00-\x1f]{0,128}"
 _PEER = r"(?P<ip>\S+) port (?P<port>\d{1,5})"
 _PAM_FIELDS = rf"logname=[^\s\x00-\x1f]{{0,128}} uid=\d+ euid=\d+ tty=ssh ruser=[^\s\x00-\x1f]{{0,128}} rhost=(?P<ip>\S+)(?:[ \t]+user={_USER})?[ \t]*"
@@ -22,7 +31,7 @@ _PATTERNS = [(name, re.compile(pattern)) for name, pattern in _FORMS]
 
 def rejection_form(event):
     """Accept only known full messages. Unknown, mixed and successful events fail open."""
-    if (event.get("service") or "").casefold() != "sshd":
+    if not is_sshd(event.get("service")):
         return None
     message = event.get("message") or ""
     if not isinstance(message, str) or len(message) > 1024:

@@ -280,3 +280,84 @@ async def test_unverified_notice_says_so_in_the_message(tmp_path, monkeypatch):
     payload["verification_status"] = "confirmed"
     await Outbox(store).send(dest, payload)
     assert "Unverified" not in requests[1]["text"]
+
+
+def test_hostile_line_does_not_stop_the_detector_for_its_machine(queue):
+    store, machine, source = queue
+    add_destination(store)
+    hostile = "authentication failure; " + "a" * 262100
+    store.ingest(
+        source,
+        [
+            dict(origin="hostile", message=hostile, service="sudo"),
+            dict(origin="oom", message="Out of memory: Killed process 42", service="kernel"),
+        ],
+    )
+    from logsentinel.portal.signal_scan import scan_originals
+
+    analyzer = Analyzer(store)
+    scan_originals(analyzer, machine["id"], store.events(limit=10))
+    assert [p["title"] for p in store.rows("problems")] == ["Process killed: out of memory"]
+    with store.connect() as db:
+        scanned = db.execute("SELECT count(*) FROM signal_scans").fetchone()[0]
+    assert scanned == 2
+
+
+@pytest.mark.parametrize("service", ["sshd", "sshd-session", "sshd-auth", "sshd.service"])
+def test_ssh_burst_is_detected_for_every_openssh_process_name(queue, service):
+    store, machine, source = queue
+    store.ingest(
+        source,
+        [
+            dict(origin=str(i), message=f"Failed password for root from 203.0.113.5 port {2000 + i} ssh2", service=service)
+            for i in range(6)
+        ],
+    )
+    from logsentinel.portal.signal_scan import scan_originals
+
+    scan_originals(Analyzer(store), machine["id"], store.events(limit=10))
+    assert [p["title"] for p in store.rows("problems")] == ["Repeated SSH authentication rejections"]
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "sudo: pam_unix(sudo:auth): authentication failure; logname=ina uid=1000 euid=0 tty=/dev/pts/1 ruser=ina rhost= user=ina",
+        "sudo: 3 incorrect password attempts ; TTY=pts/0 ; PWD=/home/user ; USER=root ; COMMAND=/usr/bin/ls",
+        "sudo: ina : user NOT in sudoers ; TTY=pts/0",
+    ],
+)
+def test_sudo_rejections_are_recognised(queue, message):
+    store, machine, source = queue
+    store.ingest(source, [dict(origin="a", message=message, service="sudo")])
+    from logsentinel.portal.signal_scan import scan_originals
+
+    scan_originals(Analyzer(store), machine["id"], store.events(limit=10))
+    assert [p["title"] for p in store.rows("problems")] == ["sudo authentication rejected"]
+
+
+def test_regex_timeout_on_one_line_is_counted_and_detection_continues(queue, monkeypatch):
+    store, machine, source = queue
+    store.ingest(
+        source,
+        [
+            dict(origin="slow", message="pathological line", service="app"),
+            dict(origin="oom", message="Out of memory: Killed process 42", service="kernel"),
+        ],
+    )
+    from logsentinel.portal import signals
+    from logsentinel.portal.signal_scan import scan_originals
+
+    real = signals.regex.search
+
+    def search(pattern, text, **kwargs):
+        if text == "pathological line":
+            raise TimeoutError("synthetic")
+        return real(pattern, text, **kwargs)
+
+    monkeypatch.setattr(signals.regex, "search", search)
+    scan_originals(Analyzer(store), machine["id"], store.events(limit=10))
+    assert [p["title"] for p in store.rows("problems")] == ["Process killed: out of memory"]
+    assert int(store.meta("detector_slow_lines")) == sum(1 for s in signals.SIGNALS if not s.get("service"))
+    with store.connect() as db:
+        assert db.execute("SELECT count(*) FROM signal_scans").fetchone()[0] == 2

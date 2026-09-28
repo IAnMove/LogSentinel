@@ -8,6 +8,7 @@ from .store import dumps
 
 from .freshness import SEVERE, event_instant
 from .rules import excluded
+from .ssh_notifications import is_sshd
 
 
 SIGNALS = (
@@ -40,7 +41,8 @@ SIGNALS = (
         "min": 1,
         "severity": "MEDIUM",
         "category": "authentication",
-        "pattern": r"(?i)user NOT in sudoers|authentication failure;.+\bsudo\b|sudo:.*incorrect password attempts",
+        # Every gap is bounded: an unbounded ".+" is quadratic on a hostile line.
+        "pattern": r"(?i)user NOT in sudoers|\bsudo\b[^\n]{0,200}?authentication failure|authentication failure;[^\n]{0,400}?\bsudo\b|sudo:[^\n]{0,300}?incorrect password attempts",
         "title": ("Autenticación sudo rechazada", "sudo authentication rejected"),
         "summary": (
             "Un intento de privilegio elevado fue rechazado. Puede ser un error o un abuso.",
@@ -54,7 +56,7 @@ SIGNALS = (
         "severity": "HIGH",
         "category": "authentication",
         "pattern": r"(?i)failed password|authentication failure|invalid user|disconnected by authenticating user",
-        "service": "sshd",
+        "service": is_sshd,
         "title": ("Varios rechazos de autenticación SSH", "Repeated SSH authentication rejections"),
         "summary": (
             "Hay varios fallos de SSH en una ventana de cinco minutos. No prueba un compromiso.",
@@ -142,16 +144,23 @@ def apply_signals(analyzer, limit=500, *, machine_id=None, events=None, notify=T
             continue
         eligible = [e for e in events if not excluded(store, e, rules)]
         for spec in SIGNALS:
-            hits = [
-                e
-                for e in eligible
-                if regex.search(spec["pattern"], e.get("message") or "", timeout=0.02)
-                and (
-                    not spec.get("service")
-                    or (e.get("service") or "").casefold()
-                    == spec["service"].casefold()
-                )
-            ]
+            hits = []
+            slow = 0
+            for e in eligible:
+                if spec.get("service") and not spec["service"](e.get("service")):
+                    continue
+                try:
+                    found = regex.search(spec["pattern"], e.get("message") or "", timeout=0.02)
+                except TimeoutError:
+                    # A hostile line must not stop detection for its machine or
+                    # be retried forever; the model still receives the original.
+                    slow += 1
+                    continue
+                if found:
+                    hits.append(e)
+            if slow:
+                total = int(store.meta("detector_slow_lines") or 0) + slow
+                store.set_meta("detector_slow_lines", str(total))
             batches = (
                 window_evidence(store, machine_id, spec, hits, rules)
                 if spec.get("window_seconds") and hits
