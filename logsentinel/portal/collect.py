@@ -22,6 +22,7 @@ from .store import dumps
 from .source_paths import open_source, validate_source_handle, validate_source_path, UnsafeSourcePath
 
 MAX_LINE = 256_000
+MAX_FOLDER_FILES = 100
 MAX_ARCHIVE_BYTES = 64 * 1024 * 1024
 MAX_EXPANDED_BYTES = 128 * 1024 * 1024
 HASH_CHUNK = 1024 * 1024
@@ -135,13 +136,15 @@ class Collector:
                 return 0
             else:
                 root = validate_source_path(source["path"], self.store.directory)
-                paths = (
-                    [root]
-                    if source["kind"] == "file"
-                    else sorted(root.glob(source["pattern"]))[:100]
-                )
+                skipped = 0
+                if source["kind"] == "file":
+                    paths = [root]
+                else:
+                    matches = self.newest_first(root, source["pattern"])
+                    paths, skipped = matches[:MAX_FOLDER_FILES], max(0, len(matches) - MAX_FOLDER_FILES)
                 if not paths:
                     raise OSError("No matching readable files")
+                failures = []
                 for path in paths:
                     if source["kind"] == "folder" and (
                         path.is_symlink() or not path.resolve().is_relative_to(root)
@@ -157,15 +160,28 @@ class Collector:
                     except UnsafeSourcePath:
                         self.store.metric(source["id"], "blocked_source_files", 1)
                         continue
+                    except Exception as exc:
+                        # One unreadable file must not stop the ones after it.
+                        if strict or source["kind"] == "file":
+                            raise
+                        failures.append((path.name, str(exc)[:100]))
+                        self.store.metric(source["id"], "unreadable_source_files", 1)
+                if source["kind"] == "folder":
+                    self.release_vanished(source, set(paths))
                 for item in list(self.retired):
                     if item["source"] != source["id"]:
                         continue
-                    total += self.file(
-                        source,
-                        item["path"],
-                        handle=item["handle"],
-                        cursor_key=item["key"],
-                    )
+                    try:
+                        total += self.file(
+                            source,
+                            item["path"],
+                            handle=item["handle"],
+                            cursor_key=item["key"],
+                        )
+                    except Exception as exc:
+                        if strict:
+                            raise
+                        failures.append((Path(item["path"]).name, str(exc)[:100]))
                     size = os.fstat(item["handle"].fileno()).st_size
                     if size != item["size"]:
                         item.update(size=size, quiet=time.monotonic())
@@ -173,6 +189,30 @@ class Collector:
                         item["handle"].close()
                         self.retired.remove(item)
                         self.store.metric(source["id"], "rotation_watch_closed", 1)
+                problems = []
+                if failures:
+                    problems.append(
+                        f"{len(failures)} of {len(paths)} files could not be read ("
+                        + "; ".join(f"{name}: {why}" for name, why in failures[:3])
+                        + ")"
+                    )
+                if skipped:
+                    problems.append(
+                        f"{skipped} older matching files are not read: only the newest {MAX_FOLDER_FILES} are"
+                    )
+                if problems and not strict:
+                    self.store.set_meta(
+                        "health:" + source["id"],
+                        dumps(
+                            {
+                                "status": "error",
+                                "checked": time.time(),
+                                "new_events": total,
+                                "error": "; ".join(problems)[:300],
+                            }
+                        ),
+                    )
+                    return total
             if strict:
                 return total
             self.store.set_meta(
@@ -190,6 +230,46 @@ class Collector:
             )
         return total
 
+    @staticmethod
+    def newest_first(root, pattern):
+        """Fresh files first, so a crowded folder never hides the newest logs."""
+
+        def age(path):
+            try:
+                return -path.stat().st_mtime_ns
+            except OSError:
+                return 0
+
+        return sorted(root.glob(pattern), key=lambda p: (age(p), str(p)))
+
+    def retire(self, source, path, handle):
+        """Keep draining a file that was rotated or removed, then let it go."""
+        previous = os.fstat(handle.fileno())
+        retired_key = (
+            str(path) + "#rotated:" + str(previous.st_dev) + ":" + str(previous.st_ino)
+        )
+        cursor = self.store.cursor(source["id"], str(path))
+        if cursor:
+            self.store.ingest(source, [], retired_key, cursor)
+        self.retired.append(
+            {
+                "source": source["id"],
+                "path": path,
+                "key": retired_key,
+                "handle": handle,
+                "size": previous.st_size,
+                "quiet": time.monotonic(),
+            }
+        )
+
+    def release_vanished(self, source, present):
+        """A deleted log left its handle open for good; hand it to the
+        rotation watch, which closes it once the file stays quiet."""
+        for key in [k for k in self.handles if k[0] == source["id"]]:
+            path = Path(key[1])
+            if path not in present and not path.exists():
+                self.retire(source, path, self.handles.pop(key))
+
     def plain(self, source, path):
         key = (source["id"], str(path))
         handle = self.handles.get(key)
@@ -200,26 +280,7 @@ class Collector:
         if handle and current:
             previous = os.fstat(handle.fileno())
             if (previous.st_dev, previous.st_ino) != (current.st_dev, current.st_ino):
-                retired_key = (
-                    str(path)
-                    + "#rotated:"
-                    + str(previous.st_dev)
-                    + ":"
-                    + str(previous.st_ino)
-                )
-                cursor = self.store.cursor(source["id"], str(path))
-                if cursor:
-                    self.store.ingest(source, [], retired_key, cursor)
-                self.retired.append(
-                    {
-                        "source": source["id"],
-                        "path": path,
-                        "key": retired_key,
-                        "handle": handle,
-                        "size": previous.st_size,
-                        "quiet": time.monotonic(),
-                    }
-                )
+                self.retire(source, path, handle)
                 del self.handles[key]
                 handle = None
         if handle is None:
@@ -261,6 +322,16 @@ class Collector:
                 self.store.ingest(source, [], key, {"stamp": stamp, "stable": False})
                 return 0
             if old.get("done"):
+                return 0
+            if not source.get("history") and not old.get("offset"):
+                # An archive is past log. Without "import history" it is
+                # recorded as seen, as a plain file's existing lines are; an
+                # archive made by rotating a file already read would otherwise
+                # be imported a second time. Enabling history later imports it.
+                if not old.get("skipped"):
+                    self.store.ingest(
+                        source, [], key, {"stamp": stamp, "stable": True, "skipped": True}
+                    )
                 return 0
             # A new archive is imported only after an unchanged polling interval.
             if stat.st_size > MAX_ARCHIVE_BYTES:
@@ -351,7 +422,9 @@ class Collector:
 
     def journal(self, source):
         cursor = self.store.cursor(source["id"], "journal") or {}
-        cmd = ["journalctl", "--no-pager", "-o", "json"]
+        # Without --all, journalctl writes any field over 4096 bytes as null,
+        # and a record whose MESSAGE is null used to be dropped without a trace.
+        cmd = ["journalctl", "--no-pager", "--all", "-o", "json"]
         if cursor.get("cursor"):
             # Include the saved record to verify that retention did not erase it.
             cmd += ["--cursor", cursor["cursor"]]
@@ -399,6 +472,8 @@ class Collector:
                 entries.append(
                     dict(e.model_dump(mode="json"), origin="journal:" + last)
                 )
+            elif data.get("MESSAGE") is None:
+                skipped += 1
         if skipped:
             self.store.metric(source["id"], "journal_skipped", skipped)
         if limited and not last:
