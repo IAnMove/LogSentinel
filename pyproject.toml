@@ -35,6 +35,8 @@ dependencies = [
 dev = [
     "pytest>=7.0.0",
     "pytest-asyncio>=0.23.0",
+    "ruff>=0.6",
+    "mypy>=1.10",
 ]
 
 [project.scripts]
@@ -50,3 +52,26 @@ exclude = ["tests*", "systemd*", "logsentinel.portal.static.tutorials*"]
 
 [tool.setuptools.exclude-package-data]
 "*" = ["static/tutorials", "static/tutorials/*", "static/tutorials/**/*"]
+
+[tool.ruff]
+target-version = "py310"
+extend-exclude = ["logsentinel/portal/static"]
+
+[tool.ruff.lint]
+# Real defects only: undefined or unused names, common bug patterns, blocking
+# calls in async code. Style is deliberately left out.
+select = ["E9", "F", "B", "ASYNC"]
+ignore = [
+    "B008",     # typer.Option(...) as a default is how typer is used
+    "ASYNC109", # a timeout parameter on an async function is fine here
+    "ASYNC240", # short pathlib calls in async code; the heavy work is threaded
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Fixtures imported from another test module look unused to the linter.
+"tests/*" = ["F401", "F811"]
+
+[tool.mypy]
+python_version = "3.10"
+ignore_missing_imports = true
+packages = ["logsentinel"]
