@@ -59,4 +59,15 @@ python -m venv .venv && .venv/bin/pip install -e '.[dev]'
 ```
 
 Browser walkthroughs need Playwright; see [README.md](README.md#desarrollo-y-verificación).
+
+## Operating it
+
+[OPERACION.md](OPERACION.md) (Spanish) covers: setting up a local llama.cpp/Ollama
+server and its pitfalls (a port taken by another service, reasoning models that
+spend the output budget thinking, the context actually loaded), measured call
+times and the timeout they call for on CPU-only hosts, reaching the panel through
+SSH tunnels (including from behind NAT), user versus system services, watching
+`/healthz` from outside, sender quotas and HTTP 429/507 behaviour, remote metrics
+and backups. The Tentri illustrations are generated artwork, not an official
+Omarchy mark.
 Report vulnerabilities as described in [SECURITY.md](SECURITY.md).

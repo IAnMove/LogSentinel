@@ -1,8 +1,10 @@
 **Enviar logs desde otro equipo al central**
 
 El cliente inicia una conexión HTTPS hacia el central. No necesita un servidor
-SSH ni recibe órdenes del central. El panel de administración y la recepción
-usan puertos distintos: normalmente 8766 y 8767, respectivamente.
+SSH y el central no puede ejecutar nada en él: lo único que le comunica es si debe
+pausar o reanudar la captura y el envío (la pausa de una máquina en el portal). El
+panel de administración y la recepción usan puertos distintos: normalmente 8765
+(el predeterminado del panel) y 8767, respectivamente.
 
 **En el cliente: un comando**
 
@@ -99,7 +101,7 @@ Protege la clave privada para que solo la lea el usuario del portal. En la misma
 instancia, conservando su directorio de datos:
 
 ```bash
-logsentinel portal --data-dir /RUTA/DEL/PORTAL --port 8766 \
+logsentinel portal --data-dir /RUTA/DEL/PORTAL --port 8765 \
   --ingest-listen 0.0.0.0:8767 \
   --tls-cert /RUTA/server.pem --tls-key /RUTA/server.key
 ```

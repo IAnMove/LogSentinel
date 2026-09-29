@@ -105,6 +105,7 @@ Si no detecta Omarchy Quattro con `omarchy plugin`, sale sin instalar nada. No e
 - [Guía rápida](GUIA_RAPIDA.md): configuración guiada, primeros pasos y comprobaciones.
 - [Equipos remotos](GUIA_EQUIPOS.md) y [encargo para otro Codex](CODEX_CLIENTE.md): cómo enviar logs desde otro Linux.
 - [Protección y recuperación del cliente](CLIENTES_RECUPERACION.md): límites del emisor, actualización y qué hacer con un disco con problemas.
+- [Operación](OPERACION.md): montar el servidor de modelos local, tiempos y timeouts medidos, túneles SSH, servicio de usuario o de sistema, vigilar el portal, cuotas de los emisores y métricas.
 - [Dirección de producto](PRODUCT_DIRECTION.md): el plan original y sus propuestas; no describe garantías de esta versión.
 - [Seguridad](SECURITY.md), [contribuir](CONTRIBUTING.md) y [cambios](CHANGELOG.md).
 
