@@ -39,7 +39,7 @@ function metricState(state) {
       active: "Mediciones activas",
       disabled: "Mediciones desactivadas",
       waiting: "Esperando primera muestra",
-      stale: "Sin datos recientes",
+      stale: "Sin mediciones recientes",
       partial: "Medición parcial",
     }[state] || state,
   );
@@ -500,7 +500,7 @@ async function metricsView(root) {
               t("Métrica"),
               t("Mínimo"),
               t("Máximo"),
-              t("Media"),
+              t("Promedio"),
               t("Muestras"),
             ],
             data.daily
