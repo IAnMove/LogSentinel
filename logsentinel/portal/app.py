@@ -924,32 +924,19 @@ def create_app(directory, background=True):
             )
         )
 
-    @app.post("/api/rules/preview")
-    async def preview(request: Request):
-        body = await request.json()
-        body.pop("id", None)
-        rule = validate_rule(Rule(**body))
+    def run_preview(rule):
         rows = store.events(rule.machine_id, rule.source_id, limit=500)
-        yes = []
-        no = []
+        dumped = rule.model_dump()
+        # One lookup for the whole sample, not one per event.
+        evidence = (
+            {x["id"] for x in (store.problem(rule.pattern) or {}).get("evidence", [])}
+            if rule.kind == "problem"
+            else set()
+        )
+        yes, no = [], []
         for e in rows:
             try:
-                hit = matches(
-                    rule.model_dump(),
-                    e,
-                    (
-                        rule.pattern
-                        if rule.kind == "problem"
-                        and e["id"]
-                        in {
-                            x["id"]
-                            for x in (store.problem(rule.pattern) or {}).get(
-                                "evidence", []
-                            )
-                        }
-                        else ""
-                    ),
-                )
+                hit = matches(dumped, e, rule.pattern if e["id"] in evidence else "")
             except TimeoutError:
                 raise HTTPException(400, "Regex exceeded evaluation time limit")
             (yes if hit else no).append(e)
@@ -960,6 +947,14 @@ def create_app(directory, background=True):
             "matches": sanitize(yes[:5], protected_secrets(store)),
             "nonmatches": sanitize(no[:5], protected_secrets(store)),
         }
+
+    @app.post("/api/rules/preview")
+    async def preview(request: Request):
+        body = await request.json()
+        body.pop("id", None)
+        rule = validate_rule(Rule(**body))
+        # Up to 500 events at 20 ms of regex each: seconds, not for the event loop.
+        return await asyncio.to_thread(run_preview, rule)
 
     @app.get("/api/rule-presets")
     def rule_presets():
