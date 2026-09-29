@@ -43,8 +43,15 @@ FINAL_DELIVERIES = ("delivered", "accepted", "failed", "muted", "cancelled", "un
 # Databases created before versioned migrations report version 1 and already
 # have the base schema below; each later step adds to it and is applied to old
 # and new databases alike, inside one transaction with its version bump.
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 MIGRATIONS = {
+    3: (
+        # Syslog priority 0-3 (emergency to error) marks an original the model
+        # should see before routine lines when the backlog is longer than a batch.
+        # The partial index only holds the rare urgent rows.
+        "ALTER TABLE events ADD COLUMN urgent INTEGER NOT NULL DEFAULT 0",
+        "CREATE INDEX IF NOT EXISTS events_urgent ON events(machine_id,source_id,received) WHERE urgent=1",
+    ),
     2: (
         # Deleting an event cascaded into signal_hits with a full table scan
         # per event because only (signal, event_id) and the window index exist.
@@ -458,8 +465,10 @@ class Store:
                     ),
                 )
                 for i, item in enumerate(unique):
+                    priority = item.get("priority")
                     db.execute(
-                        "INSERT INTO events VALUES(?,?,?,?,?,?,?,?,?,?)",
+                        "INSERT INTO events(id,source_id,machine_id,segment_id,ordinal,received,event_time,service,status,origin,urgent) "
+                        "VALUES(?,?,?,?,?,?,?,?,?,?,?)",
                         (
                             item["id"],
                             source["id"],
@@ -471,6 +480,7 @@ class Store:
                             item.get("service", "unknown"),
                             "pending",
                             item["origin"],
+                            int(type(priority) is int and 0 <= priority <= 3),
                         ),
                     )
                 self._metric(db, source["id"], "events_ingested", len(unique))

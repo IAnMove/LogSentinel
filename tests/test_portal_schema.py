@@ -17,20 +17,24 @@ def test_new_database_is_at_the_current_version_with_every_migration_index(tmp_p
     names = indexes(store.path)
     for statements in MIGRATIONS.values():
         for statement in statements:
-            assert statement.split()[5] in names
+            if statement.startswith("CREATE INDEX"):
+                assert statement.split()[5] in names
+    with store.connect() as db:
+        assert "urgent" in {r[1] for r in db.execute("PRAGMA table_info(events)")}
 
 
 def test_version_one_database_is_upgraded_in_place_without_losing_data(tmp_path):
     store = Store(tmp_path)
     store.set_meta("keep", "me")
     with store.connect() as db:
-        for name in ("signal_hits_event", "events_segment", "usage_created", "usage_job"):
+        for name in ("signal_hits_event", "events_segment", "usage_created", "usage_job", "events_urgent"):
             db.execute(f"DROP INDEX {name}")
+        db.execute("ALTER TABLE events DROP COLUMN urgent")
         db.execute("UPDATE meta SET value='1' WHERE key='schema_version'")
     reopened = Store(tmp_path)
     with reopened.connect() as db:
         assert schema_version(db) == SCHEMA_VERSION
-    assert {"signal_hits_event", "events_segment", "usage_created", "usage_job"} <= indexes(reopened.path)
+    assert {"signal_hits_event", "events_segment", "usage_created", "usage_job", "events_urgent"} <= indexes(reopened.path)
     assert reopened.meta("keep") == "me"
 
 

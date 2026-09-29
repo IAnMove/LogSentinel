@@ -27,6 +27,27 @@ PROVIDER_RETRY_LIMIT = 100
 
 
 EXTRA_SAMPLES = 3
+# Share of a batch that urgent originals may take while routine ones wait, so a
+# noisy error source cannot starve the rest of the machine's logs.
+URGENT_SHARE = 0.75
+
+
+def pick_oldest_urgent_first(db, machine_id, source_id, condition, cutoff, limit):
+    """Choose a batch: errors and worse first, oldest first within each kind.
+
+    The queue used to be strictly first in, first out, so a critical line
+    waited behind every routine line received before it."""
+    base = (
+        "SELECT id FROM events WHERE machine_id=? AND source_id=? AND urgent=? "
+        "AND status IN ('pending','capacity') AND " + condition + " ORDER BY received,rowid LIMIT ?"
+    )
+    urgent = db.execute(base, (machine_id, source_id, 1, cutoff, limit)).fetchall()
+    routine = db.execute(base, (machine_id, source_id, 0, cutoff, limit)).fetchall()
+    taken_urgent = urgent[: max(1, int(limit * URGENT_SHARE))]
+    taken_routine = routine[: limit - len(taken_urgent)]
+    if len(taken_urgent) + len(taken_routine) < limit:
+        taken_urgent = urgent[: limit - len(taken_routine)]
+    return taken_urgent + taken_routine
 
 
 def spread(items, count):
@@ -201,12 +222,9 @@ class ReviewQueue:
                         if historical
                         else "received>=? AND status='pending'"
                     )
-                    rows = db.execute(
-                        "SELECT id FROM events WHERE machine_id=? AND source_id=? AND status IN ('pending','capacity') AND "
-                        + condition
-                        + " ORDER BY received,rowid LIMIT ?",
-                        (machine["id"], sid, cutoff, cfg.max_events),
-                    ).fetchall()
+                    rows = pick_oldest_urgent_first(
+                        db, machine["id"], sid, condition, cutoff, cfg.max_events
+                    )
                     if rows:
                         break
             events = self.store.events(ids=[r[0] for r in rows], limit=cfg.max_events)
