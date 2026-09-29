@@ -39,3 +39,14 @@ dist/
 /scripts/tutorial_capture.py
 /scripts/tutorials_smoke.py
 /.github/workflows/pages.yml
+
+# Things a running portal or an installer leaves behind, and things that must
+# never be committed by accident: keys, enrollment packages (single-use codes),
+# backups (they hold the original logs and the access key) and local agent files.
+access-key.txt
+*.pem
+*.key
+alta*.json
+backups/
+notifications/
+.claude/
