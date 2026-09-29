@@ -85,3 +85,30 @@ def test_the_checked_in_unit_uses_the_same_hardening_as_the_generated_one():
         }
     }
     assert shipped == generated, (shipped ^ generated)
+
+
+def _luminance(colour):
+    channels = [int(colour.lstrip("#")[i : i + 2], 16) / 255 for i in (0, 2, 4)]
+    linear = [c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4 for c in channels]
+    return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2]
+
+
+def _contrast(a, b):
+    high, low = sorted((_luminance(a), _luminance(b)), reverse=True)
+    return (high + 0.05) / (low + 0.05)
+
+
+def test_the_muted_text_colour_of_every_light_theme_reads_on_its_own_backgrounds():
+    """WCAG AA asks 4.5:1 for normal text; muted text on the page and on panels is normal text."""
+    css = (ROOT / "logsentinel" / "portal" / "static" / "themes.css").read_text()
+    themes = re.findall(r'(?:\[data-palette="(\w+)"\]|:root\[data-theme="(\w+)"\])[^{]*\{([^}]*)\}', css)
+    checked = 0
+    for a, b, body in themes:
+        values = dict(re.findall(r"--(bg|surface|muted|soft):\s*(#[0-9a-fA-F]{6})\b", body))
+        if "muted" not in values or "bg" not in values:
+            continue
+        for background in ("bg", "surface", "soft"):
+            if background in values:
+                assert _contrast(values["muted"], values[background]) >= 4.5, (a or b, background)
+                checked += 1
+    assert checked >= 4
