@@ -599,7 +599,7 @@ def test_preview_reports_a_runaway_regex_instead_of_hanging(client, monkeypatch)
     def runaway(*args, **kwargs):
         raise TimeoutError("regex exceeded its time limit")
 
-    monkeypatch.setattr("logsentinel.portal.app.matches", runaway)
+    monkeypatch.setattr("logsentinel.portal.routes.problems.matches", runaway)
     r = c.post(
         "/api/rules/preview",
         json={"name": "slow", "action": "mute", "kind": "regex", "pattern": "line", "machine_id": m},
