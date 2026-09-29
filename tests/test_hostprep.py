@@ -123,3 +123,38 @@ def test_the_command_needs_something_to_grant(tmp_path):
     result = CliRunner().invoke(cli.app, ["prepare-host", "--account", "agent"])
     assert result.exit_code != 0
     assert "--source" in strip_ansi(result.output)
+
+
+def test_credential_stores_and_home_directories_cannot_be_granted_or_read(tmp_path, monkeypatch):
+    from logsentinel import hostprep
+    from logsentinel.portal.source_paths import UnsafeSourcePath, validate_source_path
+
+    home = tmp_path / "ana"
+    (home / ".ssh").mkdir(parents=True)
+    (home / ".aws").mkdir()
+    (home / ".ssh" / "config").write_text("Host x")
+    (home / ".aws" / "credentials").write_text("[default]")
+    (home / "app.log").write_text("line\n")
+    (home / "key.pem").write_text("x")
+    monkeypatch.setattr(hostprep, "home_directories", lambda: {home})
+    for refused in (home, home / ".ssh", home / ".aws" / "credentials", home / "key.pem"):
+        with pytest.raises(ValueError):
+            hostprep.check_source(str(refused))
+    assert hostprep.check_source(str(home / "app.log")) == home / "app.log"
+    for refused in (home / ".ssh" / "config", home / ".aws" / "credentials", home / "key.pem",
+                    "/proc/self/environ", "/dev/mem", home / ".env", home / "x" / "id_ed25519.gz"):
+        with pytest.raises(UnsafeSourcePath):
+            validate_source_path(refused, tmp_path / "data")
+    assert validate_source_path(home / "app.log", tmp_path / "data") == home / "app.log"
+
+
+def test_a_folder_that_holds_a_credential_directory_is_not_granted(tmp_path, monkeypatch):
+    from logsentinel import hostprep
+
+    project = tmp_path / "project"
+    (project / ".ssh").mkdir(parents=True)
+    (project / "logs").mkdir()
+    monkeypatch.setattr(hostprep, "home_directories", lambda: set())
+    with pytest.raises(ValueError, match=r"contains \.ssh"):
+        hostprep.check_source(str(project))
+    assert hostprep.check_source(str(project / "logs")) == project / "logs"
