@@ -1,2 +1,3 @@
 portal text eol=lf
 plugin text eol=lf
+setup-client.sh text eol=lf

@@ -1,18 +1,19 @@
 [build-system]
-requires = ["setuptools>=61.0"]
+# The SPDX license expression below needs setuptools 77 or newer.
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "logsentinel"
 version = "1.0.1"
-description = "Intelligent Linux log monitoring and security sentinel powered by local LLMs with adaptive memory"
+description = "Local Linux log observatory: an LLM reviews logs and resource metrics, the evidence is kept, and problems are reported and explained"
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
 authors = [
     { name = "ianmove" }
 ]
-keywords = ["security", "logs", "llm", "ollama", "journalctl", "syslog", "monitoring", "memory"]
+keywords = ["logs", "log-analysis", "monitoring", "security", "llm", "ollama", "llama.cpp", "vllm", "lm-studio", "journald", "syslog", "systemd"]
 classifiers = [
     "Programming Language :: Python :: 3",
     "Operating System :: POSIX :: Linux",
@@ -20,15 +21,18 @@ classifiers = [
     "Topic :: Security",
 ]
 dependencies = [
-    "pydantic>=2.0.0",
-    "pyyaml>=6.0",
+    "pydantic>=2.0.0,<3",
+    "pyyaml>=6.0,<7",
     "httpx>=0.25.0,<1",
     "httpcore>=1.0,<2",
-    "rich>=13.0.0",
-    "typer>=0.9.0",
-    "fastapi>=0.115.0",
-    "uvicorn>=0.30.0",
+    "rich>=13.0.0,<16",
+    "typer>=0.9.0,<1",
+    "fastapi>=0.115.0,<1",
+    "uvicorn>=0.30.0,<1",
     "regex>=2024.5.15",
+    # Imported directly by the code; fastapi brings them, but the floor is ours.
+    "starlette>=0.40,<2",
+    "anyio>=4,<5",
 ]
 
 [project.optional-dependencies]

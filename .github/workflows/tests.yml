@@ -29,6 +29,7 @@ jobs:
       - run: python -m pytest -q
       - run: python scripts/evaluate_portal.py --output /tmp/evaluation.json
       - run: python -m pip wheel . --no-deps -w /tmp/wheels
+      - run: python scripts/check_wheel.py /tmp/wheels/*.whl
   browser:
     runs-on: ubuntu-latest
     timeout-minutes: 15
