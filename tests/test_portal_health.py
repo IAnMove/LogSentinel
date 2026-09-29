@@ -3,7 +3,7 @@ import time
 import asyncio
 import pytest
 
-from test_portal_api import client, machine_source
+from helpers import machine_source
 from test_portal_telemetry import configured, sample
 from logsentinel.portal.models import Destination
 from logsentinel.portal.app import create_app
@@ -169,7 +169,7 @@ def test_capacity_diagnostics_preserve_machine_scope_and_separate_policy(client)
         [{"origin": str(i), "message": "entry", "service": "app"} for i in range(4)],
     )
     events = store.events(source_id=source)
-    for event, status in zip(events, ("compact", "capacity", "sampled", "measured")):
+    for event, status in zip(events, ("compact", "capacity", "sampled", "measured"), strict=True):
         store.mark([event["id"]], status)
     store.ingest(
         store.get("source", other_source), [{"origin": "other", "message": "different"}]

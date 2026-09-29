@@ -2,8 +2,23 @@
 
 from __future__ import annotations
 from abc import ABC, abstractmethod
-from typing import Optional
+import httpx
 from logsentinel.core.models import Alert
+
+
+def outbound_client(timeout: float = 10.0) -> httpx.AsyncClient:
+    """HTTP client for a destination taken from configuration.
+
+    The portal's notifier already refuses cloud metadata addresses, ignores
+    proxy variables and never follows redirects; the older channels get the
+    same transport instead of a bare AsyncClient.
+    """
+    from logsentinel.portal.network import CheckedAsyncTransport
+
+    return httpx.AsyncClient(
+        transport=CheckedAsyncTransport(), timeout=timeout,
+        trust_env=False, follow_redirects=False,
+    )
 
 
 class BaseNotifier(ABC):

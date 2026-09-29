@@ -1,5 +1,5 @@
 import json
-from test_portal_api import client, machine_source
+from helpers import machine_source
 from logsentinel.portal.analysis import ReviewClient
 from logsentinel.portal.problem_context import context_for, chat_system
 from logsentinel.portal.research import SearchPlan, related_events

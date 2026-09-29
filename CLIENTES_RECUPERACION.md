@@ -21,13 +21,18 @@ sudo ./setup-client.sh --upgrade --name logs
 
 No necesitas otra alta. El actualizador conserva configuración, identidad,
 credencial, CA, eventos y cursores. Guarda una copia SQLite coherente y la unidad
-anterior en el directorio de copia que imprime. Comprueba espacio para la copia y
-el índice; la operación de copia y adaptación de la cola tiene prioridad baja.
+anterior en el directorio de copia que imprime, accesible solo por root: la copia
+la genera la cuenta del emisor en su propia cola y root la adopta. Comprueba
+espacio para la copia intermedia, la definitiva y el índice; la operación de copia y adaptación de la cola tiene prioridad baja.
 La adaptación añade un índice y un contador; no elimina evidencia ni reinicia el
 cursor. El runtime anterior queda disponible.
 
-**Un servicio detenido permanece detenido.** Cuando termines la investigación,
-puedes arrancar el cliente; seguirá pausado mientras lo esté la máquina del portal:
+**Un servicio detenido permanece detenido.** Si estaba activo y la actualización
+falla (disco bajo presión, falta de espacio), el instalador lo deja detenido y
+anota que estaba activo en `/opt/logsentinel-client/resume-NOMBRE`; al repetir
+la actualización con éxito lo reanuda. Para que siga detenido, borra esa marca.
+Cuando termines la investigación, puedes arrancar el cliente; seguirá pausado
+mientras lo esté la máquina del portal:
 
 ```bash
 sudo systemctl start logsentinel-client-logs

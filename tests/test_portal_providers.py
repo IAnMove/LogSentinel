@@ -5,7 +5,7 @@ import json
 import httpx
 import pytest
 
-from test_portal_api import client
+
 
 
 @pytest.fixture

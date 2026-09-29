@@ -77,7 +77,7 @@
               <div class="eyebrow" data-i18n="MÁQUINAS · LOGS · HALLAZGOS">
                 MACHINES · LOGS · FINDINGS
               </div>
-              <h1 id="page-title">Resumen</h1>
+              <h1 id="page-title" tabindex="-1">Resumen</h1>
             </div>
           </div>
           <label class="scope"
@@ -90,10 +90,9 @@
         <div
           id="monitor-status"
           class="monitor-status"
-          aria-live="polite"
         ></div>
         <div id="notice" role="status" hidden></div>
-        <section id="content" aria-live="polite"></section>
+        <section id="content"></section>
       </main>
       <button id="help-toggle" class="help-toggle" data-i18n="Ayuda con el LLM">
         Ask the LLM

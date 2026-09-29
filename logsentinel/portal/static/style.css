@@ -1215,3 +1215,9 @@ nav button {
   min-height: 36px;
   line-height: 1.35;
 }
+
+/* The heading takes focus when the view changes so screen readers start there;
+   it is not a control, so it shows no ring. */
+#page-title:focus {
+  outline: none;
+}

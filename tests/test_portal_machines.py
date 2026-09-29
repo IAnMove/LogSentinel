@@ -2,7 +2,7 @@ import asyncio
 import time
 
 import pytest
-from test_portal_api import client, machine_source
+from helpers import machine_source
 from logsentinel.portal.telemetry_data import MetricSample, TelemetryConfig
 
 

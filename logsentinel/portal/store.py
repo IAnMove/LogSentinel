@@ -28,6 +28,45 @@ def uid():
 
 
 QUOTA_WINDOW = 3600.0
+# VACUUM rewrites the whole file while holding the write lock and needs about
+# as much free disk as the database itself. Freed pages are reused and already
+# count as free in the quota, so it only runs when it clearly pays for itself.
+VACUUM_MIN_RECLAIM = 256 * 1024**2
+VACUUM_MIN_FRACTION = 0.5
+VACUUM_DISK_MARGIN = 256 * 1024**2
+# Token statistics and the audit trail outlive the log evidence, but not forever.
+LEDGER_MIN_DAYS = 365
+BACKUPS_KEPT = 5
+FINAL_JOBS = ("done", "cancelled", "failed", "partial", "split")
+FINAL_DELIVERIES = ("delivered", "accepted", "failed", "muted", "cancelled", "unknown")
+
+# Databases created before versioned migrations report version 1 and already
+# have the base schema below; each later step adds to it and is applied to old
+# and new databases alike, inside one transaction with its version bump.
+SCHEMA_VERSION = 3
+MIGRATIONS = {
+    3: (
+        # Syslog priority 0-3 (emergency to error) marks an original the model
+        # should see before routine lines when the backlog is longer than a batch.
+        # The partial index only holds the rare urgent rows.
+        "ALTER TABLE events ADD COLUMN urgent INTEGER NOT NULL DEFAULT 0",
+        "CREATE INDEX IF NOT EXISTS events_urgent ON events(machine_id,source_id,received) WHERE urgent=1",
+    ),
+    2: (
+        # Deleting an event cascaded into signal_hits with a full table scan
+        # per event because only (signal, event_id) and the window index exist.
+        "CREATE INDEX IF NOT EXISTS signal_hits_event ON signal_hits(event_id)",
+        "CREATE INDEX IF NOT EXISTS events_segment ON events(segment_id,status)",
+        # Token statistics, timing and capacity read the newest usage rows.
+        "CREATE INDEX IF NOT EXISTS usage_created ON usage(created)",
+        "CREATE INDEX IF NOT EXISTS usage_job ON usage(job_id)",
+    ),
+}
+
+
+def schema_version(db):
+    row = db.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()
+    return int(row[0]) if row else None
 
 
 def dumps(value):
@@ -79,14 +118,23 @@ class Store:
             CREATE TABLE IF NOT EXISTS sender_quota(source_id TEXT PRIMARY KEY,window_start REAL,bytes INTEGER,events INTEGER);
             """
             )
-            version = db.execute(
-                "SELECT value FROM meta WHERE key='schema_version'"
-            ).fetchone()
-            if version and version[0] != "1":
+            # Read the version only once nobody else can be migrating: two
+            # processes starting together must not both apply the same step.
+            db.execute("BEGIN IMMEDIATE")
+            version = schema_version(db)
+            if version is not None and version > SCHEMA_VERSION:
                 raise RuntimeError(
                     "Unsupported schema version; restore with a compatible version"
                 )
             db.execute("INSERT OR IGNORE INTO meta VALUES('schema_version','1')")
+            for target in range(max(version or 1, 1) + 1, SCHEMA_VERSION + 1):
+                for statement in MIGRATIONS[target]:
+                    db.execute(statement)
+                db.execute(
+                    "UPDATE meta SET value=? WHERE key='schema_version'", (str(target),)
+                )
+            # One transaction for every pending step: a second process waits for
+            # this one and then finds nothing left to do.
             db.execute(
                 "INSERT OR IGNORE INTO meta VALUES('settings',?)",
                 (dumps(Settings().model_dump()),),
@@ -176,6 +224,11 @@ class Store:
 
     def set_meta(self, key, value):
         with self.connect() as db:
+            # Workers record their status on every tick; an unchanged value
+            # must not cost a synchronous commit.
+            row = db.execute("SELECT value FROM meta WHERE key=?", (key,)).fetchone()
+            if row is not None and row[0] == value:
+                return
             db.execute("INSERT OR REPLACE INTO meta VALUES(?,?)", (key, value))
 
     def settings(self):
@@ -351,7 +404,6 @@ class Store:
     def prepare_sender(self):
         """One-time indexed migration and count, including legacy durable queues."""
         with self.connect() as db:
-            db.execute("CREATE INDEX IF NOT EXISTS events_segment ON events(segment_id,status)")
             if not db.execute("SELECT 1 FROM meta WHERE key='sender_pending_count'").fetchone():
                 db.execute("INSERT INTO meta SELECT 'sender_pending_count',CAST(count(*) AS TEXT) FROM events WHERE status='pending'")
 
@@ -417,8 +469,10 @@ class Store:
                     ),
                 )
                 for i, item in enumerate(unique):
+                    priority = item.get("priority")
                     db.execute(
-                        "INSERT INTO events VALUES(?,?,?,?,?,?,?,?,?,?)",
+                        "INSERT INTO events(id,source_id,machine_id,segment_id,ordinal,received,event_time,service,status,origin,urgent) "
+                        "VALUES(?,?,?,?,?,?,?,?,?,?,?)",
                         (
                             item["id"],
                             source["id"],
@@ -430,9 +484,16 @@ class Store:
                             item.get("service", "unknown"),
                             "pending",
                             item["origin"],
+                            int(type(priority) is int and 0 <= priority <= 3),
                         ),
                     )
                 self._metric(db, source["id"], "events_ingested", len(unique))
+                # Lets the detectors tell "nothing new" from "look again" without
+                # scanning the machine's whole history to find out.
+                db.execute(
+                    "INSERT INTO meta VALUES(?,'1') ON CONFLICT(key) DO UPDATE SET value=CAST(value AS INTEGER)+1",
+                    ("ingest_seq:" + source["machine_id"],),
+                )
                 db.execute("UPDATE meta SET value=CAST(value AS INTEGER)+? WHERE key='sender_pending_count'", (len(unique),))
                 self._metric(
                     db,
@@ -835,19 +896,46 @@ class Store:
                 db.execute("DELETE FROM segments WHERE id=?", (sid,))
             if ids:
                 self._metric(db, "", "segments_expired", len(ids))
+            # Only evidence and frozen requests used to expire; these tables
+            # grew for as long as the portal ran and counted against the quota.
+            ledger = time.time() - max(self.settings().retention_days, LEDGER_MIN_DAYS) * 86400
+            trimmed = db.execute(
+                "DELETE FROM jobs WHERE status IN (%s) AND updated<?" % ",".join("?" * len(FINAL_JOBS)),
+                (*FINAL_JOBS, cutoff),
+            ).rowcount
+            trimmed += db.execute(
+                "DELETE FROM deliveries WHERE status IN (%s) AND updated<?" % ",".join("?" * len(FINAL_DELIVERIES)),
+                (*FINAL_DELIVERIES, cutoff),
+            ).rowcount
+            trimmed += db.execute("DELETE FROM usage WHERE created<?", (ledger,)).rowcount
+            trimmed += db.execute("DELETE FROM audit WHERE created<?", (ledger,)).rowcount
         # Checkpoint after the cleanup transaction commits, including a cleanup
         # that deletes zero rows. SQLite rejects checkpointing our own writer.
         with self.connect() as db:
-            if ids:
+            if ids or trimmed:
                 db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-                db.execute("VACUUM")
             else:
                 db.execute("PRAGMA wal_checkpoint(PASSIVE)")
+        if ids or trimmed:
+            self.compact_if_worthwhile()
         if ids:
             with self._segment_cache_lock:
                 self._segment_cache.clear()
                 self._segment_cache_bytes = 0
         return len(ids)
+
+    def compact_if_worthwhile(self):
+        """VACUUM only when a large share of the file is reusable and the disk
+        can hold a second copy; otherwise leave the free pages for reuse."""
+        usage = self.storage_usage()
+        allocated, reusable = usage["allocated_bytes"], usage["reusable_bytes"]
+        if reusable < VACUUM_MIN_RECLAIM or reusable < allocated * VACUUM_MIN_FRACTION:
+            return False
+        if usage["disk_free_bytes"] < allocated + VACUUM_DISK_MARGIN:
+            return False
+        with self.connect() as db:
+            db.execute("VACUUM")
+        return True
 
     def discard_sent(self, event_ids=None):
         """Reclaim fully acknowledged sender segments without touching file cursors."""
@@ -876,7 +964,34 @@ class Store:
         target = Path(target)
         if target.exists():
             raise ValueError("Backup target already exists")
-        with self.connect() as db, sqlite3.connect(target) as dest:
-            db.backup(dest)
-        os.chmod(target, 0o600)
+        import shutil
+
+        if shutil.disk_usage(target.parent).free < self.size() + VACUUM_DISK_MARGIN:
+            raise ValueError("Not enough free disk space for a backup")
+        # Owner-only from the first byte, and never a half-written target.
+        partial = target.with_name(target.name + ".partial")
+        os.close(os.open(partial, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600))
+        try:
+            dest = sqlite3.connect(partial)
+            try:
+                with self.connect() as db:
+                    db.backup(dest)
+            finally:
+                dest.close()
+            os.replace(partial, target)
+        except BaseException:
+            partial.unlink(missing_ok=True)
+            raise
         return target
+
+    @staticmethod
+    def rotate_backups(folder, keep=BACKUPS_KEPT):
+        """Each backup holds every retained log, so they cannot pile up."""
+        found = sorted(
+            (p for p in Path(folder).glob("backup-*.db") if p.is_file()),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
+        for old in found[keep:]:
+            old.unlink(missing_ok=True)
+        return max(0, len(found) - keep)

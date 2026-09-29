@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 import json
+import os
 from pathlib import Path
 from logsentinel.config import FileNotifierConfig
 from logsentinel.core.models import Alert
@@ -17,6 +18,13 @@ class FileNotifier(BaseNotifier):
         self.config = config
         self.path = Path(config.path).expanduser().resolve() if config.path else default_path
         self.path.parent.mkdir(parents=True, exist_ok=True)
+
+    def _append(self, record: dict) -> None:
+        """Alerts quote log lines, so the file is owner-only from its first byte."""
+        fd = os.open(self.path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+        os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "a", encoding="utf-8") as f:
+            f.write(json.dumps(record) + "\n")
 
     async def send(self, alert: Alert) -> bool:
         if not self.config.enabled:
@@ -34,16 +42,14 @@ class FileNotifier(BaseNotifier):
                 "count": alert.incident.count,
                 "recommended_action": alert.verdict.recommended_action,
             }
-            with open(self.path, "a", encoding="utf-8") as f:
-                f.write(json.dumps(record) + "\n")
+            self._append(record)
             return True
         except Exception:
             return False
 
     async def test(self) -> bool:
         try:
-            with open(self.path, "a", encoding="utf-8") as f:
-                f.write(json.dumps({"test": True, "app": "logsentinel"}) + "\n")
+            self._append({"test": True, "app": "logsentinel"})
             return True
         except Exception:
             return False

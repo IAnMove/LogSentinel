@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 import html
-from typing import Optional
-import httpx
 from logsentinel.config import TelegramNotifierConfig
 from logsentinel.core.models import Alert, Severity
-from logsentinel.notifiers.base import BaseNotifier
+from logsentinel.notifiers.base import BaseNotifier, outbound_client
 
 
 class TelegramNotifier(BaseNotifier):
@@ -37,21 +35,21 @@ class TelegramNotifier(BaseNotifier):
             f"<b>Title:</b> {title}",
             f"<b>Service:</b> <code>{service}</code> | <b>Category:</b> {cat}",
             f"<b>Events count:</b> {alert.incident.count}",
-            f"",
-            f"<b>Summary:</b>",
+            "",
+            "<b>Summary:</b>",
             f"{summary}",
         ]
 
         if alert.verdict.recommended_action:
             action = html.escape(alert.verdict.recommended_action)
             lines.extend([
-                f"",
-                f"<b>Recommended Action:</b>",
+                "",
+                "<b>Recommended Action:</b>",
                 f"<code>{action}</code>",
             ])
 
         lines.extend([
-            f"",
+            "",
             f"<i>Alert ID:</i> <code>{alert.id}</code>",
             f"<i>To ignore future occurrences:</i> <code>logsentinel alerts dismiss {alert.id} --always</code>",
         ])
@@ -71,7 +69,7 @@ class TelegramNotifier(BaseNotifier):
         }
 
         try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
+            async with outbound_client(10.0) as client:
                 resp = await client.post(url, json=payload)
                 return resp.status_code == 200
         except Exception:
@@ -87,7 +85,7 @@ class TelegramNotifier(BaseNotifier):
             "parse_mode": "HTML",
         }
         try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
+            async with outbound_client(10.0) as client:
                 resp = await client.post(url, json=payload)
                 return resp.status_code == 200
         except Exception:

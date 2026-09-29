@@ -437,7 +437,7 @@ function recentMetricChart(key, history, threshold) {
   const legend = el("p", undefined, "resource-legend subtle");
   legend.append(
     el("span", t("Máximo"), "legend-maximum"),
-    el("span", t("Media"), "legend-average"),
+    el("span", t("Promedio"), "legend-average"),
     el("span", bilingual("Huecos: sin muestras", "Gaps: no samples")),
   );
   card.append(svg, legend);
@@ -490,7 +490,7 @@ function recentMetricChart(key, history, threshold) {
         ": " +
         metricValue(key, row.maximum) +
         " · " +
-        t("Media") +
+        t("Promedio") +
         ": " +
         metricValue(key, row.average) +
         " · " +

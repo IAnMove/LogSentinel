@@ -6,28 +6,7 @@ from logsentinel.portal.app import create_app
 from logsentinel.portal.analysis import ReviewClient
 
 
-@pytest.fixture
-def client(tmp_path):
-    app = create_app(tmp_path, background=False)
-    with TestClient(app, base_url="http://localhost") as c:
-        c.headers["X-LogSentinel"] = "portal"
-        assert (
-            c.post(
-                "/login", json={"token": app.state.store.meta("admin_token")}
-            ).status_code
-            == 200
-        )
-        yield c, app.state.store
-
-
-def machine_source(c):
-    m = c.post("/api/objects/machine", json={"name": "A"}).json()["id"]
-    r = c.post(
-        "/api/objects/source",
-        json={"name": "remote", "machine_id": m, "kind": "push", "enabled": True},
-    )
-    assert r.status_code == 200, r.text
-    return m, r.json()["id"]
+from helpers import machine_source
 
 
 def test_auth_csrf_and_host_are_required(tmp_path):
@@ -567,3 +546,41 @@ def test_failed_key_rotation_leaves_old_key_consistent_and_revokes_sessions(clie
     assert not c.app.state.sessions
     assert c.get("/api/state").status_code == 401
     assert c.post("/login", json={"token": previous}).status_code == 200
+
+
+def test_problem_rule_preview_looks_the_problem_up_once_and_matches_only_its_evidence(client):
+    c, s = client
+    m, source = machine_source(c)
+    s.ingest({"id": source, "machine_id": m}, [{"origin": str(i), "message": f"disk failure {i}"} for i in range(30)])
+    ids = [e["id"] for e in s.events(machine_id=m)]
+    from logsentinel.portal.analysis import Analyzer
+
+    problem = Analyzer(s).save_finding(
+        m, dict(title="Disk", summary="s", severity="HIGH", category="storage"), ids[:3], notify=False
+    )
+    calls = []
+    original = s.problem
+    s.problem = lambda pid: calls.append(pid) or original(pid)
+    r = c.post(
+        "/api/rules/preview",
+        json={"name": "this problem", "action": "mute", "kind": "problem", "pattern": problem, "machine_id": m},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["tested"] == 30 and r.json()["matched"] == 3
+    assert calls == [problem]
+
+
+def test_preview_reports_a_runaway_regex_instead_of_hanging(client, monkeypatch):
+    c, s = client
+    m, source = machine_source(c)
+    s.ingest({"id": source, "machine_id": m}, [{"origin": "1", "message": "some line"}])
+
+    def runaway(*args, **kwargs):
+        raise TimeoutError("regex exceeded its time limit")
+
+    monkeypatch.setattr("logsentinel.portal.routes.problems.matches", runaway)
+    r = c.post(
+        "/api/rules/preview",
+        json={"name": "slow", "action": "mute", "kind": "regex", "pattern": "line", "machine_id": m},
+    )
+    assert r.status_code == 400 and "time limit" in r.text

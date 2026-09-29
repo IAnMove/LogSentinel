@@ -1,8 +1,6 @@
 # Dirección de producto: revisión de logs asistida por LLM
 
-Actualización de implementación: se ha construido una primera versión operativa. El diagnóstico y las alternativas que siguen describen la propuesta original, no una lista de garantías certificadas.
-
-Documento de propuesta tras revisar el repositorio. No describe funcionalidades ya implementadas. Las capacidades solicitadas están acordadas; los valores de ejemplo (cadencia, tamaño de segmento), tecnologías candidatas y objetivos de rendimiento siguen pendientes de validación en el piloto.
+> **Estado de este documento.** Es el plan de producto de la fase inicial, escrito antes de construir el portal. El portal ya existe y cubre buena parte de él, pero este texto **no describe lo que hace la versión actual ni sus garantías**: para eso están el [README](README.md) (sección «Garantías y límites») y el [CHANGELOG](CHANGELOG.md). Las capacidades pedidas siguen siendo el objetivo acordado; las cifras de ejemplo (cadencia, tamaño de segmento), las tecnologías candidatas y los objetivos de rendimiento eran propuestas por validar y algunas se decidieron de otro modo al implementarlas.
 
 ## Objetivo acordado
 

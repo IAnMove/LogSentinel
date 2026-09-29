@@ -83,9 +83,9 @@ def generate_disk_full(mount_point: str = "/var/log") -> List[LogEntry]:
     """Generates filesystem no space left on device error logs."""
     now = datetime.now(timezone.utc)
     lines = [
-        f"kernel: EXT4-fs error (device sda2): ext4_lookup:1795: inode #1234: comm rsyslogd: No space left on device",
+        "kernel: EXT4-fs error (device sda2): ext4_lookup:1795: inode #1234: comm rsyslogd: No space left on device",
         f"systemd[1]: Failed to write journal at {mount_point}: No space left on device",
-        f"auditd[800]: Audit daemon failed to write log record: No space left on device",
+        "auditd[800]: Audit daemon failed to write log record: No space left on device",
     ]
     entries = []
     for line in lines:

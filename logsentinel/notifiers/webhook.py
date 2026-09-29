@@ -1,10 +1,9 @@
 """Generic HTTP webhook notification dispatcher."""
 
 from __future__ import annotations
-import httpx
 from logsentinel.config import GenericWebhookConfig
 from logsentinel.core.models import Alert
-from logsentinel.notifiers.base import BaseNotifier
+from logsentinel.notifiers.base import BaseNotifier, outbound_client
 
 
 class WebhookNotifier(BaseNotifier):
@@ -35,7 +34,7 @@ class WebhookNotifier(BaseNotifier):
         headers = {"Content-Type": "application/json", **self.config.headers}
 
         try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
+            async with outbound_client(10.0) as client:
                 resp = await client.post(self.config.url, json=payload, headers=headers)
                 return 200 <= resp.status_code < 300
         except Exception:
@@ -47,7 +46,7 @@ class WebhookNotifier(BaseNotifier):
         payload = {"event": "test", "app": "logsentinel"}
         headers = {"Content-Type": "application/json", **self.config.headers}
         try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
+            async with outbound_client(10.0) as client:
                 resp = await client.post(self.config.url, json=payload, headers=headers)
                 return 200 <= resp.status_code < 300
         except Exception:

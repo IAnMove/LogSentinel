@@ -65,6 +65,36 @@ def read_package(path):
     return package
 
 
+def ca_fingerprint(pem):
+    return 'sha256:' + hashlib.sha256(ssl.PEM_cert_to_DER_cert(pem)).hexdigest()
+
+
+def normalize_fingerprint(text):
+    value = str(text).strip().lower()
+    value = value.removeprefix('sha256:').replace(':', '').replace(' ', '')
+    if not re.fullmatch(r'[0-9a-f]{64}', value):
+        raise ValueError('Una huella SHA-256 tiene 64 dígitos hexadecimales.')
+    return 'sha256:' + value
+
+
+def confirm_ca(package, expected=None, interactive=False):
+    """The package names the receiver and the CA to trust, so it cannot vouch
+    for itself: whoever swaps the file also swaps the fingerprint inside it.
+    The operator compares it with what the central printed, out of band."""
+    actual = ca_fingerprint(package['ca_certificate'])
+    print('Receptor:', package['receiver'])
+    print('Huella del certificado del central:', actual, flush=True)
+    if not expected and interactive:
+        expected = input('Pega la huella que mostró el central para confirmarla: ')
+    if not expected:
+        raise ValueError('Indica --ca-fingerprint con la huella que mostró el central al crear el alta '
+                         '(o ejecuta el instalador en un terminal para pegarla). Sin ella no se puede saber '
+                         'si el archivo de alta fue sustituido.')
+    if normalize_fingerprint(expected) != actual:
+        raise ValueError('La huella no coincide con la del central. No uses este archivo de alta.')
+    return actual
+
+
 def selection(name, package, file=None, history=False):
     if not re.fullmatch(r'[a-z][a-z0-9-]{0,19}', name):
         raise ValueError('El nombre debe tener 1–20 letras minúsculas, números o guiones y empezar por letra.')
@@ -190,6 +220,18 @@ CapabilityBoundingSet=
 ProtectSystem=strict
 ProtectHome=read-only
 PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
 ReadWritePaths={desired['spool']}
 
 [Install]
@@ -303,7 +345,9 @@ def configure(args, desired, package, runtime):
         try:
             print('Canjeando el alta y guardando la credencial privada...', flush=True)
             result = subprocess.run(['runuser', '-u', account, '--', str(runtime/'bin/logsentinel'),
-                                     'enroll', str(staged), '--spool', str(spool)], capture_output=True, text=True)
+                                     'enroll', str(staged), '--spool', str(spool),
+                                     '--ca-fingerprint', ca_fingerprint(package['ca_certificate'])],
+                                    capture_output=True, text=True)
             if result.returncode:
                 raise ValueError('No se pudo canjear el alta. Comprueba la conexión; si el código caducó o ya se usó, genera otro en el central.')
         finally:
@@ -367,8 +411,27 @@ def backup_sender(config_path, target):
     import sqlite3
     cfg=json.loads(Path(config_path).read_text())
     source=Path(cfg['spool'])/'sentinel.db'
+    # The account can only write inside its own spool, so that is where the
+    # copy is made; it must be a new file, never one somebody put there.
+    os.close(os.open(target,os.O_CREAT|os.O_EXCL|os.O_WRONLY|os.O_NOFOLLOW,0o600))
     with sqlite3.connect(source.as_uri()+'?mode=ro',uri=True,timeout=3) as db, sqlite3.connect(target) as dest:
         db.backup(dest,pages=256,sleep=.05)
+
+
+def adopt_backup(staged,target):
+    """Move what the unprivileged account wrote into root-owned storage.
+
+    The path is sender-controlled, so it is opened without following links and
+    must be a regular file; root never opens a database the sender can change."""
+    fd=os.open(staged,os.O_RDONLY|os.O_NOFOLLOW)
+    with os.fdopen(fd,'rb') as source:
+        if not stat.S_ISREG(os.fstat(source.fileno()).st_mode):
+            raise ValueError('La copia preparada por la cuenta del emisor no es un archivo regular.')
+        out=os.open(target,os.O_CREAT|os.O_EXCL|os.O_WRONLY,0o600)
+        with os.fdopen(out,'wb') as dest:
+            shutil.copyfileobj(source,dest,1024*1024)
+            dest.flush();os.fsync(dest.fileno())
+    os.unlink(staged)
 
 
 def upgrade_client(args, desired, runtime):
@@ -384,34 +447,40 @@ def upgrade_client(args, desired, runtime):
     spool=Path(desired['spool'])
     if spool.is_symlink() or not spool.is_dir() or spool.stat().st_uid != entry.pw_uid:
         raise ValueError('La cola existente no tiene su propietario esperado.')
+    # A failed attempt leaves the unit stopped. The marker remembers that it was
+    # running, so repeating the upgrade restores it instead of leaving a sender
+    # silently down; a unit stopped on purpose has no marker and stays stopped.
+    resume=INSTALL/('resume-'+args.name)
     was_active=subprocess.run(['systemctl','is-active','--quiet',unit.name]).returncode==0
+    if was_active:
+        resume.write_text('activo antes de actualizar\n')
+    else:
+        was_active=resume.is_file() and not resume.is_symlink()
     command('systemctl','stop',unit.name)
     from .portal.sender_safety import io_pressure
     pressure=io_pressure()
     if pressure is not None and pressure>=25:
-        raise ValueError('El disco sigue bajo presión de E/S. Cliente detenido; repite la actualización cuando se estabilice.')
+        raise ValueError('El disco sigue bajo presión de E/S. Cliente detenido; repite la actualización cuando se estabilice (si estaba activo, se reanudará entonces).')
     # Budget the coherent backup and the additive index before touching the unit.
     size=sum(p.stat().st_size for p in spool.glob('sentinel.db*') if p.is_file())
     if shutil.disk_usage(INSTALL).free < size*2 + 256*1024**2:
         raise ValueError('Falta espacio para copia y actualización. El cliente queda detenido y conserva su cola.')
-    if shutil.disk_usage(spool).free < size + 256*1024**2:
-        raise ValueError('Falta espacio en el volumen de la cola para adaptar el índice. El cliente queda detenido; no se elimina evidencia.')
+    if shutil.disk_usage(spool).free < size*2 + 256*1024**2:
+        raise ValueError('Falta espacio en el volumen de la cola para la copia intermedia y el índice. El cliente queda detenido; no se elimina evidencia.')
     backup=INSTALL/('backup-'+args.name+'-'+str(time.time_ns()))
-    backup.mkdir(mode=0o710)
-    os.chown(backup,0,entry.pw_gid)
+    backup.mkdir(mode=0o700)
     previous=unit.read_bytes()
     (backup/'service.before').write_bytes(previous)
     shutil.copyfile(config_path,backup/'config.before.json')
     (backup/'config.before.json').chmod(0o600)
     target=backup/'sentinel.db'
-    fd=os.open(target,os.O_CREAT|os.O_EXCL|os.O_WRONLY,0o600)
-    os.fchown(fd,entry.pw_uid,entry.pw_gid);os.close(fd)
+    staged=spool/('upgrade-backup-'+str(time.time_ns())+'.db')
     try:
         low_priority=['nice','-n','10']
         if shutil.which('ionice'):
             low_priority+=['ionice','-c','3']
-        command('runuser','-u',desired['account'],'--',*low_priority,runtime/'bin/python','-m','logsentinel.client_setup','backup','--config',config_path,'--target',target)
-        os.chown(target,0,0)
+        command('runuser','-u',desired['account'],'--',*low_priority,runtime/'bin/python','-m','logsentinel.client_setup','backup','--config',config_path,'--target',staged)
+        adopt_backup(staged,target)
         command('runuser','-u',desired['account'],'--',*low_priority,runtime/'bin/python','-m','logsentinel.client_setup','migrate','--config',config_path)
         unit.write_text(unit_text(config_path,runtime,desired));unit.chmod(0o644)
         command('systemd-analyze','verify',unit,stdout=subprocess.DEVNULL)
@@ -419,16 +488,20 @@ def upgrade_client(args, desired, runtime):
         if was_active:
             command('systemctl','start',unit.name)
             command('systemctl','is-active','--quiet',unit.name)
+        resume.unlink(missing_ok=True)
     except BaseException:
         # Do not replace a live queue with its backup: new durable events may exist.
         subprocess.run(['systemctl','stop',unit.name],capture_output=True)
         unit.write_bytes(previous)
         subprocess.run(['systemctl','daemon-reload'],capture_output=True)
         print('Actualización incompleta: cliente detenido; cola intacta. Copia:',backup,file=sys.stderr)
+        if was_active:
+            print('Estaba activo: se reanudará al repetir la actualización. Para que siga detenido, borra',resume,file=sys.stderr)
         raise
     finally:
-        os.chown(target,0,0)
-        backup.chmod(0o700)
+        # A half-written intermediate copy is only ever removed, never trusted.
+        if staged.is_file() and not staged.is_symlink():
+            staged.unlink()
     print('Cliente actualizado. Runtime:',runtime)
     print('Copia coherente:',backup)
     print('Se conservan configuración, credenciales, CA, cursor y cola.')
@@ -468,6 +541,7 @@ def main(argv=None):
     parser.add_argument('--file',help='Un archivo en lugar del journal')
     parser.add_argument('--logrotate-config',help='Configuración de rotación del archivo, con un único postrotate')
     parser.add_argument('--include-history',action='store_true',help='Importar también historial en una instalación nueva')
+    parser.add_argument('--ca-fingerprint',help='Huella SHA-256 del certificado del central, tal como la mostró al crear el alta')
     parser.add_argument('--plan',action='store_true',help='Mostrar el recorrido sin instalar ni enviar nada')
     parser.add_argument('--prepared',action='store_true',help=argparse.SUPPRESS)
     args=parser.parse_args(argv)
@@ -490,6 +564,8 @@ def main(argv=None):
     validate_existing(CONFIG/(args.name+'.json'),desired)
     print('Receptor:',desired['receiver'],'\nLogs:',desired['path'] or 'journal del sistema (todos los servicios)')
     print('Cuenta sin login:',desired['account'],'\nInicio:', 'con histórico' if args.include_history else 'solo entradas nuevas; se conservan cursores existentes',flush=True)
+    if package and args.plan:
+        print('Huella del certificado del central:',ca_fingerprint(package['ca_certificate']),'\nComprueba que coincide con la que mostró el central antes de instalar.')
     if args.plan:
         print('Plan: actualizar runtime con copia coherente; conservar identidad y estado del servicio. No se ha cambiado nada.' if args.upgrade else 'Plan: instalar Python aislado, conceder lectura, canjear el alta HTTPS y activar un servicio emisor. No se ha cambiado nada.')
         return
@@ -498,6 +574,10 @@ def main(argv=None):
     os.umask(0o022)
     if not Path('/run/systemd/system').is_dir():
         raise ValueError('Este instalador necesita systemd ejecutándose como gestor del sistema.')
+    if package:
+        confirmed=confirm_ca(package,args.ca_fingerprint,interactive=sys.stdin.isatty() and not args.prepared)
+        if not args.ca_fingerprint:
+            argv+=['--ca-fingerprint',confirmed]
     if not args.prepared:
         repo=Path(__file__).resolve().parents[1]
         runtime=bootstrap(repo)

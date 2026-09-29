@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock
 from logsentinel.config import Config
 from logsentinel.core.engine import SentinelEngine
 from logsentinel.core.models import Incident, LogEntry, LLMVerdict, MemoryRule, MemoryRuleType, Category, AlertStatus
+from helpers import until
 
 
 def make_engine(tmp_path, **kwargs):
@@ -95,3 +96,68 @@ def test_inference_cancellation_keeps_original_evidence(tmp_path):
     assert len(saved) == 1
     assert saved[0].verdict.title == 'Analysis pending'
     assert saved[0].incident.entries[0].message == 'Failed password'
+
+
+def test_a_slow_model_does_not_stop_ingestion(tmp_path):
+    from logsentinel.core.engine import ANALYSIS_WORKERS
+
+    engine = make_engine(tmp_path, sources={'journald': {'enabled': False}, 'files': {'enabled': False}},
+                         aggregator={'max_batch_size': 1})
+    release = asyncio.Event()
+    started = []
+
+    async def slow_model(incident, memory_context=None):
+        started.append(incident.signature)
+        await release.wait()
+        return LLMVerdict(title='Needs review', summary='Evidence')
+
+    engine.llm_client.analyze = slow_model
+
+    async def run():
+        await engine.start()
+        # Every entry fills its own batch, so each one hands an incident over.
+        # With the model stuck, ingestion still returns immediately.
+        for n in range(ANALYSIS_WORKERS + 5):
+            await asyncio.wait_for(
+                engine.ingest_log(LogEntry(service='sshd', message=f'Failed password for user{n}x', raw='x')), 1)
+        await until(lambda: len(started) == ANALYSIS_WORKERS)
+        blocked_workers = len(started)
+        release.set()
+        await engine.stop()
+        return blocked_workers
+
+    workers_busy = asyncio.run(run())
+    assert workers_busy == ANALYSIS_WORKERS
+    assert len(engine.memory_store.list_alerts()) == ANALYSIS_WORKERS + 5
+
+
+def test_stop_analyses_what_is_still_queued(tmp_path):
+    engine = make_engine(tmp_path, sources={'journald': {'enabled': False}, 'files': {'enabled': False}})
+
+    async def run():
+        await engine.start()
+        await engine.ingest_log(LogEntry(service='sshd', message='Failed password for root', raw='x'))
+        await engine.stop()
+
+    asyncio.run(run())
+    assert len(engine.memory_store.list_alerts()) == 1
+
+
+def test_an_analysis_failure_is_still_reported_to_the_supervisor(tmp_path):
+    import pytest
+
+    engine = make_engine(tmp_path, sources={'journald': {'enabled': False}, 'files': {'enabled': False}},
+                         aggregator={'max_batch_size': 1})
+    engine.llm_client.analyze = AsyncMock(side_effect=RuntimeError('database is locked'))
+
+    async def run():
+        await engine.start()
+        await engine.ingest_log(LogEntry(service='sshd', message='Failed password for root', raw='x'))
+        await until(lambda: engine._analysis_error is not None)
+        try:
+            with pytest.raises(RuntimeError, match='database is locked'):
+                engine.raise_if_failed()
+        finally:
+            await engine.stop()
+
+    asyncio.run(run())

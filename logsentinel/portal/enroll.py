@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import re
 import secrets
 import ssl
 import time
@@ -23,8 +24,11 @@ PACKAGE_VERSION = 1
 # is worthless. Redeeming it immediately invalidates it regardless.
 DEFAULT_VALIDITY = 3600
 # A 256-bit code is not guessable; this only stops a client from grinding against
-# the endpoint and filling the log with attempts.
+# the endpoint and filling the log with attempts. It is counted per client
+# address: the source id is not secret, so a shared counter would let anyone
+# who has seen it spend the ten attempts and burn the code of a real sender.
 MAX_ATTEMPTS = 10
+TRACKED_CLIENTS = 50
 
 
 def fingerprint(certificate_pem):
@@ -32,6 +36,15 @@ def fingerprint(certificate_pem):
     return "sha256:" + hashlib.sha256(
         ssl.PEM_cert_to_DER_cert(certificate_pem)
     ).hexdigest()
+
+
+def normalize_fingerprint(text):
+    """Accept sha256:ab12..., SHA256:AB:12:... or bare hex, as tools print them."""
+    value = str(text).strip().lower().removeprefix("sha256:")
+    value = value.replace(":", "").replace(" ", "")
+    if not re.fullmatch(r"[0-9a-f]{64}", value):
+        raise ValueError("A SHA-256 fingerprint has 64 hexadecimal digits")
+    return "sha256:" + value
 
 
 def issue_package(store, source_id, receiver, certificate_pem="", validity=DEFAULT_VALIDITY):
@@ -71,7 +84,7 @@ def issue_package(store, source_id, receiver, certificate_pem="", validity=DEFAU
     return package
 
 
-def redeem(store, source_id, code):
+def redeem(store, source_id, code, client=""):
     """Exchange a valid code for a fresh source token, consuming the code."""
     raw = store.meta("enroll:" + source_id)
     if not raw:
@@ -80,12 +93,18 @@ def redeem(store, source_id, code):
     if pending["expires"] < time.time():
         store.set_meta("enroll:" + source_id, "")
         raise KeyError("This enrollment expired; issue a new package")
-    if pending["attempts"] >= MAX_ATTEMPTS:
-        raise KeyError("Too many failed attempts; issue a new package")
+    failures = pending.setdefault("failures", {})
+    if failures.get(client, 0) >= MAX_ATTEMPTS:
+        raise KeyError("Too many failed attempts from this address; try again from the sender or issue a new package")
     if not hmac.compare_digest(
         hashlib.sha256(code.encode()).hexdigest(), pending["code"]
     ):
         pending["attempts"] += 1
+        if client not in failures and len(failures) >= TRACKED_CLIENTS:
+            # Forget the oldest address so the record stays bounded; an address
+            # that has not failed yet always starts with its full allowance.
+            failures.pop(next(iter(failures)))
+        failures[client] = failures.get(client, 0) + 1
         store.set_meta("enroll:" + source_id, json.dumps(pending))
         raise KeyError("Enrollment code rejected")
     token = secrets.token_urlsafe(32)
@@ -115,7 +134,12 @@ def register_enrollment(app, store):
             # Same answer as a wrong code: enrollment must not enumerate sources.
             raise HTTPException(401, "Enrollment refused")
         try:
-            token = redeem(store, body["source_id"], body["code"])
+            token = redeem(
+                store,
+                body["source_id"],
+                body["code"],
+                request.client.host if request.client else "",
+            )
         except KeyError:
-            raise HTTPException(401, "Enrollment refused")
+            raise HTTPException(401, "Enrollment refused") from None
         return {"token": token, "source_id": body["source_id"]}

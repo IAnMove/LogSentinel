@@ -4,7 +4,8 @@ from __future__ import annotations
 import ipaddress
 import json
 import re
-from typing import List, Optional, Tuple
+import regex
+from typing import Optional, Tuple
 from logsentinel.core.models import Incident, MemoryRule, MemoryRuleType
 from logsentinel.memory.store import MemoryStore
 
@@ -36,13 +37,13 @@ class MemoryMatcher:
                 if not rule.content.strip():
                     continue
                 try:
-                    pattern = re.compile(rule.content, re.IGNORECASE)
-                except re.error:
+                    pattern = regex.compile(rule.content, regex.IGNORECASE)
+                except regex.error:
                     # Invalid rules are inert, never repaired into suppression.
                     continue
 
                 if incident.entries and all(
-                    pattern.search(entry.message)
+                    self._search(pattern, entry.message)
                     for entry in incident.entries
                 ):
                     self.store.record_rule_hit(rule.id)
@@ -52,7 +53,7 @@ class MemoryMatcher:
             elif rule.rule_type == MemoryRuleType.IP_ADDRESS:
                 rule_ip = rule.content.strip()
                 # A matching sample must not hide unrelated entries in the batch.
-                if incident.entries and all(self._matches_ip(entry.message, rule_ip) for entry in incident.entries):
+                if incident.entries and all(self.matches_ip(entry.message, rule_ip) for entry in incident.entries):
                     self.store.record_rule_hit(rule.id)
                     return True, rule
 
@@ -70,7 +71,15 @@ class MemoryMatcher:
         ], ensure_ascii=True)
 
     @staticmethod
-    def _matches_ip(text: str, target_ip_or_cidr: str) -> bool:
+    def _search(pattern, text: str) -> bool:
+        """A rule is user text: a pattern that runs away simply does not match."""
+        try:
+            return bool(pattern.search(text, timeout=0.02))
+        except TimeoutError:
+            return False
+
+    @staticmethod
+    def matches_ip(text: str, target_ip_or_cidr: str) -> bool:
         """Check if an IP or CIDR is present in the text."""
         try:
             network = ipaddress.ip_network(target_ip_or_cidr, strict=False)
@@ -93,3 +102,5 @@ class MemoryMatcher:
             if address in network:
                 return True
         return False
+
+    _matches_ip = matches_ip  # the name older callers used

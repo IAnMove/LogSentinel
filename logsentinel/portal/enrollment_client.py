@@ -47,7 +47,7 @@ def validate(package):
         try:
             actual = fingerprint(certificate)
         except (ValueError, TypeError):
-            raise ValueError("The package certificate is not readable PEM")
+            raise ValueError("The package certificate is not readable PEM") from None
         stated = package.get("fingerprint", "")
         if stated and stated != actual:
             raise ValueError(
@@ -62,6 +62,8 @@ def claim(package, spool, client=None):
     digest = validate(package)
     spool = Path(spool).expanduser()
     spool.mkdir(parents=True, exist_ok=True, mode=0o700)
+    # mkdir keeps the mode of a directory that already existed.
+    os.chmod(spool, 0o700)
     ca_path = ""
     verify = True
     if package.get("ca_certificate"):
@@ -80,7 +82,7 @@ def claim(package, spool, client=None):
             json={"source_id": package["source_id"], "code": package["code"]},
         )
     except httpx.HTTPError as failure:
-        raise ValueError(f"Could not reach the receiver at {receiver}: {failure}")
+        raise ValueError(f"Could not reach the receiver at {receiver}: {failure}") from None
     finally:
         if owned:
             client.close()
@@ -104,7 +106,7 @@ def claim(package, spool, client=None):
 
 def _write_private(path, text):
     """Create owner-only, and stay owner-only if the file already existed."""
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
     os.fchmod(fd, 0o600)
     with os.fdopen(fd, "w") as handle:
         handle.write(text)

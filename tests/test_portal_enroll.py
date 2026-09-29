@@ -79,17 +79,36 @@ def test_an_expired_code_is_refused(central):
 
 def test_guessing_is_capped_and_reveals_no_source(central):
     store, reception, source = central
-    issue_package(store, source, "http://localhost")
+    package = issue_package(store, source, "http://localhost")
     for _ in range(12):
         assert reception.post(
             "/enroll", json={"source_id": source, "code": "wrong"}
         ).status_code == 401
-    # Attempts are spent, so even the real code no longer works.
+    # The address that ground against the endpoint is spent, even with the real code.
     with pytest.raises(KeyError, match="Too many"):
-        redeem(store, source, "irrelevant")
+        redeem(store, source, package["code"], client="testclient")
     unknown = reception.post("/enroll", json={"source_id": "no-such-source", "code": "x"})
     assert unknown.status_code == 401
     assert "source" not in unknown.json()["detail"].lower()
+
+
+def test_a_flood_from_one_address_cannot_burn_the_code_of_the_real_sender(central):
+    store, reception, source = central
+    package = issue_package(store, source, "http://localhost")
+    for _ in range(40):
+        with pytest.raises(KeyError):
+            redeem(store, source, "wrong", client="198.51.100.9")
+    assert redeem(store, source, package["code"], client="203.0.113.7")
+
+
+def test_a_flood_of_addresses_cannot_grow_the_stored_record_without_bound(central):
+    store, reception, source = central
+    package = issue_package(store, source, "http://localhost")
+    for i in range(200):
+        with pytest.raises(KeyError):
+            redeem(store, source, "wrong", client=f"198.51.100.{i}")
+    assert len(json.loads(store.meta("enroll:" + source))["failures"]) <= 51
+    assert redeem(store, source, package["code"], client="203.0.113.7")
 
 
 def test_the_credential_earned_can_actually_deliver(central, tmp_path):
@@ -153,3 +172,60 @@ def test_https_without_a_certificate_never_reaches_the_network(tmp_path):
     with pytest.raises(ValueError, match="must carry the certificate"):
         claim(package, tmp_path / "spool")
     assert not (tmp_path / "spool").exists()
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://169.254.169.254/latest/meta-data",
+        "http://168.63.129.16/machine",
+        "http://[fd00:ec2::254]/latest/meta-data",
+        "https://metadata.azure.com/metadata/instance",
+        "http://metadata.google.internal/",
+    ],
+)
+def test_cloud_metadata_endpoints_are_refused(url):
+    from logsentinel.portal.models import check_url
+
+    with pytest.raises(ValueError):
+        check_url(url)
+
+
+def test_existing_package_file_and_spool_are_made_private(central, certificate, tmp_path):
+    import stat
+
+    from typer.testing import CliRunner
+
+    from logsentinel.cli import app as cli
+
+    store, reception, source = central
+    out = tmp_path / "alta.json"
+    out.write_text("previous contents")
+    out.chmod(0o644)
+    (tmp_path / "ca.pem").write_text(certificate)
+    result = CliRunner().invoke(
+        cli,
+        ["enrollment-package", "--source-id", source, "--receiver", "https://central.invalid:8767",
+         "--ca-cert", str(tmp_path / "ca.pem"), "--data-dir", str(store.directory), "--out", str(out)],
+    )
+    assert result.exit_code == 0, result.output
+    assert stat.S_IMODE(out.stat().st_mode) == 0o600
+    assert json.loads(out.read_text())["source_id"] == source
+
+    spool = tmp_path / "spool"
+    spool.mkdir()
+    spool.chmod(0o755)
+    package = json.loads(out.read_text())
+
+    class Fake:
+        def post(self, url, json=None):
+            import httpx
+
+            return httpx.Response(200, json={"token": "issued-token"})
+
+        def close(self):
+            pass
+
+    claim(package, spool, client=Fake())
+    assert stat.S_IMODE(spool.stat().st_mode) == 0o700
+    assert stat.S_IMODE((spool / "push-token").stat().st_mode) == 0o600

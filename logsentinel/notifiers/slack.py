@@ -1,10 +1,9 @@
 """Slack incoming webhook notification dispatcher."""
 
 from __future__ import annotations
-import httpx
 from logsentinel.config import SlackNotifierConfig
 from logsentinel.core.models import Alert
-from logsentinel.notifiers.base import BaseNotifier
+from logsentinel.notifiers.base import BaseNotifier, outbound_client
 
 
 class SlackNotifier(BaseNotifier):
@@ -30,17 +29,19 @@ class SlackNotifier(BaseNotifier):
             {
                 "type": "section",
                 "fields": [
-                    {"type": "mrkdwn", "text": f"*Service:* `{alert.incident.service}`"},
-                    {"type": "mrkdwn", "text": f"*Category:* {alert.verdict.category.value}"},
-                    {"type": "mrkdwn", "text": f"*Count:* {alert.incident.count}"},
-                    {"type": "mrkdwn", "text": f"*Alert ID:* `{alert.id}`"},
+                    {"type": "plain_text", "text": f"Service: {alert.incident.service}"},
+                    {"type": "plain_text", "text": f"Category: {alert.verdict.category.value}"},
+                    {"type": "plain_text", "text": f"Count: {alert.incident.count}"},
+                    {"type": "plain_text", "text": f"Alert ID: {alert.id}"},
                 ],
             },
             {
                 "type": "section",
+                # Text written by the model or copied from a log is data: in mrkdwn it
+                # could ping a channel (<!channel>) or draw a link that hides its target.
                 "text": {
-                    "type": "mrkdwn",
-                    "text": f"*Summary:*\n{alert.verdict.summary}",
+                    "type": "plain_text",
+                    "text": f"Summary:\n{alert.verdict.summary}",
                 },
             },
         ]
@@ -49,15 +50,15 @@ class SlackNotifier(BaseNotifier):
             blocks.append({
                 "type": "section",
                 "text": {
-                    "type": "mrkdwn",
-                    "text": f"*Recommended Action:*\n```{alert.verdict.recommended_action}```",
+                    "type": "plain_text",
+                    "text": f"Recommended Action:\n{alert.verdict.recommended_action}",
                 },
             })
 
         payload = {"blocks": blocks}
 
         try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
+            async with outbound_client(10.0) as client:
                 resp = await client.post(self.config.webhook_url, json=payload)
                 return resp.status_code == 200
         except Exception:
@@ -68,7 +69,7 @@ class SlackNotifier(BaseNotifier):
             return False
         payload = {"text": "🛡️ LogSentinel: Slack notifications test successful!"}
         try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
+            async with outbound_client(10.0) as client:
                 resp = await client.post(self.config.webhook_url, json=payload)
                 return resp.status_code == 200
         except Exception:

@@ -12,6 +12,7 @@ from logsentinel.config import LLMConfig
 METADATA_HOSTS = {
     "metadata.google.internal",
     "metadata.goog",
+    "metadata.azure.com",
     "instance-data",
 }
 METADATA_NETWORKS = (
@@ -20,6 +21,9 @@ METADATA_NETWORKS = (
     ipaddress.ip_network("0.0.0.0/8"),
     ipaddress.ip_network("255.255.255.255/32"),
     ipaddress.ip_network("100.100.100.200/32"),
+    # Azure's wire server and AWS's IPv6 metadata endpoint.
+    ipaddress.ip_network("168.63.129.16/32"),
+    ipaddress.ip_network("fd00:ec2::254/128"),
 )
 
 
@@ -243,14 +247,41 @@ class Rule(Model):
     expires_at: float | None = None
 
 
-class Finding(Model):
+class ModelReply(BaseModel):
+    """What a model answers is not a trusted configuration object.
+
+    Any mismatch used to discard the whole batch and the retry repeated the same
+    prompt, so it failed the same way. Cosmetic differences are tolerated here:
+    an unknown extra key is ignored, severity may be lower case, and prose that is
+    a little too long is clipped. What carries meaning stays strict: the severity
+    must be one of the four levels and every finding must cite evidence.
+    """
+
+    model_config = ConfigDict(extra="ignore", allow_inf_nan=False)
+
+
+FINDING_LIMITS = {"title": 200, "summary": 4000, "category": 100, "reasoning": 5000, "next_steps": 4000}
+
+
+class Finding(ModelReply):
     title: str = Field(min_length=1, max_length=200)
     summary: str = Field(min_length=1, max_length=4000)
     severity: Literal["LOW", "MEDIUM", "HIGH", "CRITICAL"]
-    category: str = Field(min_length=1, max_length=100)
+    category: str = Field(default="other", min_length=1, max_length=100)
     evidence_ids: list[str] = Field(min_length=1, max_length=100)
     reasoning: str = Field(default="", max_length=5000)
     next_steps: str = Field(default="", max_length=4000)
+
+    @field_validator("severity", mode="before")
+    @classmethod
+    def normalize_severity(cls, value):
+        return value.strip().upper() if isinstance(value, str) else value
+
+    @field_validator("title", "summary", "category", "reasoning", mode="before")
+    @classmethod
+    def clip(cls, value, info):
+        limit = FINDING_LIMITS[info.field_name]
+        return value.strip()[:limit] if isinstance(value, str) else value
 
     @field_validator("next_steps", mode="before")
     @classmethod
@@ -258,9 +289,9 @@ class Finding(Model):
         # Small local models commonly return a list of checks. Accept only
         # strings, retain the length bound and never coerce arbitrary objects.
         if isinstance(value, list) and all(isinstance(step, str) for step in value):
-            return "\n".join("- " + step for step in value)
-        return value
+            value = "\n".join("- " + step for step in value)
+        return value[: FINDING_LIMITS["next_steps"]] if isinstance(value, str) else value
 
 
-class Verdict(Model):
+class Verdict(ModelReply):
     findings: list[Finding] = Field(max_length=30)

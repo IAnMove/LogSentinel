@@ -1,10 +1,10 @@
 # LogSentinel
 
-Interfaz disponible en español e inglés.
-
-La integración de Omarchy Quattro está disponible como prueba en este equipo. `omarchy plugin add` y `./plugin` solo instalan el widget en tu escritorio; no lo publican en el marketplace. Falta completar la validación en un escritorio Omarchy real. El widget necesita un portal en ejecución y no instala un LLM ni empieza a enviar logs por sí solo.
+Interfaz disponible en español e inglés · [English summary](README.en.md)
 
 Portal local para revisar logs de Linux con un LLM, detectar problemas de funcionamiento y seguridad y conservar la evidencia. Cada fuente pertenece a una máquina. El modelo propone hallazgos y filtros; no ejecuta comandos ni cambia reglas por su cuenta.
+
+Solo lee y explica: no cambia la configuración de tus equipos ni bloquea direcciones. Se instala en un equipo Linux con Python 3.10 o superior y necesita un servidor de modelos (Ollama, llama.cpp, LM Studio, vLLM u otro compatible con la API `/v1`), que se instala por separado.
 
 ## Instalar y abrir
 
@@ -18,14 +18,6 @@ chmod +x portal
 ```
 
 Equivale a `python3 -m venv .venv`, `pip install -e .` y `logsentinel portal`. Pasa opciones del portal, por ejemplo `./portal --port 8766`. Si falta el módulo `venv`: en Debian/Ubuntu `sudo apt install python3 python3-venv python3-pip`; en Arch/Omarchy `python` ya suele estar.
-
-En Omarchy, el widget de la barra es otro comando y se queda en esta máquina:
-
-```bash
-./plugin
-```
-
-Si no detecta Omarchy Quattro con `omarchy plugin`, sale sin instalar nada. No envía el proyecto a [plugins.omarchy.org](https://plugins.omarchy.org). Después hay que emparejar la clave en **Escritorio** del portal.
 
 Para dejarlo como servicio de usuario: `.venv/bin/logsentinel service install` y `systemctl --user enable --now logsentinel`.
 
@@ -59,6 +51,20 @@ Los servidores LLM fuera de loopback requieren activar la autorización de enví
 - Backup coherente y restauración en un directorio nuevo.
 - Asistente de inicio, selector español/inglés persistente y ayuda LLM disponible desde cualquier pantalla. La ayuda de configuración no recibe logs ni credenciales; el asistente de logs usa una muestra reciente de la máquina seleccionada.
 
+## Garantías y límites
+
+Lo que esta versión asegura y lo que no, para que no haya que descubrirlo en un incidente.
+
+- **Avisos graves.** Un hallazgo HIGH o CRITICAL que el modelo no ha podido verificar (la verificación no cabe, falla tres veces o queda «incierta») se notifica igualmente, marcado como **sin verificar** en el mensaje y en el payload. Los MEDIUM y LOW sin verificar (solo ocurren con la verificación de todos los candidatos) no se notifican, pero quedan visibles en Problemas. Los eventos recibidos con retraso (cola larga o caída del modelo) avisan si ocurrieron en las últimas seis horas y son HIGH o CRITICAL; el histórico más antiguo no.
+- **Caídas del modelo.** Si el servidor del modelo no responde, el lote no gasta sus intentos: se reintenta con espera creciente hasta que vuelve. Un tiempo de espera de lectura o un error 500 sí cuentan, porque pueden deberse al propio lote.
+- **Detectores sin modelo.** OOM, disco lleno o de solo lectura, rechazos de `sudo` y ráfagas de fallos SSH (incluido `sshd-session` de OpenSSH 9.8 o posterior) se detectan sobre los originales, sin esperar al LLM ni a que haya cupo.
+- **Orden de revisión.** Con más cola que un lote, se revisan antes los originales con prioridad de syslog 0–3 (emergencia a error), hasta tres cuartas partes del lote; el resto va por orden de llegada.
+- **Retención.** `retention_days` (30 por defecto) rige los originales, los trabajos terminados y el historial de entregas. Los consumos de tokens y la auditoría se conservan al menos un año. Los problemas y sus revisiones se conservan. Las copias de seguridad guardan las cinco más recientes.
+- **Disco.** El espacio liberado se reutiliza y cuenta como libre en la cuota. `VACUUM` solo se ejecuta si hay al menos 256 MiB y la mitad del archivo reutilizables y el disco puede alojar una copia; nunca en un equipo con poco espacio. La copia de seguridad se rechaza si no cabe.
+- **Ocultación de secretos.** Antes de enviar texto al modelo o a un destino se ocultan credenciales reconocibles: pares `clave=valor` y JSON, `Authorization`, `Bearer`, credenciales en URL, `--password`, cookies, claves PEM y prefijos de token conocidos. Es una lista, no una garantía: un secreto con otra forma pasa. Los originales se guardan sin redactar.
+- **Registro del servidor.** Los fallos de los procesos internos se escriben con su traza en stderr (el journal, si corre como servicio), con los secretos ocultos y un mismo fallo como máximo cada cinco minutos.
+- **Lo que no hace.** No garantiza detectar ataques nuevos ni resiste toda inyección de instrucciones en los logs: la detecta por frases, la marca como hallazgo y no deja que decida por sí sola silenciar un problema. «Sin revisar» nunca significa «sin problemas».
+
 ## Enviar desde otro equipo
 
 Para el recorrido por HTTPS con certificado local, cuenta limitada, paquete de
@@ -66,7 +72,7 @@ alta y servicio emisor, sigue la [guía de equipos remotos](GUIA_EQUIPOS.md).
 Con el repositorio y el alta entregada por el central, en un Linux con systemd:
 
 ```bash
-sudo ./setup-client.sh --package /ruta/alta.json
+sudo ./setup-client.sh --package /ruta/alta.json --ca-fingerprint sha256:HUELLA
 ```
 
 Instala el emisor con una cuenta sin login. Por defecto envía el journal desde
@@ -78,31 +84,56 @@ por HTTPS en la LAN o mediante un túnel SSH, manteniendo la validación TLS.
 
 El emisor mantiene IDs y cola locales. El receptor confirma solo después de persistir; un ACK perdido se puede reintentar sin duplicar eventos retenidos. Cada archivo o journal necesita su propio spool. `--once` envía un lote para pruebas. No reutilices un spool para otra fuente. La cuota llena impide avanzar el cursor; conserva los archivos originales hasta resolverla. El emisor no configura SSH ni un proxy TLS automáticamente.
 
-## Rotación, límites y notificaciones
-
-El [plan completo](PRODUCT_DIRECTION.md) conserva propuestas de producto que no deben confundirse con garantías de esta versión.
+## Notificaciones externas
 
 Hermes recibe un webhook firmado V2 y un identificador de entrega estable. La plantilla del portal propone una ruta `deliver_only`; requiere configurar el gateway externo. n8n es opcional: la plantilla crea una entrada autenticada y un punto para conectar el destino elegido. No despliega ni activa n8n. Los proveedores externos requieren sus credenciales.
 
-## Verificar
+## Widget para Omarchy
+
+La integración de Omarchy Quattro está disponible como prueba en este equipo. `omarchy plugin add` y `./plugin` solo instalan el widget en tu escritorio; no lo publican en el marketplace. Falta completar la validación en un escritorio Omarchy real. El widget necesita un portal en ejecución y no instala un LLM ni empieza a enviar logs por sí solo.
+
+En Omarchy, el widget de la barra es otro comando y se queda en esta máquina:
 
 ```bash
-.venv/bin/python -m pytest -q
+./plugin
+```
+
+Si no detecta Omarchy Quattro con `omarchy plugin`, sale sin instalar nada. No envía el proyecto a [plugins.omarchy.org](https://plugins.omarchy.org). Después hay que emparejar la clave en **Escritorio** del portal.
+
+## Documentos
+
+- [Guía rápida](GUIA_RAPIDA.md): configuración guiada, primeros pasos y comprobaciones.
+- [Equipos remotos](GUIA_EQUIPOS.md) y [encargo para otro Codex](CODEX_CLIENTE.md): cómo enviar logs desde otro Linux.
+- [Protección y recuperación del cliente](CLIENTES_RECUPERACION.md): límites del emisor, actualización y qué hacer con un disco con problemas.
+- [Dirección de producto](PRODUCT_DIRECTION.md): el plan original y sus propuestas; no describe garantías de esta versión.
+- [Seguridad](SECURITY.md), [contribuir](CONTRIBUTING.md) y [cambios](CHANGELOG.md).
+
+## Desarrollo y verificación
+
+```bash
+python -m venv .venv && .venv/bin/pip install -e '.[dev]'
+.venv/bin/python -m pytest -q            # unitarias y de contrato
+.venv/bin/ruff check .                   # defectos: nombres, patrones de error, bloqueos en async
+.venv/bin/mypy                           # tipos del paquete
 .venv/bin/python scripts/evaluate_portal.py
 # Evaluación real: necesita el modelo disponible
 .venv/bin/python scripts/evaluate_portal.py --live --model MODELO_INSTALADO
-# Recorrido real de interfaz con modelo simulado, sin avisos remotos
-.venv/bin/python -m pip install playwright
-.venv/bin/python -m playwright install chromium
-.venv/bin/python scripts/portal_smoke.py
-.venv/bin/python scripts/setup_smoke.py
-.venv/bin/python scripts/problem_smoke.py
-.venv/bin/python scripts/metrics_smoke.py
 ```
 
-`constraints-tested-py312.txt` registra las versiones del entorno comprobado; úsalo como constraints de instalación en Python 3.12. La CI añade una matriz de versiones de Python; sus resultados en GitHub aún deben ejecutarse tras publicar los commits.
+Los recorridos de interfaz usan un navegador real y un modelo simulado, sin avisos remotos:
 
-La CLI anterior se conserva como compatibilidad; usa otra base y no es el motor del portal. El experimento de horarios SSH queda desactivado por defecto.
+```bash
+.venv/bin/python -m pip install -c constraints-tested-py312.txt playwright
+.venv/bin/python -m playwright install chromium
+for s in portal setup problem metrics providers capacity review_state chat machines_resources guidance themes; do
+  .venv/bin/python scripts/${s}_smoke.py
+done
+node scripts/omarchy_smoke.mjs
+```
+
+`constraints-tested-py312.txt` registra las versiones con las que pasan; úsalo como constraints en Python 3.12. La CI ejecuta las pruebas en Python 3.10, 3.12, 3.13 y 3.14, el linter, los tipos, los once recorridos de navegador y comprueba el contenido del wheel (`scripts/check_wheel.py`).
+
+La CLI anterior (`logsentinel run`) se conserva como compatibilidad; usa otra base y no es el motor del portal. Recibe la misma redacción de secretos y el mismo transporte seguro, pero no las mejoras de flujo del portal. El experimento de horarios SSH queda desactivado por defecto.
 
 ## About us
 

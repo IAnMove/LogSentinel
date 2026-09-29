@@ -20,7 +20,11 @@ def capture_http(monkeypatch):
         return httpx.Response(200, json={"choices": [{"message": {"content": "{}"}, "finish_reason": "stop"}], "message": {"content": "{}"}, "done": True, "done_reason": "stop"})
 
     original = httpx.AsyncClient
-    monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: original(transport=httpx.MockTransport(handler), **kwargs))
+    # The client brings its own checked transport; the fake replaces it.
+    monkeypatch.setattr(
+        httpx, "AsyncClient",
+        lambda **kwargs: original(transport=httpx.MockTransport(handler), **{k: v for k, v in kwargs.items() if k != "transport"}),
+    )
     return requests
 
 
@@ -54,7 +58,11 @@ async def test_backend_truncation_cannot_suppress_even_with_complete_json(monkey
     def handler(request):
         return httpx.Response(200, json={"choices": [{"message": {"content": raw}, "finish_reason": reason}], "message": {"content": raw}, "done": True, "done_reason": reason})
     original = httpx.AsyncClient
-    monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: original(transport=httpx.MockTransport(handler), **kwargs))
+    # The client brings its own checked transport; the fake replaces it.
+    monkeypatch.setattr(
+        httpx, "AsyncClient",
+        lambda **kwargs: original(transport=httpx.MockTransport(handler), **{k: v for k, v in kwargs.items() if k != "transport"}),
+    )
     client = LLMClient(LLMConfig(provider=provider, base_url="http://synthetic.invalid"))
     verdict = await client.analyze(Incident(service="synthetic", signature="synthetic", category_hint=Category.ANOMALY))
     assert verdict.alert_needed is True

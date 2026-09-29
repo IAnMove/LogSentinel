@@ -8,7 +8,6 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-import socket
 import tempfile
 import threading
 import time
@@ -55,15 +54,13 @@ with tempfile.TemporaryDirectory(prefix="sentinel-setup-") as tmp:
     original = ReviewClient.call
     ReviewClient.call = stub
     app = create_app(directory / "data")
-    with socket.socket() as sock:
-        sock.bind(("127.0.0.1", 0))
-        port = sock.getsockname()[1]
     server = uvicorn.Server(
-        uvicorn.Config(app, host="127.0.0.1", port=port, log_level="error")
+        uvicorn.Config(app, host="127.0.0.1", port=0, log_level="error")
     )
     thread = threading.Thread(target=server.run, daemon=True)
     thread.start()
     wait_until(lambda: server.started)
+    port = server.servers[0].sockets[0].getsockname()[1]
     errors = []
     try:
         with sync_playwright() as pw:

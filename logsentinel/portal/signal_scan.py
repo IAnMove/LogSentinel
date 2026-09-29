@@ -2,6 +2,7 @@
 
 import time
 
+from .freshness import event_instant, happened_recently, live_cutoff
 from .store import dumps
 
 VERSION = 1
@@ -21,13 +22,24 @@ def scan_originals(analyzer, machine_id, events):
                 (VERSION, dumps([e["id"] for e in events])),
             )}
         pending = [e for e in events if e["id"] not in done]
-        cutoff = time.time() - max(300, store.settings().interval_seconds * 2)
-        for live in (False, True):
-            selected = [e for e in pending if (e["received"] >= cutoff) == live]
+        now = time.time()
+        cutoff = live_cutoff(store.settings().interval_seconds, now)
+        # Live events alert normally. Late ones alert only for severe signals
+        # whose events are still recent, so a backlog cannot hide an OOM or an
+        # attack; older backfill stays silent.
+        for mode in (False, "severe", True):
+            selected = [
+                e for e in pending
+                if (
+                    True if e["received"] >= cutoff
+                    else "severe" if happened_recently(event_instant(e), now)
+                    else False
+                ) == mode
+            ]
             if not selected:
                 continue
-            apply_signals(analyzer, machine_id=machine_id, events=selected, notify=live)
-            apply_injection_signals(analyzer, machine_id=machine_id, events=selected, notify=live)
+            apply_signals(analyzer, machine_id=machine_id, events=selected, notify=mode)
+            apply_injection_signals(analyzer, machine_id=machine_id, events=selected, notify=mode is True)
             # Failed detection leaves the originals eligible. Finding appearances
             # and rolling hit identities make a replay safe after a crash.
             with store.connect() as db:
@@ -45,6 +57,12 @@ def scan_signals(analyzer, limit=5000):
     for machine in store.objects("machine"):
         if not store.monitoring_active(machine["id"]):
             continue
+        # Read before the query: an ingest that lands meanwhile changes the
+        # counter and the next pass looks again.
+        seq = f"{VERSION}:{store.meta('ingest_seq:' + machine['id']) or 0}"
+        idle = "signal_idle:" + machine["id"]
+        if store.meta(idle) == seq:
+            continue
         with store.connect() as db:
             ids = [r[0] for r in db.execute(
                 "SELECT e.id FROM events e LEFT JOIN signal_scans s ON s.event_id=e.id AND s.version=? "
@@ -56,6 +74,8 @@ def scan_signals(analyzer, limit=5000):
         try:
             if ids:
                 count += scan_originals(analyzer, machine["id"], store.events(ids=ids, limit=limit))
+            else:
+                store.set_meta(idle, seq)
             store.set_meta("detector_error:" + machine["id"], "")
         except Exception as exc:
             from .analysis import safe_error

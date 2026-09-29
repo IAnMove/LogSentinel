@@ -42,14 +42,6 @@ const channelNames = {
   webhook: t("Webhook genérico"),
   file: t("Archivo local"),
 };
-const esc = (s) =>
-  String(s ?? "").replace(
-    /[&<>"']/g,
-    (c) =>
-      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[
-        c
-      ],
-  );
 const stamp = (value) =>
     value
       ? new Date(Number(value) * 1000).toLocaleString(
@@ -67,7 +59,7 @@ function notice(text, error = false) {
   $("#notice").className = error ? "error" : "";
   $("#notice").textContent = text;
 }
-async function api(path, body, method) {
+async function api(path, body, method, timeout) {
   const options = {
     method: method || (body === undefined ? "GET" : "POST"),
     headers: { "X-LogSentinel": "portal" },
@@ -76,7 +68,24 @@ async function api(path, body, method) {
     options.headers["Content-Type"] = "application/json";
     options.body = JSON.stringify(body);
   }
-  const r = await fetch(path, options);
+  // Only pollers pass a timeout: a model test or a chat legitimately takes
+  // minutes, but a status poll that hangs must not pile up behind itself.
+  let timer;
+  if (timeout) {
+    const controller = new AbortController();
+    options.signal = controller.signal;
+    timer = setTimeout(() => controller.abort(), timeout);
+  }
+  let r;
+  try {
+    r = await fetch(path, options);
+  } catch (error) {
+    if (error.name === "AbortError")
+      throw Error(t("El portal no respondió a tiempo"));
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
   if (r.status === 401) {
     $("#login").hidden = false;
     $("#shell").hidden = true;
@@ -251,7 +260,11 @@ function navigate(v) {
   edit = null;
   offset = 0;
   $("#notice").hidden = true;
-  render();
+  // A person who moves to another view lands on its heading, so a screen reader
+  // starts reading the new page; background refreshes never move focus.
+  render()
+    .then(() => $("#page-title").focus({ preventScroll: true }))
+    .catch((e) => notice(e.message, true));
 }
 // Eighteen flat entries made the rail a list to read rather than a place to
 // aim at, and it scrolled on a laptop. Grouping puts what you check daily at
@@ -320,7 +333,10 @@ async function render() {
   // buttons cannot shift which one reads as active.
   $("#nav")
     .querySelectorAll("button[data-view]")
-    .forEach((n) => n.classList.toggle("active", n.dataset.view === view));
+    .forEach((n) => {
+      n.classList.toggle("active", n.dataset.view === view);
+      n.setAttribute("aria-current", n.dataset.view === view ? "page" : "false");
+    });
   if (["machine", "source", "destination", "rule"].includes(view))
     return objectView(root);
   if (view === "summary") return summary(root);
@@ -1829,19 +1845,49 @@ function backupView(root) {
 initLanguage();
 initHelp();
 refresh().catch(() => {});
-setInterval(async () => {
-  if (!$("#shell").hidden) {
+// A poll that never overlaps itself, sleeps while the tab is hidden and stops
+// when the view that started it is gone. setInterval alone kept polling a
+// hidden tab and started a new request before the last one had answered.
+function pollWhileVisible(alive, ms, task, onError) {
+  let running = false;
+  const wake = () => {
+    if (!document.hidden) tick();
+  };
+  const stop = () => {
+    clearInterval(timer);
+    document.removeEventListener("visibilitychange", wake);
+  };
+  async function tick() {
+    if (!alive()) return stop();
+    if (running || document.hidden) return;
+    running = true;
     try {
-      S.monitor = await api("/api/monitor");
-      drawMonitor(S.monitor);
-    } catch {
-      $("#monitor-status").textContent = t(
-        "Sin conexión con el portal. No se puede confirmar el estado del monitor.",
-      );
+      await task();
+    } catch (error) {
+      if (onError) onError(error);
+    } finally {
+      running = false;
     }
   }
-}, 5000);
-setInterval(() => {
+  const timer = setInterval(tick, ms);
+  document.addEventListener("visibilitychange", wake);
+  return stop;
+}
+pollWhileVisible(
+  () => true,
+  5000,
+  async () => {
+    if ($("#shell").hidden) return;
+    S.monitor = await api("/api/monitor", undefined, undefined, 10000);
+    drawMonitor(S.monitor);
+  },
+  () => {
+    $("#monitor-status").textContent = t(
+      "Sin conexión con el portal. No se puede confirmar el estado del monitor.",
+    );
+  },
+);
+pollWhileVisible(() => true, 15000, async () => {
   if ($("#shell").hidden || view !== "summary" || $("#modal").open) return;
   // This rebuilds the whole content section every 15 seconds. Keeping the data
   // live is worth it; losing the reader's place is not. Stay out of the way
@@ -1852,9 +1898,6 @@ setInterval(() => {
   const selection = document.getSelection();
   if (selection && !selection.isCollapsed) return;
   const top = window.scrollY;
-  refresh()
-    .then(() => {
-      if (window.scrollY !== top) window.scrollTo(0, top);
-    })
-    .catch((e) => notice(e.message, true));
-}, 15000);
+  await refresh();
+  if (window.scrollY !== top) window.scrollTo(0, top);
+}, (e) => notice(e.message, true));

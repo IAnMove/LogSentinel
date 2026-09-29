@@ -4,10 +4,10 @@ from logsentinel.portal.store import Store
 from logsentinel.portal.models import Machine
 from logsentinel.portal.analysis import (
     Analyzer,
-    compact,
     interleave_services,
     grouping_key,
 )
+from logsentinel.portal.compaction import compact
 from logsentinel.portal.rules import redact
 
 
@@ -354,3 +354,47 @@ def test_signal_rules_are_loaded_once_per_scan(data, monkeypatch):
     monkeypatch.setattr(store, "objects", counted)
     apply_signals(Analyzer(store), machine_id=machine, events=store.events(limit=5000))
     assert reads == ["rule"]
+
+
+def test_triage_prompt_explains_every_sensitivity_level_the_setting_offers():
+    from typing import get_args
+
+    from logsentinel.portal.analysis import TRIAGE_SYSTEM
+    from logsentinel.portal.models import Settings
+
+    levels = get_args(Settings.model_fields["sensitivity"].annotation)
+    assert levels
+    for level in levels:
+        assert level + " -" in TRIAGE_SYSTEM, level
+
+
+@pytest.mark.parametrize(
+    "mode, expected",
+    [
+        ("all", {"a", "b", "c", "d"}),
+        ("priority", {"a", "c"}),
+        ("adaptive", {"a", "c"}),
+        ("keywords", {"c"}),
+    ],
+)
+def test_trigger_selection_by_mode_keeps_every_original(mode, expected):
+    events = [
+        {"id": "a", "message": "routine", "priority": 3},
+        {"id": "b", "message": "routine", "priority": 6},
+        {"id": "c", "message": "disk failure", "priority": 6},
+        {"id": "d", "message": "routine"},
+    ]
+    source = {"analysis_mode": mode, "trigger_terms": "failure", "priority_ceiling": 4}
+    triggers, skipped = Analyzer._trigger_events(events, source)
+    assert {e["id"] for e in triggers} == expected
+    assert set(skipped) == {"a", "b", "c", "d"} - expected  # nothing is dropped, only left for later
+
+
+def test_trigger_selection_is_linear_in_the_batch():
+    import time
+
+    events = [{"id": str(i), "message": "x" * 200 + str(i), "priority": 6} for i in range(4000)]
+    started = time.perf_counter()
+    triggers, skipped = Analyzer._trigger_events(events, {"analysis_mode": "keywords", "trigger_terms": "zzz"})
+    assert triggers == [] and len(skipped) == 4000
+    assert time.perf_counter() - started < 2

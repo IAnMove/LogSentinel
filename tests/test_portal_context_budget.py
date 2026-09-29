@@ -68,5 +68,5 @@ async def test_fragment_context_split_keeps_complete_coverage_obligation(queue):
         rows = db.execute("SELECT start,end,covered FROM review_parts ORDER BY start").fetchall()
         assert db.execute("SELECT count(*) FROM review_parts WHERE job_id=?", (work[0],)).fetchone()[0] == 0
     assert rows[0]["start"] == 0 and rows[-1]["end"] == 3000
-    assert all(a["end"] == b["start"] for a, b in zip(rows, rows[1:]))
+    assert all(a["end"] == b["start"] for a, b in zip(rows, rows[1:], strict=False))
     assert all(r["covered"] == 0 for r in rows)

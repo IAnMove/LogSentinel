@@ -5,7 +5,6 @@ notification service is contacted.
 """
 import json
 from pathlib import Path
-import socket
 import sys
 import tempfile
 import threading
@@ -38,14 +37,18 @@ with tempfile.TemporaryDirectory(prefix="sentinel-guidance-") as directory:
             created = now - 600 + i * 110
             db.execute("INSERT INTO jobs VALUES(?,?,?,?,?,?,?,?,NULL)", (f"job{i}", machine, "[]", "done", created, created + 100, 1, cfg.model_dump_json()))
             db.execute("INSERT INTO usage VALUES(?,?,?,?,?,?,?,?,?,?,?)", (f"usage{i}", f"job{i}", machine, "[]", "analysis", created + 100, 100, 10, 100, "ok", json.dumps(dict(load_seconds=80, prompt_eval_seconds=2, eval_seconds=3))))
-    with socket.socket() as sock:
-        sock.bind(("127.0.0.1", 0))
-        port = sock.getsockname()[1]
-    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="error"))
+    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=0, log_level="error"))
     thread = threading.Thread(target=server.run, daemon=True)
     thread.start()
-    while not server.started:
+    for _ in range(400):
+        if server.started:
+            break
         time.sleep(.05)
+    else:
+        raise SystemExit("The portal did not start")
+    # uvicorn bound port 0 itself, so no other process can take the port between
+    # choosing it and serving on it.
+    port = server.servers[0].sockets[0].getsockname()[1]
     errors, writes = [], []
     try:
         with sync_playwright() as pw:

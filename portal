@@ -29,6 +29,14 @@ if [[ ! -x "$venv/bin/python" ]]; then
   python3 -m venv "$venv" || need_python
 fi
 
-"$venv/bin/python" -m pip install -q -U pip
-"$venv/bin/python" -m pip install -e "$root"
+# Install only when the dependencies may have changed. An editable install
+# already follows edits to the code, and reaching for the package index on every
+# start made the portal need the network just to open, and updated pip
+# unasked each time.
+stamp="$venv/.installed-$(sha256sum "$root/pyproject.toml" | cut -c1-16)"
+if [[ ! -e "$stamp" ]]; then
+  "$venv/bin/python" -m pip install -q -e "$root"
+  rm -f "$venv"/.installed-*
+  touch "$stamp"
+fi
 exec "$venv/bin/logsentinel" portal "$@"

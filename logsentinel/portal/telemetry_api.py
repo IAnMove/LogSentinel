@@ -118,7 +118,7 @@ def register_metrics_ingest(app, telemetry):
                 accepted += await asyncio.to_thread(telemetry.receive, id, sample)
                 acknowledged.append(sample.id)
         except OSError:
-            raise HTTPException(507, "Storage full; retain and retry these samples")
+            raise HTTPException(507, "Storage full; retain and retry these samples") from None
         return {
             "status": "durable",
             "accepted": accepted,

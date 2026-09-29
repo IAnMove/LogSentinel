@@ -7,16 +7,17 @@ exposing the panel that can read and change everything.
 """
 
 from __future__ import annotations
+import asyncio
 import hashlib
 import hmac
 import json
 import time
 
 from fastapi import FastAPI, Request, HTTPException
-from fastapi.responses import JSONResponse
 
+from .limits import BodyLimit
 from .store import dumps
-from .collect import normalize
+from .collect import machine_zone, normalize
 from .enroll import register_enrollment
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
@@ -33,11 +34,6 @@ class SenderHeartbeat(BaseModel):
     disk_free_bytes: int = Field(default=0, ge=0, le=10**15)
     io_pressure_percent: float | None = Field(default=None, ge=0, le=100)
     build: str = Field(default="", max_length=80, pattern=r"^[A-Za-z0-9_.-]*$")
-
-
-# Senders batch up to 500 events of 256 KB, but a well-behaved batch stays far
-# below this; it bounds what one unauthenticated request can make us buffer.
-MAX_REQUEST_BYTES = 4_000_000
 
 
 def register_ingest(app, store):
@@ -88,16 +84,21 @@ def register_ingest(app, store):
     def sender_control(id: str, request: Request):
         return control_state(push_source(id, request, allow_paused=True))
 
+    # The store is synchronous SQLite: keep it off the event loop that also
+    # accepts every other sender's connection.
     @app.post("/heartbeat/{id}")
     async def heartbeat(id: str, request: Request):
-        source = push_source(id, request, allow_paused=True)
+        source = await asyncio.to_thread(push_source, id, request, True)
         body = await request.json()
         try:
             state = SenderHeartbeat.model_validate(body)
         except ValidationError:
             raise HTTPException(
                 400, "Send ok (boolean) and pending (non-negative integer)"
-            )
+            ) from None
+        return await asyncio.to_thread(record_heartbeat, id, source, body, state)
+
+    def record_heartbeat(id, source, body, state):
         control = control_state(source)
         old = json.loads(store.meta("health:" + id) or "{}")
         old.update(
@@ -124,7 +125,9 @@ def register_ingest(app, store):
 
     @app.post("/ingest/{id}")
     async def ingest(id: str, request: Request):
-        source = push_source(id, request)
+        # Authenticate before the body is read: an unknown token never makes
+        # this listener buffer what the client is sending.
+        source = await asyncio.to_thread(push_source, id, request)
         body = await request.json()
         if not isinstance(body, dict):
             raise HTTPException(400, "Send an events object")
@@ -135,6 +138,7 @@ def register_ingest(app, store):
         if not isinstance(items, list) or not 1 <= len(items) <= 500:
             raise HTTPException(400, "Send 1–500 events")
         entries = []
+        zone = await asyncio.to_thread(machine_zone, store, source)
         for item in items:
             if (
                 not isinstance(item, dict)
@@ -158,7 +162,10 @@ def register_ingest(app, store):
                     raise HTTPException(400, "Invalid journal event")
                 entries.append(dict(entry.model_dump(mode="json"), origin=item["id"]))
             else:
-                entries.append(normalize(item["raw"], "remote", item["id"]))
+                entries.append(normalize(item["raw"], "remote", item["id"], zone))
+        return await asyncio.to_thread(persist, id, source, items, entries)
+
+    def persist(id, source, items, entries):
         offered = sum(len(item["raw"].encode()) for item in items)
         retry_after = store.charge_sender_quota(
             source["id"], offered, len(items), store.settings()
@@ -172,7 +179,7 @@ def register_ingest(app, store):
         try:
             count = store.ingest(source, entries)
         except OSError:
-            raise HTTPException(507, "Storage full; retain and retry these events")
+            raise HTTPException(507, "Storage full; retain and retry these events") from None
         old_health = json.loads(store.meta("health:" + id) or "{}")
         old_health.update(checked=time.time(), new_events=count)
         if "heartbeat" not in old_health:
@@ -196,22 +203,15 @@ def create_ingest_app(store, telemetry=None):
     )
     app.state.store = store
 
+    # Senders batch up to 500 events of 256 KB, but a well-behaved batch stays
+    # far below the limit, which bounds what any one request can make us hold.
+    app.add_middleware(BodyLimit)
+
     @app.middleware("http")
     async def guard(request, call_next):
         # No Host check here: this listener is meant to be reachable by name or
         # address. Authentication is the per-source token, and TLS is the
         # operator's responsibility on the listener itself.
-        if request.method in ("POST", "PUT", "PATCH"):
-            parts = []
-            size = 0
-            async for chunk in request.stream():
-                size += len(chunk)
-                if size > MAX_REQUEST_BYTES:
-                    return JSONResponse(
-                        {"detail": "Request exceeds 4 MB"}, status_code=413
-                    )
-                parts.append(chunk)
-            request._body = b"".join(parts)
         response = await call_next(request)
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["Cache-Control"] = "no-store"

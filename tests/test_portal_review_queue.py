@@ -14,7 +14,7 @@ from logsentinel.portal.monitor import Monitor
 from logsentinel.portal.public_static import PublicStaticFiles
 from logsentinel.portal.review_queue import ReviewQueue
 from logsentinel.portal.store import Store, dumps
-from tests.test_portal_api import client, machine_source
+from helpers import machine_source
 
 
 @pytest.fixture

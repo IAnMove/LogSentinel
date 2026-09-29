@@ -2,16 +2,20 @@
 
 from __future__ import annotations
 import gzip
+import io
 import bz2
 import lzma
+import zlib
 import hashlib
 import json
 import os
 import shutil
-import subprocess
 import time
 import threading
+from datetime import timezone
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from .journal_stream import read_journal
+from .logs import report
 from contextlib import nullcontext
 from pathlib import Path
 import httpx
@@ -22,9 +26,80 @@ from .store import dumps
 from .source_paths import open_source, validate_source_handle, validate_source_path, UnsafeSourcePath
 
 MAX_LINE = 256_000
+MAX_FOLDER_FILES = 100
+# An xz header can ask the decoder for a gigabyte of dictionary; an archive that
+# needs more than this to be read is refused rather than allowed to exhaust memory.
+XZ_MEMORY_LIMIT = 128 * 1024 * 1024
 MAX_ARCHIVE_BYTES = 64 * 1024 * 1024
 MAX_EXPANDED_BYTES = 128 * 1024 * 1024
 HASH_CHUNK = 1024 * 1024
+
+
+class LimitedXZ(io.RawIOBase):
+    """Read an xz file through decoders with a memory ceiling, seekably.
+
+    lzma.LZMAFile has no such limit; LZMADecompressor does. Like LZMAFile this
+    reads concatenated streams and supports seek (backwards by starting over)."""
+
+    def __init__(self, raw):
+        self.raw = raw
+        self.position = 0
+        self._restart()
+
+    def _restart(self):
+        self.raw.seek(0)
+        self.decoder = lzma.LZMADecompressor(memlimit=XZ_MEMORY_LIMIT)
+        self.pending = b""
+        self.position = 0
+
+    def readable(self):
+        return True
+
+    def seekable(self):
+        return True
+
+    def tell(self):
+        return self.position
+
+    def seek(self, offset, whence=io.SEEK_SET):
+        if whence != io.SEEK_SET:
+            raise io.UnsupportedOperation("only absolute seeks are supported")
+        if offset < self.position:
+            self._restart()
+        while self.position < offset:
+            if not self.read(min(1 << 20, offset - self.position)):
+                break
+        return self.position
+
+    def readinto(self, buffer):
+        while not self.pending:
+            if self.decoder.eof:
+                # A finished stream may be followed by zero padding and another
+                # stream; only a clean end of the file ends the data.
+                rest = self.decoder.unused_data
+                while not rest.strip(b"\0"):
+                    rest = self.raw.read(64 * 1024)
+                    if not rest:
+                        return 0
+                self.decoder = lzma.LZMADecompressor(memlimit=XZ_MEMORY_LIMIT)
+                chunk = rest.lstrip(b"\0")
+            elif self.decoder.needs_input:
+                chunk = self.raw.read(64 * 1024)
+                if not chunk:
+                    raise EOFError("Compressed file ended before the end-of-stream marker")
+            else:
+                chunk = b""
+            self.pending = self.decoder.decompress(chunk, max_length=len(buffer))
+        n = min(len(buffer), len(self.pending))
+        buffer[:n] = self.pending[:n]
+        self.pending = self.pending[n:]
+        self.position += n
+        return n
+
+
+def open_xz(handle):
+    handle.seek(0)
+    return io.BufferedReader(LimitedXZ(handle))
 
 
 def file_digest(path, handle=None):
@@ -83,8 +158,17 @@ def discovery():
     }
 
 
-def normalize(line, path, origin):
-    entry = FileTailerCollector.parse_log_line(line, source_path=path)
+def machine_zone(store, source):
+    """Timezone of the machine that wrote a source, for lines that carry none."""
+    machine = store.get("machine", source["machine_id"]) or {}
+    try:
+        return ZoneInfo(machine.get("timezone") or "UTC")
+    except (ZoneInfoNotFoundError, ValueError):
+        return timezone.utc
+
+
+def normalize(line, path, origin, tz=None):
+    entry = FileTailerCollector.parse_log_line(line, source_path=path, tz=tz)
     return dict(entry.model_dump(mode="json"), origin=origin)
 
 
@@ -135,13 +219,15 @@ class Collector:
                 return 0
             else:
                 root = validate_source_path(source["path"], self.store.directory)
-                paths = (
-                    [root]
-                    if source["kind"] == "file"
-                    else sorted(root.glob(source["pattern"]))[:100]
-                )
+                skipped = 0
+                if source["kind"] == "file":
+                    paths = [root]
+                else:
+                    matches = self.newest_first(root, source["pattern"])
+                    paths, skipped = matches[:MAX_FOLDER_FILES], max(0, len(matches) - MAX_FOLDER_FILES)
                 if not paths:
                     raise OSError("No matching readable files")
+                failures = []
                 for path in paths:
                     if source["kind"] == "folder" and (
                         path.is_symlink() or not path.resolve().is_relative_to(root)
@@ -157,15 +243,28 @@ class Collector:
                     except UnsafeSourcePath:
                         self.store.metric(source["id"], "blocked_source_files", 1)
                         continue
+                    except Exception as exc:
+                        # One unreadable file must not stop the ones after it.
+                        if strict or source["kind"] == "file":
+                            raise
+                        failures.append((path.name, str(exc)[:100]))
+                        self.store.metric(source["id"], "unreadable_source_files", 1)
+                if source["kind"] == "folder":
+                    self.release_vanished(source, set(paths))
                 for item in list(self.retired):
                     if item["source"] != source["id"]:
                         continue
-                    total += self.file(
-                        source,
-                        item["path"],
-                        handle=item["handle"],
-                        cursor_key=item["key"],
-                    )
+                    try:
+                        total += self.file(
+                            source,
+                            item["path"],
+                            handle=item["handle"],
+                            cursor_key=item["key"],
+                        )
+                    except Exception as exc:
+                        if strict:
+                            raise
+                        failures.append((Path(item["path"]).name, str(exc)[:100]))
                     size = os.fstat(item["handle"].fileno()).st_size
                     if size != item["size"]:
                         item.update(size=size, quiet=time.monotonic())
@@ -173,6 +272,30 @@ class Collector:
                         item["handle"].close()
                         self.retired.remove(item)
                         self.store.metric(source["id"], "rotation_watch_closed", 1)
+                problems = []
+                if failures:
+                    problems.append(
+                        f"{len(failures)} of {len(paths)} files could not be read ("
+                        + "; ".join(f"{name}: {why}" for name, why in failures[:3])
+                        + ")"
+                    )
+                if skipped:
+                    problems.append(
+                        f"{skipped} older matching files are not read: only the newest {MAX_FOLDER_FILES} are"
+                    )
+                if problems and not strict:
+                    self.store.set_meta(
+                        "health:" + source["id"],
+                        dumps(
+                            {
+                                "status": "error",
+                                "checked": time.time(),
+                                "new_events": total,
+                                "error": "; ".join(problems)[:300],
+                            }
+                        ),
+                    )
+                    return total
             if strict:
                 return total
             self.store.set_meta(
@@ -188,7 +311,49 @@ class Collector:
                     {"status": "error", "checked": time.time(), "error": str(exc)[:300]}
                 ),
             )
+            # The interface shows the message; the log keeps where it came from.
+            report("source " + str(source.get("name", source["id"])), exc)
         return total
+
+    @staticmethod
+    def newest_first(root, pattern):
+        """Fresh files first, so a crowded folder never hides the newest logs."""
+
+        def age(path):
+            try:
+                return -path.stat().st_mtime_ns
+            except OSError:
+                return 0
+
+        return sorted(root.glob(pattern), key=lambda p: (age(p), str(p)))
+
+    def retire(self, source, path, handle):
+        """Keep draining a file that was rotated or removed, then let it go."""
+        previous = os.fstat(handle.fileno())
+        retired_key = (
+            str(path) + "#rotated:" + str(previous.st_dev) + ":" + str(previous.st_ino)
+        )
+        cursor = self.store.cursor(source["id"], str(path))
+        if cursor:
+            self.store.ingest(source, [], retired_key, cursor)
+        self.retired.append(
+            {
+                "source": source["id"],
+                "path": path,
+                "key": retired_key,
+                "handle": handle,
+                "size": previous.st_size,
+                "quiet": time.monotonic(),
+            }
+        )
+
+    def release_vanished(self, source, present):
+        """A deleted log left its handle open for good; hand it to the
+        rotation watch, which closes it once the file stays quiet."""
+        for key in [k for k in self.handles if k[0] == source["id"]]:
+            path = Path(key[1])
+            if path not in present and not path.exists():
+                self.retire(source, path, self.handles.pop(key))
 
     def plain(self, source, path):
         key = (source["id"], str(path))
@@ -200,26 +365,7 @@ class Collector:
         if handle and current:
             previous = os.fstat(handle.fileno())
             if (previous.st_dev, previous.st_ino) != (current.st_dev, current.st_ino):
-                retired_key = (
-                    str(path)
-                    + "#rotated:"
-                    + str(previous.st_dev)
-                    + ":"
-                    + str(previous.st_ino)
-                )
-                cursor = self.store.cursor(source["id"], str(path))
-                if cursor:
-                    self.store.ingest(source, [], retired_key, cursor)
-                self.retired.append(
-                    {
-                        "source": source["id"],
-                        "path": path,
-                        "key": retired_key,
-                        "handle": handle,
-                        "size": previous.st_size,
-                        "quiet": time.monotonic(),
-                    }
-                )
+                self.retire(source, path, handle)
                 del self.handles[key]
                 handle = None
         if handle is None:
@@ -262,6 +408,16 @@ class Collector:
                 return 0
             if old.get("done"):
                 return 0
+            if not source.get("history") and not old.get("offset"):
+                # An archive is past log. Without "import history" it is
+                # recorded as seen, as a plain file's existing lines are; an
+                # archive made by rotating a file already read would otherwise
+                # be imported a second time. Enabling history later imports it.
+                if not old.get("skipped"):
+                    self.store.ingest(
+                        source, [], key, {"stamp": stamp, "stable": True, "skipped": True}
+                    )
+                return 0
             # A new archive is imported only after an unchanged polling interval.
             if stat.st_size > MAX_ARCHIVE_BYTES:
                 raise ValueError("Archive exceeds 64 MiB input limit")
@@ -280,7 +436,9 @@ class Collector:
                 handle.seek(0)
                 if path.suffix == ".gz":
                     return gzip.GzipFile(fileobj=handle, mode="rb")
-                return {".xz": lzma.LZMAFile, ".bz2": bz2.BZ2File}[path.suffix](handle, "rb")
+                if path.suffix == ".xz":
+                    return open_xz(handle)
+                return bz2.BZ2File(handle, "rb")
         else:
             generation = old.get(
                 "generation", f"{stat.st_dev}:{stat.st_ino}:{stat.st_ctime_ns}"
@@ -303,40 +461,52 @@ class Collector:
         entries = []
         used = 0
         done = False
-        with opener(path, "rb") as f:
-            f.seek(offset)
-            while used < source["max_batch_bytes"] and len(entries) < 1000:
-                begin = f.tell()
-                if compressed and begin >= MAX_EXPANDED_BYTES:
-                    done = True
-                    break
-                line = f.readline(MAX_LINE + 1)
-                if not line:
-                    done = True
-                    break
-                if len(line) > MAX_LINE:
-                    raise ValueError(
-                        "Event exceeds 256 KB; change source format or explicit source limit policy"
-                    )
-                if compressed and begin + len(line) > MAX_EXPANDED_BYTES:
-                    done = True
-                    f.seek(begin)
-                    break
-                if not line.endswith(b"\n") and not compressed:
-                    f.seek(begin)
-                    break
-                text = line.decode("utf-8", errors="replace").rstrip("\r\n")
-                if source.get("multiline") and text.startswith((" ", "\t")) and entries:
-                    entries[-1]["message"] += "\n" + text
-                    entries[-1]["raw"] += "\n" + text
-                elif text:
-                    entries.append(normalize(text, key, f"{generation}:{begin}"))
-                used += len(line)
-            end = f.tell()
-            tail = ""
-            if not compressed:
-                f.seek(max(0, end - 64))
-                tail = hashlib.sha256(f.read(min(64, end))).hexdigest()
+        zone = machine_zone(self.store, source)
+        try:
+            with opener(path, "rb") as f:
+                f.seek(offset)
+                while used < source["max_batch_bytes"] and len(entries) < 1000:
+                    begin = f.tell()
+                    if compressed and begin >= MAX_EXPANDED_BYTES:
+                        done = True
+                        break
+                    line = f.readline(MAX_LINE + 1)
+                    if not line:
+                        done = True
+                        break
+                    if len(line) > MAX_LINE:
+                        raise ValueError(
+                            "Event exceeds 256 KB; change source format or explicit source limit policy"
+                        )
+                    if compressed and begin + len(line) > MAX_EXPANDED_BYTES:
+                        done = True
+                        f.seek(begin)
+                        break
+                    if not line.endswith(b"\n") and not compressed:
+                        f.seek(begin)
+                        break
+                    text = line.decode("utf-8", errors="replace").rstrip("\r\n")
+                    if source.get("multiline") and text.startswith((" ", "\t")) and entries:
+                        entries[-1]["message"] += "\n" + text
+                        entries[-1]["raw"] += "\n" + text
+                    elif text:
+                        entries.append(normalize(text, key, f"{generation}:{begin}", zone))
+                    used += len(line)
+                end = f.tell()
+                tail = ""
+                if not compressed:
+                    f.seek(max(0, end - 64))
+                    tail = hashlib.sha256(f.read(min(64, end))).hexdigest()
+        except (EOFError, lzma.LZMAError, zlib.error, gzip.BadGzipFile) as exc:
+            # A cut-off or damaged archive is a fact about that file, not a
+            # crash: readers treat ValueError as "this source cannot be read".
+            if isinstance(exc, lzma.LZMAError) and "emory" in str(exc):
+                raise ValueError(
+                    f"Compressed source needs more than {XZ_MEMORY_LIMIT >> 20} MiB of memory to read"
+                ) from None
+            raise ValueError(
+                "Compressed source is truncated or corrupt: " + type(exc).__name__
+            ) from None
         cursor = {
             "identity": sig,
             "generation": generation,
@@ -351,7 +521,9 @@ class Collector:
 
     def journal(self, source):
         cursor = self.store.cursor(source["id"], "journal") or {}
-        cmd = ["journalctl", "--no-pager", "-o", "json"]
+        # Without --all, journalctl writes any field over 4096 bytes as null,
+        # and a record whose MESSAGE is null used to be dropped without a trace.
+        cmd = ["journalctl", "--no-pager", "--all", "-o", "json"]
         if cursor.get("cursor"):
             # Include the saved record to verify that retention did not erase it.
             cmd += ["--cursor", cursor["cursor"]]
@@ -399,6 +571,8 @@ class Collector:
                 entries.append(
                     dict(e.model_dump(mode="json"), origin="journal:" + last)
                 )
+            elif data.get("MESSAGE") is None:
+                skipped += 1
         if skipped:
             self.store.metric(source["id"], "journal_skipped", skipped)
         if limited and not last:

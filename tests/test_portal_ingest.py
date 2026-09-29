@@ -191,3 +191,98 @@ def test_reception_accepts_machine_metrics_without_exposing_configuration(pair):
     assert reception.post("/ingest-metrics/" + machine, json=body).status_code == 401
     latest = panel.get("/api/telemetry/" + machine).json()["latest"]
     assert latest["values"]["cpu_pct"] == 12
+
+
+def test_declared_oversize_is_refused_by_both_listeners_without_a_token(pair):
+    panel, reception, source, *_ = pair
+    body = b"x" * 4_100_000
+    assert reception.post("/ingest/" + source, content=body).status_code == 413
+    assert panel.post("/ingest/" + source, content=body).status_code == 413
+
+
+def test_chunked_oversize_is_refused_while_it_streams(pair):
+    _, reception, source, token, _ = pair
+
+    def chunks():
+        for _ in range(50):
+            yield b"x" * 100_000
+
+    result = reception.post(
+        "/ingest/" + source, content=chunks(), headers={"Authorization": "Bearer " + token}
+    )
+    assert result.status_code == 413
+
+
+@pytest.mark.asyncio
+async def test_a_wrong_token_is_rejected_before_any_of_the_body_is_read(tmp_path):
+    from logsentinel.portal.store import Store
+
+    app = create_ingest_app(Store(tmp_path))
+    received = 0
+
+    async def receive():
+        nonlocal received
+        received += 1
+        return {"type": "http.request", "body": b"x" * 65536, "more_body": True}
+
+    sent = []
+
+    async def send(message):
+        sent.append(message)
+
+    scope = {
+        "type": "http",
+        "asgi": {"version": "3.0"},
+        "http_version": "1.1",
+        "method": "POST",
+        "scheme": "https",
+        "path": "/ingest/unknown-source",
+        "raw_path": b"/ingest/unknown-source",
+        "query_string": b"",
+        "headers": [(b"host", b"sentinel.invalid"), (b"authorization", b"Bearer wrong")],
+        "client": ("203.0.113.9", 4000),
+        "server": ("sentinel.invalid", 443),
+    }
+    await app(scope, receive, send)
+    status = next(m["status"] for m in sent if m["type"] == "http.response.start")
+    assert status == 401
+    assert received <= 2
+
+
+def test_login_with_non_ascii_key_is_a_plain_rejection(tmp_path):
+    app = create_app(tmp_path, background=False)
+    with TestClient(app, base_url="http://localhost") as c:
+        c.headers["X-LogSentinel"] = "portal"
+        assert c.post("/login", json={"token": "clave-ñandú-€"}).status_code == 401
+
+
+def test_successful_logins_do_not_spend_the_failure_budget(tmp_path):
+    app = create_app(tmp_path, background=False)
+    key = app.state.store.meta("admin_token")
+    with TestClient(app, base_url="http://localhost") as c:
+        c.headers["X-LogSentinel"] = "portal"
+        assert [c.post("/login", json={"token": key}).status_code for _ in range(15)] == [200] * 15
+        assert [c.post("/login", json={"token": "wrong"}).status_code for _ in range(11)] == [401] * 10 + [429]
+        # The lockout applies to guesses; it must not be bypassable by the right key.
+        assert c.post("/login", json={"token": key}).status_code == 429
+
+
+def test_reception_listener_bounds_its_concurrent_connections(tmp_path, monkeypatch):
+    import uvicorn
+
+    seen = []
+    monkeypatch.setattr(uvicorn, "Server", lambda config: seen.append(config) or None)
+    monkeypatch.setattr(cli.asyncio, "run", lambda coroutine: coroutine.close())
+    cert = tmp_path / "cert.pem"
+    key = tmp_path / "key.pem"
+    cert.write_text("x")
+    key.write_text("x")
+    result = CliRunner().invoke(
+        cli.app,
+        ["portal", "--data-dir", str(tmp_path / "data"), "--ingest-listen", "127.0.0.1:8767",
+         "--tls-cert", str(cert), "--tls-key", str(key)],
+    )
+    assert result.exit_code == 0, result.output
+    reception = next(c for c in seen if c.port == 8767)
+    assert reception.limit_concurrency == cli.INGEST_MAX_CONNECTIONS
+    assert next(c for c in seen if c.port == 8765).limit_concurrency is None

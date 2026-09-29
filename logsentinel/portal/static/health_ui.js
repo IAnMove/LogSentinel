@@ -137,8 +137,10 @@ async function healthView(root) {
   };
   config.append(form);
   root.append(config);
-  const poll = setInterval(() => {
-    if (!root.isConnected || view !== "health") return clearInterval(poll);
-    update().catch((error) => notice(error.message, true));
-  }, 5000);
+  pollWhileVisible(
+    () => root.isConnected && view === "health",
+    5000,
+    update,
+    (error) => notice(error.message, true),
+  );
 }

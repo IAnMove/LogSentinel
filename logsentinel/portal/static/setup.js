@@ -6,7 +6,6 @@ let setupStep = 0,
   monitorDetailsOpen = false;
 
 function statusLabel(key) {
-  if (key === "MEDIUM") return locale === "es" ? "Media" : "Medium";
   const labels = {
     LOW: "Baja",
     MEDIUM: "Media",

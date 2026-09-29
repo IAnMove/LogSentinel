@@ -3,11 +3,12 @@
 from __future__ import annotations
 import regex
 import hashlib
-from datetime import datetime
 
 from .store import dumps
 
+from .freshness import SEVERE, event_instant
 from .rules import excluded
+from .ssh_notifications import is_sshd
 
 
 SIGNALS = (
@@ -40,7 +41,8 @@ SIGNALS = (
         "min": 1,
         "severity": "MEDIUM",
         "category": "authentication",
-        "pattern": r"(?i)user NOT in sudoers|authentication failure;.+\bsudo\b|sudo:.*incorrect password attempts",
+        # Every gap is bounded: an unbounded ".+" is quadratic on a hostile line.
+        "pattern": r"(?i)user NOT in sudoers|\bsudo\b[^\n]{0,200}?authentication failure|authentication failure;[^\n]{0,400}?\bsudo\b|sudo:[^\n]{0,300}?incorrect password attempts",
         "title": ("Autenticación sudo rechazada", "sudo authentication rejected"),
         "summary": (
             "Un intento de privilegio elevado fue rechazado. Puede ser un error o un abuso.",
@@ -54,7 +56,7 @@ SIGNALS = (
         "severity": "HIGH",
         "category": "authentication",
         "pattern": r"(?i)failed password|authentication failure|invalid user|disconnected by authenticating user",
-        "service": "sshd",
+        "service": is_sshd,
         "title": ("Varios rechazos de autenticación SSH", "Repeated SSH authentication rejections"),
         "summary": (
             "Hay varios fallos de SSH en una ventana de cinco minutos. No prueba un compromiso.",
@@ -91,16 +93,6 @@ def signal_batches(analyzer, limit, machine_id=None, events=None):
             yield machine["id"], pending
 
 
-def event_instant(event):
-    try:
-        value = datetime.fromisoformat(str(event.get("timestamp") or "").replace("Z", "+00:00"))
-        if value.tzinfo is not None:
-            return value.timestamp()
-    except (ValueError, OverflowError):
-        pass
-    return event["received"]
-
-
 def window_evidence(store, machine_id, spec, hits, rules):
     """Retain hit identities so model batches and restarts cannot reset a burst."""
     policy = hashlib.sha256(dumps([r for r in rules if r["action"] == "exclude"]).encode()).hexdigest()
@@ -113,7 +105,7 @@ def window_evidence(store, machine_id, spec, hits, rules):
         with store.connect() as db:
             db.executemany(
                 "INSERT OR REPLACE INTO signal_hits VALUES(?,?,?,?,?,?)",
-                [(spec["id"], e["id"], machine_id, source, at, policy) for e, at in zip(incoming, instants)],
+                [(spec["id"], e["id"], machine_id, source, at, policy) for e, at in zip(incoming, instants, strict=True)],
             )
             rows = db.execute(
                 "SELECT event_id,instant FROM signal_hits WHERE signal=? AND machine_id=? AND source_id=? AND policy=? AND instant BETWEEN ? AND ? ORDER BY instant,event_id",
@@ -142,40 +134,50 @@ def window_evidence(store, machine_id, spec, hits, rules):
 
 
 def apply_signals(analyzer, limit=500, *, machine_id=None, events=None, notify=True):
+    """notify is True, False, or "severe": only HIGH/CRITICAL signals may alert."""
     store = analyzer.store
     spanish = store.settings().language == "es"
     created = 0
     rules = store.objects("rule")
-    for machine_id, events in signal_batches(analyzer, limit, machine_id, events):
-        if not events:
+    for batch_machine, batch in signal_batches(analyzer, limit, machine_id, events):
+        if not batch:
             continue
-        eligible = [e for e in events if not excluded(store, e, rules)]
+        eligible = [e for e in batch if not excluded(store, e, rules)]
         for spec in SIGNALS:
-            hits = [
-                e
-                for e in eligible
-                if regex.search(spec["pattern"], e.get("message") or "", timeout=0.02)
-                and (
-                    not spec.get("service")
-                    or (e.get("service") or "").casefold()
-                    == spec["service"].casefold()
-                )
-            ]
+            hits = []
+            slow = 0
+            for e in eligible:
+                if spec.get("service") and not spec["service"](e.get("service")):
+                    continue
+                try:
+                    found = regex.search(spec["pattern"], e.get("message") or "", timeout=0.02)
+                except TimeoutError:
+                    # A hostile line must not stop detection for its machine or
+                    # be retried forever; the model still receives the original.
+                    slow += 1
+                    continue
+                if found:
+                    hits.append(e)
+            if slow:
+                total = int(store.meta("detector_slow_lines") or 0) + slow
+                store.set_meta("detector_slow_lines", str(total))
             batches = (
-                window_evidence(store, machine_id, spec, hits, rules)
+                window_evidence(store, batch_machine, spec, hits, rules)
                 if spec.get("window_seconds") and hits
                 else [("", hits)]
             )
             for source_id, evidence in batches:
                 if len(evidence) < spec["min"]:
                     continue
-                save_signal(analyzer, machine_id, spec, evidence, spanish, source_id, notify=notify)
+                save_signal(analyzer, batch_machine, spec, evidence, spanish, source_id, notify=notify)
                 created += 1
     return created
 
 
 def save_signal(analyzer, machine_id, spec, hits, spanish, source_id="", *, notify=True):
     idx = 0 if spanish else 1
+    if notify == "severe":
+        notify = spec["severity"] in SEVERE
     analyzer.save_finding(
         machine_id,
         {

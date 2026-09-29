@@ -576,7 +576,11 @@ Object.assign(translations, {
   "Mediciones activas": "Measurements active",
   "Mediciones desactivadas": "Measurements disabled",
   "Esperando primera muestra": "Waiting for the first sample",
-  "Sin datos recientes": "No recent measurements",
+  "Sin mediciones recientes": "No recent measurements",
+  Copiado: "Copied",
+  "El portal no respondió a tiempo": "The portal did not answer in time",
+  "Ver detalles": "View details",
+  Intervalo: "Interval",
   "Medición parcial": "Partial measurement",
   "Máximos y medias por hora, últimas 24 h":
     "Hourly peaks and averages, last 24 hours",
@@ -584,7 +588,7 @@ Object.assign(translations, {
     "Orange: maximum · Blue: average · Gaps: no samples",
   Mínimo: "Minimum",
   Máximo: "Maximum",
-  Media: "Average",
+  Promedio: "Average",
   Día: "Day",
   Métrica: "Metric",
   "Añade una máquina antes de configurar las métricas.":

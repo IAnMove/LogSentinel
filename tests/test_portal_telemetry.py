@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 from pydantic import ValidationError
-from test_portal_api import client, machine_source
+from helpers import machine_source
 from logsentinel.portal.analysis import ReviewClient
 from logsentinel.portal.models import Machine
 from logsentinel.portal.telemetry_data import (
@@ -102,7 +102,11 @@ def test_linux_sampler_uses_available_memory_cpu_deltas_and_missing_swap(
 def test_compressed_samples_daily_extrema_and_replay_are_atomic(client):
     c, s = client
     machine, monitor = configured(c, s)
-    stamp = time.time() - 300
+    # Both samples must land in one UTC day. "Five minutes ago" straddles
+    # midnight for five minutes a day and made this test fail then.
+    stamp = time.time() // 86400 * 86400 + 12 * 3600
+    if stamp > time.time() - 300:
+        stamp -= 86400
     first = sample(10, stamp)
     assert monitor.receive(machine, first)
     assert not monitor.receive(machine, first)

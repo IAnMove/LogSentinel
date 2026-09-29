@@ -4,7 +4,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-import socket, tempfile, threading, time
+import tempfile, threading, time
 import uvicorn
 from playwright.sync_api import sync_playwright
 from logsentinel.portal.app import create_app
@@ -18,7 +18,7 @@ def contrast(a, b):
         values = [
             v / 12.92 if v <= 0.04045 else ((v + 0.055) / 1.055) ** 2.4 for v in values
         ]
-        return sum(v * weight for v, weight in zip(values, (0.2126, 0.7152, 0.0722)))
+        return sum(v * weight for v, weight in zip(values, (0.2126, 0.7152, 0.0722), strict=True))
 
     x, y = sorted([luminance(a), luminance(b)])
     return (y + 0.05) / (x + 0.05)
@@ -277,19 +277,22 @@ with tempfile.TemporaryDirectory(prefix="sentinel-themes-") as directory:
             ),
         )
     app.state.health.tick()
-    with socket.socket() as sock:
-        sock.bind(("127.0.0.1", 0))
-        port = sock.getsockname()[1]
     server = uvicorn.Server(
-        uvicorn.Config(app, host="127.0.0.1", port=port, log_level="error")
+        uvicorn.Config(app, host="127.0.0.1", port=0, log_level="error")
     )
     thread = threading.Thread(target=server.run, daemon=True)
     thread.start()
-    while not server.started:
+    for _ in range(400):
+        if server.started:
+            break
         time.sleep(0.05)
+    else:
+        raise SystemExit("The portal did not start")
+    # uvicorn bound port 0 itself, so no other process can take the port between
+    # choosing it and serving on it.
+    port = server.servers[0].sockets[0].getsockname()[1]
     errors = []
-    screenshots = Path("/tmp/logsentinel-themes")
-    screenshots.mkdir(exist_ok=True)
+    screenshots = Path(tempfile.mkdtemp(prefix="logsentinel-themes-"))
     try:
         with sync_playwright() as pw:
             browser = pw.chromium.launch(headless=True, args=["--no-sandbox"])

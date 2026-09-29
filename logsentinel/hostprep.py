@@ -26,6 +26,15 @@ FORBIDDEN = {
 }
 
 
+def home_directories():
+    """Every account's home directory: reading one grants far more than a log."""
+    homes = {Path("/root")}
+    for entry in pwd.getpwall():
+        if entry.pw_dir and entry.pw_dir != "/":
+            homes.add(Path(entry.pw_dir))
+    return homes
+
+
 def account_exists(name):
     try:
         pwd.getpwnam(name)
@@ -48,10 +57,22 @@ def check_source(raw):
     if not path.is_absolute():
         raise ValueError(f"Use an absolute path: {raw}")
     path = path.resolve()
-    if path in FORBIDDEN:
+    if path in FORBIDDEN or path in home_directories():
         raise ValueError(
             f"Refusing to grant read access to {path}; name the log file or its own directory"
         )
+    from .portal.source_paths import SENSITIVE_DIRS, is_sensitive
+
+    if is_sensitive(path):
+        raise ValueError(f"{path} holds credentials, not logs; name the log file instead")
+    # Access is granted recursively, so a folder that contains credentials would
+    # hand them over even though it is not itself one.
+    if path.is_dir():
+        for name in sorted(SENSITIVE_DIRS):
+            if (path / name).exists():
+                raise ValueError(
+                    f"{path} contains {name}, which holds credentials; name the log file or a dedicated log folder"
+                )
     if not path.exists():
         raise ValueError(f"No such path: {path}")
     return path
@@ -100,8 +121,8 @@ def plan(account, sources, journal=False, group=READ_GROUP):
     if journal:
         steps.append({
             "why": (
-                f"Reading the whole journal means every service's messages, "
-                f"including other users' — grant it only where you want that"
+                "Reading the whole journal means every service's messages, "
+                "including other users' — grant it only where you want that"
             ),
             "command": ["usermod", "--append", "--groups", JOURNAL_GROUP, account],
         })

@@ -1,11 +1,10 @@
 """Discord webhook notification dispatcher."""
 
 from __future__ import annotations
-from datetime import datetime, timezone
-import httpx
+from typing import Any
 from logsentinel.config import DiscordNotifierConfig
 from logsentinel.core.models import Alert, Severity
-from logsentinel.notifiers.base import BaseNotifier
+from logsentinel.notifiers.base import BaseNotifier, outbound_client
 
 
 class DiscordNotifier(BaseNotifier):
@@ -31,7 +30,7 @@ class DiscordNotifier(BaseNotifier):
             return False
 
         color = self._get_color(alert.verdict.severity)
-        embed = {
+        embed: dict[str, Any] = {
             "title": f"🛡️ [{alert.verdict.severity.value}] {alert.verdict.title}",
             "description": alert.verdict.summary,
             "color": color,
@@ -56,10 +55,11 @@ class DiscordNotifier(BaseNotifier):
         payload = {
             "username": "LogSentinel AI",
             "embeds": [embed],
+            "allowed_mentions": {"parse": []},
         }
 
         try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
+            async with outbound_client(10.0) as client:
                 resp = await client.post(self.config.webhook_url, json=payload)
                 return resp.status_code in (200, 204)
         except Exception:
@@ -70,6 +70,7 @@ class DiscordNotifier(BaseNotifier):
             return False
         payload = {
             "username": "LogSentinel AI",
+            "allowed_mentions": {"parse": []},
             "embeds": [{
                 "title": "🛡️ LogSentinel Test",
                 "description": "Discord webhook notifications are properly configured!",
@@ -77,7 +78,7 @@ class DiscordNotifier(BaseNotifier):
             }],
         }
         try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
+            async with outbound_client(10.0) as client:
                 resp = await client.post(self.config.webhook_url, json=payload)
                 return resp.status_code in (200, 204)
         except Exception:
