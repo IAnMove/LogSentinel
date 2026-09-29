@@ -7,7 +7,7 @@ import os
 import logging
 from pathlib import Path
 import re
-from typing import AsyncGenerator, Dict, List, Optional
+from typing import AsyncGenerator, BinaryIO, Dict, List, Optional
 from logsentinel.config import FileSourceConfig
 from logsentinel.core.models import LogEntry, LogSourceType
 from logsentinel.collectors.base import BaseCollector
@@ -39,7 +39,7 @@ class FileTailerCollector(BaseCollector):
             return
 
         self._running = True
-        handles = {}
+        handles: Dict[Path, BinaryIO] = {}
         paths = [Path(p).expanduser().absolute() for p in self.config.paths]
 
         def complete_lines(handle, path):
@@ -65,9 +65,9 @@ class FileTailerCollector(BaseCollector):
             # Only files present at startup skip history. New files start at 0.
             for path in paths:
                 try:
-                    handle = path.open("rb")
-                    handle.seek(0, os.SEEK_END)
-                    handles[path] = handle
+                    opened = path.open("rb")
+                    opened.seek(0, os.SEEK_END)
+                    handles[path] = opened
                 except FileNotFoundError:
                     pass
                 except OSError as exc:
@@ -76,7 +76,7 @@ class FileTailerCollector(BaseCollector):
             while self._running:
                 for path in paths:
                     try:
-                        handle = handles.get(path)
+                        handle: Optional[BinaryIO] = handles.get(path)
                         try:
                             current = path.stat()
                         except FileNotFoundError:

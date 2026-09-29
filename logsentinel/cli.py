@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 import asyncio
-from datetime import datetime
 import os
 from pathlib import Path
 import sys
@@ -19,10 +18,8 @@ from logsentinel.core.engine import SentinelEngine
 from logsentinel.core.models import (
     Alert,
     AlertStatus,
-    Category,
     Incident,
     LogEntry,
-    MemoryRule,
     MemoryRuleType,
     Severity,
 )
@@ -237,7 +234,7 @@ def ignore_quick(
     learner = FeedbackLearner(store)
 
     rule = learner.learn_from_text(instruction_or_pattern)
-    console.print(f"[green]✓ Memory rule learned & stored successfully![/green]")
+    console.print("[green]✓ Memory rule learned & stored successfully![/green]")
     console.print(f"  [bold]ID:[/bold] {rule.id}")
     console.print(f"  [bold]Type:[/bold] {rule.rule_type.value}")
     console.print(f"  [bold]Rule:[/bold] {rule.content}")
@@ -347,7 +344,7 @@ def memory_add(
             m_type = MemoryRuleType(rule_type.upper())
         except ValueError:
             console.print(f"[red]Invalid rule type '{rule_type}'. Valid types: PATTERN, SERVICE, IP_ADDRESS, SEMANTIC[/red]")
-            raise typer.Exit(1)
+            raise typer.Exit(1) from None
 
     rule = learner.learn_from_text(content, rule_type=m_type, description=description)
     console.print(f"[green]✓ Memory rule added:[/green] {rule.id} ({rule.rule_type.value}): {rule.content}")
@@ -619,7 +616,7 @@ def service_install(
             account_info = pwd.getpwnam(account)
             group = grp.getgrgid(account_info.pw_gid).gr_name
         except KeyError:
-            raise typer.BadParameter(f"Create the service account and its primary group before installing: {account}")
+            raise typer.BadParameter(f"Create the service account and its primary group before installing: {account}") from None
         home = Path(account_info.pw_dir)
         if not home.is_absolute() or str(home) in ("/", "/nonexistent"):
             raise typer.BadParameter(f"Configure a usable home directory for {account}")
@@ -730,6 +727,7 @@ def portal(data_dir: str = typer.Option("~/.local/share/logsentinel/portal", "--
 
     from logsentinel.portal.ingest import create_ingest_app
 
+    assert ingest_host is not None and ingest_port is not None  # set with --ingest-listen
     scheme = "https" if tls_cert else "http"
     console.print(f"Reception: {scheme}://{ingest_host}:{ingest_port} (senders only)")
     servers = [
@@ -771,6 +769,7 @@ def forward_command(path: Optional[str] = typer.Argument(None), receiver: str = 
     from logsentinel.portal.forward import forward
     if bool(path) == bool(journal):
         raise typer.BadParameter("Select one file path or --journal")
+    token: Optional[str]
     if token_file:
         try:
             token = Path(token_file).expanduser().read_text().strip()
@@ -819,7 +818,7 @@ def enrollment_package(
     try:
         package = issue_package(Store(data_dir), source_id, receiver, certificate, validity)
     except ValueError as refusal:
-        raise typer.BadParameter(str(refusal))
+        raise typer.BadParameter(str(refusal)) from None
     target = Path(out).expanduser()
     fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
     # O_CREAT keeps the mode of a file that already existed, which can be world-readable.
@@ -853,7 +852,7 @@ def enroll_command(
         try:
             actual = fingerprint(package["ca_certificate"])
         except (ValueError, TypeError):
-            raise typer.BadParameter("The package certificate is not readable PEM")
+            raise typer.BadParameter("The package certificate is not readable PEM") from None
         console.print("Certificate fingerprint in the package:", actual, markup=False)
         if not ca_fingerprint and sys.stdin.isatty():
             ca_fingerprint = typer.prompt("Paste the fingerprint printed on the central")
@@ -864,7 +863,7 @@ def enroll_command(
         try:
             expected = normalize_fingerprint(ca_fingerprint)
         except ValueError as refusal:
-            raise typer.BadParameter(str(refusal))
+            raise typer.BadParameter(str(refusal)) from None
         if expected != actual:
             console.print("[red]The certificate is not the one the central printed. Do not use this package.[/red]")
             raise typer.Exit(1)
@@ -872,7 +871,7 @@ def enroll_command(
         result = claim(package, Path(spool).expanduser())
     except ValueError as refusal:
         console.print(f"[red]{refusal}[/red]")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from None
     console.print(f"[green]\u2713 Enrolled as source[/green] {result['source_id']}")
     console.print("Credential stored in:", result["token_path"], markup=False)
     if result.get("ca_path"):
@@ -900,7 +899,7 @@ def prepare_host(
     try:
         targets = [hostprep.check_source(item) for item in (source or [])]
     except ValueError as refusal:
-        raise typer.BadParameter(str(refusal))
+        raise typer.BadParameter(str(refusal)) from None
     if not targets and not journal:
         raise typer.BadParameter("Name at least one --source or pass --journal")
     steps = hostprep.plan(account, targets, journal)
@@ -920,10 +919,10 @@ def prepare_host(
         hostprep.apply(steps)
     except PermissionError as refusal:
         console.print(f"[red]{refusal}[/red]")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from None
     except RuntimeError as failure:
         console.print(f"[red]Stopped: {failure}[/red]")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from None
 
     console.print("[green]\u2713 Applied.[/green] Reading back as the account itself:")
     unreadable = []

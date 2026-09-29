@@ -10,9 +10,12 @@ class BaseCollector(ABC):
     """Abstract base class for log collectors."""
 
     @abstractmethod
-    async def stream(self) -> AsyncGenerator[LogEntry, None]:
-        """Asynchronously yield LogEntry instances as they arrive."""
-        pass
+    def stream(self) -> AsyncGenerator[LogEntry, None]:
+        """Asynchronously yield LogEntry instances as they arrive.
+
+        Implementations are async generators, so calling stream() returns the
+        generator directly; it is not a coroutine to await first."""
+        ...
 
     @abstractmethod
     async def stop(self) -> None:

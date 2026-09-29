@@ -53,7 +53,7 @@ async def test_aggregator_max_batch_size():
             message=f"user not in sudoers {i}",
             raw="raw",
         )
-        res = await aggregator.add_entry(entry, Category.SECURITY)
+        await aggregator.add_entry(entry, Category.SECURITY)
 
     assert len(flushed_incidents) == 1
     assert flushed_incidents[0].count == 3

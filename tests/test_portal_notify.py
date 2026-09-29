@@ -248,7 +248,7 @@ def test_notification_decisions_explain_skips_and_muted_updates_do_not_extend_co
     store = Store(tmp_path)
     machine = store.put("machine", Machine(name="host").model_dump())
     store.ingest(dict(id="s", machine_id=machine), [dict(origin="1", message="failure")])
-    dest = store.put("destination", Destination(name="Local", kind="file", enabled=True, min_severity="HIGH", cooldown_seconds=60).model_dump())
+    store.put("destination", Destination(name="Local", kind="file", enabled=True, min_severity="HIGH", cooldown_seconds=60).model_dump())
     pid = Analyzer(store).save_finding(machine, dict(title="Issue", summary="Failed", severity="MEDIUM", category="application", evidence_ids=[]), [store.events()[0]["id"]])
     assert store.problem(pid)["notification_decisions"][0]["reason"] == "below_minimum_severity"
     with store.connect() as db:

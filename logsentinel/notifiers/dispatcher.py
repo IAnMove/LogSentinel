@@ -69,7 +69,7 @@ class NotificationDispatcher:
                 return False
 
         results = await asyncio.gather(*(send_one(n) for n in self.notifiers))
-        successful_channels = [n.name for n, ok in zip(self.notifiers, results) if ok]
+        successful_channels = [n.name for n, ok in zip(self.notifiers, results, strict=True) if ok]
 
         alert.channels_notified = successful_channels
         return successful_channels
@@ -82,4 +82,4 @@ class NotificationDispatcher:
             except Exception:
                 return False
         results = await asyncio.gather(*(test_one(n) for n in self.notifiers))
-        return {n.name: bool(ok) for n, ok in zip(self.notifiers, results)}
+        return {n.name: bool(ok) for n, ok in zip(self.notifiers, results, strict=True)}

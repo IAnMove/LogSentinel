@@ -165,7 +165,7 @@ def register_model(app, ctx):
             raise HTTPException(
                 502,
                 "No se pudieron consultar los metadatos del modelo configurado; revisa servicio, nombre y credenciales",
-            )
+            ) from None
         effective = min(
             [cfg.context_tokens]
             + [n for n in (maximum, running) if type(n) is int and n > 0]
@@ -223,7 +223,7 @@ def register_model(app, ctx):
                     )
                 raise HTTPException(
                     502, "Model test failed: " + safe_error(exc, (cfg.llm.api_key,))
-                )
+                ) from None
         usage = {}
         with store.connect() as db:
             row = db.execute(

@@ -132,7 +132,7 @@ def test_failed_delivery_does_not_consume_interval_and_default_is_opt_in(scenari
 
 def test_verification_prose_cannot_add_or_remove_the_original_based_subject(scenario):
     store, _, _, _, _ = scenario
-    first = finding(scenario, 1)
+    finding(scenario, 1)
     second = finding(scenario, 2, notify=False)
     with store.connect() as db:
         data = json.loads(db.execute('select data from problems where id=?', (second,)).fetchone()[0])

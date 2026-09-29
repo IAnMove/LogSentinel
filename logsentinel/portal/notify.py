@@ -5,7 +5,6 @@ import asyncio
 import hashlib
 import gzip
 import hmac
-import html
 import json
 import os
 from pathlib import Path

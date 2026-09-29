@@ -141,5 +141,5 @@ def register_enrollment(app, store):
                 request.client.host if request.client else "",
             )
         except KeyError:
-            raise HTTPException(401, "Enrollment refused")
+            raise HTTPException(401, "Enrollment refused") from None
         return {"token": token, "source_id": body["source_id"]}

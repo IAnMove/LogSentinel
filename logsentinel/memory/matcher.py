@@ -5,7 +5,7 @@ import ipaddress
 import json
 import re
 import regex
-from typing import List, Optional, Tuple
+from typing import Optional, Tuple
 from logsentinel.core.models import Incident, MemoryRule, MemoryRuleType
 from logsentinel.memory.store import MemoryStore
 

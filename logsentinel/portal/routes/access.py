@@ -66,7 +66,8 @@ def register_access(app, ctx):
         body = await request.json()
         if not isinstance(body, dict):
             raise HTTPException(400, "Send an access key object")
-        ip = request.client.host
+        # Some servers and test clients give no peer address.
+        ip = request.client.host if request.client else "unknown"
         now = time.time()
         old = attempts.get(ip, [])
         old = [x for x in old if x > now - 60]

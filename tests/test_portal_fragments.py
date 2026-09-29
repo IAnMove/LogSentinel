@@ -40,7 +40,7 @@ async def test_long_original_has_partial_progress_and_recovers_exact_slices(queu
     sent.sort(key=lambda g: g["fragment"]["start"])
     assert "".join(g["message"] for g in sent) == original
     assert len(sent) == state["fragments"]["total"]
-    assert all(a["fragment"]["end"] == b["fragment"]["start"] for a, b in zip(sent, sent[1:]))
+    assert all(a["fragment"]["end"] == b["fragment"]["start"] for a, b in zip(sent, sent[1:], strict=False))
 
 
 def test_fragment_redaction_happens_before_cutting(queue):

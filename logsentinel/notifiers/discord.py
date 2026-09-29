@@ -1,7 +1,7 @@
 """Discord webhook notification dispatcher."""
 
 from __future__ import annotations
-from datetime import datetime, timezone
+from typing import Any
 from logsentinel.config import DiscordNotifierConfig
 from logsentinel.core.models import Alert, Severity
 from logsentinel.notifiers.base import BaseNotifier, outbound_client
@@ -30,7 +30,7 @@ class DiscordNotifier(BaseNotifier):
             return False
 
         color = self._get_color(alert.verdict.severity)
-        embed = {
+        embed: dict[str, Any] = {
             "title": f"🛡️ [{alert.verdict.severity.value}] {alert.verdict.title}",
             "description": alert.verdict.summary,
             "color": color,

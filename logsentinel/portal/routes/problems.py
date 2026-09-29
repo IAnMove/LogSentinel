@@ -30,7 +30,7 @@ def register_problems(app, ctx):
     def problems(machine_id: str = "", offset: int = 0, limit: int = 100):
         with store.connect() as db:
             query = "SELECT * FROM problems"
-            args = []
+            args: list = []
             if machine_id:
                 query += " WHERE machine_id=?"
                 args.append(machine_id)
@@ -122,7 +122,7 @@ def register_problems(app, ctx):
             try:
                 hit = matches(dumped, e, rule.pattern if e["id"] in evidence else "")
             except TimeoutError:
-                raise HTTPException(400, "Regex exceeded evaluation time limit")
+                raise HTTPException(400, "Regex exceeded evaluation time limit") from None
             (yes if hit else no).append(e)
         return {
             "tested": len(rows),
@@ -159,13 +159,15 @@ def register_problems(app, ctx):
             for r in store.objects("rule")
         ):
             raise HTTPException(409, "This preset is already present")
-        data = Rule(
-            name=name,
-            action=preset["action"],
-            kind=preset["kind"],
-            pattern=preset["pattern"],
-            machine_id=machine_id,
-            enabled=True,
+        data = Rule.model_validate(
+            dict(
+                name=name,
+                action=preset["action"],
+                kind=preset["kind"],
+                pattern=preset["pattern"],
+                machine_id=machine_id,
+                enabled=True,
+            )
         ).model_dump()
         rid = store.put("rule", data)
         store.audit("apply_rule_preset", id)

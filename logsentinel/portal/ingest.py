@@ -14,7 +14,6 @@ import json
 import time
 
 from fastapi import FastAPI, Request, HTTPException
-from fastapi.responses import JSONResponse
 
 from .limits import BodyLimit
 from .store import dumps
@@ -96,7 +95,7 @@ def register_ingest(app, store):
         except ValidationError:
             raise HTTPException(
                 400, "Send ok (boolean) and pending (non-negative integer)"
-            )
+            ) from None
         return await asyncio.to_thread(record_heartbeat, id, source, body, state)
 
     def record_heartbeat(id, source, body, state):
@@ -180,7 +179,7 @@ def register_ingest(app, store):
         try:
             count = store.ingest(source, entries)
         except OSError:
-            raise HTTPException(507, "Storage full; retain and retry these events")
+            raise HTTPException(507, "Storage full; retain and retry these events") from None
         old_health = json.loads(store.meta("health:" + id) or "{}")
         old_health.update(checked=time.time(), new_events=count)
         if "heartbeat" not in old_health:

@@ -53,7 +53,7 @@ def create_app(directory, background=True):
             fcntl.flock(lockfile, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             lockfile.close()
-            raise RuntimeError("Another portal is using this data directory")
+            raise RuntimeError("Another portal is using this data directory") from None
         store.recover()
         researcher.recover()
         telemetry.recover()

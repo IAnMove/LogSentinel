@@ -47,7 +47,7 @@ def validate(package):
         try:
             actual = fingerprint(certificate)
         except (ValueError, TypeError):
-            raise ValueError("The package certificate is not readable PEM")
+            raise ValueError("The package certificate is not readable PEM") from None
         stated = package.get("fingerprint", "")
         if stated and stated != actual:
             raise ValueError(
@@ -82,7 +82,7 @@ def claim(package, spool, client=None):
             json={"source_id": package["source_id"], "code": package["code"]},
         )
     except httpx.HTTPError as failure:
-        raise ValueError(f"Could not reach the receiver at {receiver}: {failure}")
+        raise ValueError(f"Could not reach the receiver at {receiver}: {failure}") from None
     finally:
         if owned:
             client.close()

@@ -2,7 +2,6 @@
 
 import ipaddress
 import json
-import re
 import time
 import regex
 from logsentinel.memory.matcher import MemoryMatcher

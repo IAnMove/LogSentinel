@@ -192,7 +192,7 @@ def register_objects(app, ctx):
     ):
         limit = min(max(limit, 1), 500)
         cursor = max(0, offset)
-        rows = []
+        rows: list[dict] = []
         scanned = 0
         exhausted = False
         while len(rows) < limit and scanned < 5000:

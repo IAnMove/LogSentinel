@@ -4,10 +4,10 @@ from logsentinel.portal.store import Store
 from logsentinel.portal.models import Machine
 from logsentinel.portal.analysis import (
     Analyzer,
-    compact,
     interleave_services,
     grouping_key,
 )
+from logsentinel.portal.compaction import compact
 from logsentinel.portal.rules import redact
 
 

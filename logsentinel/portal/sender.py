@@ -3,7 +3,6 @@
 import asyncio
 from contextlib import contextmanager
 import fcntl
-import json
 import logging
 import sqlite3
 import time

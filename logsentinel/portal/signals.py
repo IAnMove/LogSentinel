@@ -105,7 +105,7 @@ def window_evidence(store, machine_id, spec, hits, rules):
         with store.connect() as db:
             db.executemany(
                 "INSERT OR REPLACE INTO signal_hits VALUES(?,?,?,?,?,?)",
-                [(spec["id"], e["id"], machine_id, source, at, policy) for e, at in zip(incoming, instants)],
+                [(spec["id"], e["id"], machine_id, source, at, policy) for e, at in zip(incoming, instants, strict=True)],
             )
             rows = db.execute(
                 "SELECT event_id,instant FROM signal_hits WHERE signal=? AND machine_id=? AND source_id=? AND policy=? AND instant BETWEEN ? AND ? ORDER BY instant,event_id",
@@ -139,10 +139,10 @@ def apply_signals(analyzer, limit=500, *, machine_id=None, events=None, notify=T
     spanish = store.settings().language == "es"
     created = 0
     rules = store.objects("rule")
-    for machine_id, events in signal_batches(analyzer, limit, machine_id, events):
-        if not events:
+    for batch_machine, batch in signal_batches(analyzer, limit, machine_id, events):
+        if not batch:
             continue
-        eligible = [e for e in events if not excluded(store, e, rules)]
+        eligible = [e for e in batch if not excluded(store, e, rules)]
         for spec in SIGNALS:
             hits = []
             slow = 0
@@ -162,14 +162,14 @@ def apply_signals(analyzer, limit=500, *, machine_id=None, events=None, notify=T
                 total = int(store.meta("detector_slow_lines") or 0) + slow
                 store.set_meta("detector_slow_lines", str(total))
             batches = (
-                window_evidence(store, machine_id, spec, hits, rules)
+                window_evidence(store, batch_machine, spec, hits, rules)
                 if spec.get("window_seconds") and hits
                 else [("", hits)]
             )
             for source_id, evidence in batches:
                 if len(evidence) < spec["min"]:
                     continue
-                save_signal(analyzer, machine_id, spec, evidence, spanish, source_id, notify=notify)
+                save_signal(analyzer, batch_machine, spec, evidence, spanish, source_id, notify=notify)
                 created += 1
     return created
 

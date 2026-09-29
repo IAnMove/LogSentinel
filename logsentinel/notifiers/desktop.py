@@ -4,7 +4,6 @@ from __future__ import annotations
 import asyncio
 import os
 import shutil
-from typing import Optional
 from logsentinel.config import DesktopNotifierConfig
 from logsentinel.core.models import Alert, Severity
 from logsentinel.notifiers.base import BaseNotifier

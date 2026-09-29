@@ -18,7 +18,7 @@ def contrast(a, b):
         values = [
             v / 12.92 if v <= 0.04045 else ((v + 0.055) / 1.055) ** 2.4 for v in values
         ]
-        return sum(v * weight for v, weight in zip(values, (0.2126, 0.7152, 0.0722)))
+        return sum(v * weight for v, weight in zip(values, (0.2126, 0.7152, 0.0722), strict=True))
 
     x, y = sorted([luminance(a), luminance(b)])
     return (y + 0.05) / (x + 0.05)

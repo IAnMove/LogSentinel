@@ -9,7 +9,8 @@ import time
 from typing import Literal
 
 from fastapi import HTTPException, Request
-from .analysis import Analyzer, compact
+from .analysis import Analyzer
+from .compaction import compact
 from .compaction import public_group
 from .capacity import review_signature
 from .model_timing import estimate_model_time, endpoint_id

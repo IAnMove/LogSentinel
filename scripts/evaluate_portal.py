@@ -15,7 +15,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from logsentinel.portal.store import Store, dumps
 from logsentinel.portal.models import Machine, Source
 from logsentinel.portal.collect import normalize
-from logsentinel.portal.analysis import Analyzer, compact
+from logsentinel.portal.analysis import Analyzer
+from logsentinel.portal.compaction import compact
 
 
 async def evaluate(args):

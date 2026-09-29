@@ -247,7 +247,8 @@ class LinuxSampler:
             errors.append("Memory counters unavailable")
         try:
             load = (self.proc / "loadavg").read_text().split()
-            values.update(zip(("load1", "load5", "load15"), map(float, load[:3])))
+            # A short loadavg simply yields fewer keys.
+            values.update(zip(("load1", "load5", "load15"), map(float, load[:3]), strict=False))
             values["uptime_seconds"] = float(
                 (self.proc / "uptime").read_text().split()[0]
             )

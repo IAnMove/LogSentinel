@@ -1,8 +1,7 @@
 """LLM client for local Ollama and OpenAI-compatible inference backends."""
 
 from __future__ import annotations
-import asyncio
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 import httpx
 from logsentinel.config import LLMConfig
 from logsentinel.core.models import Category, Incident, LLMVerdict, Severity

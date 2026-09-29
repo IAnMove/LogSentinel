@@ -12,7 +12,7 @@ from .analysis import ReviewClient, safe_error
 from .models import Model, Source
 from .rules import sanitize
 from .store import dumps
-from .telemetry_data import LinuxSampler, MetricSample, TelemetryConfig, TelemetryStore
+from .telemetry_data import LinuxSampler, MetricSample, TelemetryStore
 
 
 class TrendAnswer(Model):

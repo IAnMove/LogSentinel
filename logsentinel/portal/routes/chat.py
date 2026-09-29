@@ -107,7 +107,7 @@ def register_chat(app, ctx):
             except (httpx.HTTPError, ValueError, KeyError, TypeError) as exc:
                 raise HTTPException(
                     502, "Help request failed: " + safe_error(exc, (cfg.llm.api_key,))
-                )
+                ) from None
         if (
             not isinstance(result, dict)
             or not isinstance(result.get("answer"), str)
@@ -179,7 +179,7 @@ def register_chat(app, ctx):
                     502,
                     "Chat request failed: "
                     + safe_error(exc, (store.settings().llm.api_key,)),
-                )
+                ) from None
 
     async def execute_chat(body, request_id=""):
         cfg = store.settings()
@@ -263,6 +263,6 @@ def register_chat(app, ctx):
         try:
             return chat_requests.cancel(id)
         except KeyError:
-            raise HTTPException(404, "Unknown chat request")
+            raise HTTPException(404, "Unknown chat request") from None
 
     return chat_requests

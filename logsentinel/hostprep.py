@@ -100,8 +100,8 @@ def plan(account, sources, journal=False, group=READ_GROUP):
     if journal:
         steps.append({
             "why": (
-                f"Reading the whole journal means every service's messages, "
-                f"including other users' — grant it only where you want that"
+                "Reading the whole journal means every service's messages, "
+                "including other users' — grant it only where you want that"
             ),
             "command": ["usermod", "--append", "--groups", JOURNAL_GROUP, account],
         })

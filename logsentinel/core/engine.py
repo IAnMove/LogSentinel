@@ -133,8 +133,10 @@ class SentinelEngine:
             await self._incidents.put(incident)
 
     async def _analyse_forever(self) -> None:
+        queue = self._incidents
+        assert queue is not None  # created in start(), before the workers
         while True:
-            incident = await self._incidents.get()
+            incident = await queue.get()
             try:
                 await self.process_incident(incident)
             except asyncio.CancelledError:
@@ -145,7 +147,7 @@ class SentinelEngine:
                 if self._analysis_error is None:
                     self._analysis_error = exc
             finally:
-                self._incidents.task_done()
+                queue.task_done()
 
     async def _run_journald_collector(self) -> None:
         try:

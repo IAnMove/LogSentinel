@@ -7,16 +7,14 @@ import json
 import os
 from pathlib import Path
 import sqlite3
-from typing import Any, Dict, List, Optional
+from typing import Any, List, Optional
 from logsentinel.core.models import (
     Alert,
     AlertStatus,
-    Category,
     Incident,
     LLMVerdict,
     MemoryRule,
     MemoryRuleType,
-    Severity,
 )
 
 

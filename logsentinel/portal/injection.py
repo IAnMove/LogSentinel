@@ -91,15 +91,15 @@ def apply_injection_signals(analyzer, limit=500, *, machine_id=None, events=None
     store = analyzer.store
     spanish = store.settings().language == "es"
     created = 0
-    for machine_id, events in signal_batches(analyzer, limit, machine_id, events):
-        hits = [e for e in events if looks_like_instruction(e.get("message"))]
+    for batch_machine, batch in signal_batches(analyzer, limit, machine_id, events):
+        hits = [e for e in batch if looks_like_instruction(e.get("message"))]
         if not hits:
             continue
         fingerprint = hashlib.sha256(
-            ("prompt-injection:" + machine_id).encode()
+            ("prompt-injection:" + batch_machine).encode()
         ).hexdigest()
         analyzer.save_finding(
-            machine_id,
+            batch_machine,
             {
                 "title": (
                     "Texto en logs que parece una instrucción al modelo"
