@@ -53,6 +53,20 @@ Revisión general de fiabilidad, seguridad y mantenimiento (rama `review/hardeni
 - Las fixtures compartidas viven en `conftest.py`; las pruebas ya no dependen de la presión de disco del equipo ni de esperas fijas.
 - Metadatos del paquete coherentes (versión única, `setuptools>=77`, cotas superiores, dependencias directas declaradas).
 
+### Pendiente (candidatos rescatados de notas de trabajo antiguas)
+
+Cada uno está comprobado contra el código actual y no se ha hecho todavía:
+
+- **Emisor de métricas remoto.** `metrics-forward` no fija la CA del central (no valida un certificado local), el token solo entra por variable de entorno y no hay unidad systemd ni opción en `setup-client.sh`. Propuesta: `--ca-cert` reutilizando `receiver-ca.pem`, `--token-file` y `setup-client.sh --metrics`.
+- **`service install` sin opciones.** Fija el puerto 8765 y no admite `--port`, `--ingest-listen` ni TLS, así que el receptor de red exige editar `ExecStart` a mano. `portal` imprime la URL antes de comprobar que puede enlazar el puerto y no explica que falte el bus de usuario de systemd.
+- **Timeout por defecto de 120 s** frente a modelos lentos en CPU (medido: unos 8 tokens/s, media de 75 s por llamada). Propuesta: avisar en «Cobertura y capacidad» cuando la mediana supere la mitad del timeout, y valorar 240 s para servidores locales.
+- **Estimación de tokens con llama.cpp.** Solo se aplica la relación medida tokens/byte con Ollama; con llama.cpp se asume un token por byte y se desperdicia contexto. `/props` daría el contexto real.
+- **Emisor caído sin detectar por defecto.** El plazo sin señal de una fuente remota es 0; propuesta: 180 s al emitir el alta.
+- **Modo «Adaptativa».** Es un alias exacto de «prioridad + palabras» pero la interfaz sugiere otra cosa.
+- **Métricas.** Días hasta llenar el disco (regresión lineal sobre los resúmenes diarios), presión PSI, límites de cgroup, temperaturas y SMART.
+- **Evaluación.** Caso «aguja en pajar» (un fallo entre cientos de líneas rutinarias), control negativo de 24 h, y que `evaluate_review.py` distinga una caída de infraestructura (código de salida propio) de un fallo de calidad.
+- **Feedback de la CLI antigua.** Diferenciar falsa alarma, cambio legítimo de hábito y autorización temporal; correlación SSH, `sudo`, proceso y conexión saliente.
+
 ### Sin cambiar a propósito
 
 - Las ilustraciones de Tentri (21 MB) siguen en el paquete: la galería «Ver todas las ilustraciones» las usa.
