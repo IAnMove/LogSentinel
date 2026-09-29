@@ -57,6 +57,12 @@ def scan_signals(analyzer, limit=5000):
     for machine in store.objects("machine"):
         if not store.monitoring_active(machine["id"]):
             continue
+        # Read before the query: an ingest that lands meanwhile changes the
+        # counter and the next pass looks again.
+        seq = f"{VERSION}:{store.meta('ingest_seq:' + machine['id']) or 0}"
+        idle = "signal_idle:" + machine["id"]
+        if store.meta(idle) == seq:
+            continue
         with store.connect() as db:
             ids = [r[0] for r in db.execute(
                 "SELECT e.id FROM events e LEFT JOIN signal_scans s ON s.event_id=e.id AND s.version=? "
@@ -68,6 +74,8 @@ def scan_signals(analyzer, limit=5000):
         try:
             if ids:
                 count += scan_originals(analyzer, machine["id"], store.events(ids=ids, limit=limit))
+            else:
+                store.set_meta(idle, seq)
             store.set_meta("detector_error:" + machine["id"], "")
         except Exception as exc:
             from .analysis import safe_error

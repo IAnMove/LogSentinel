@@ -484,6 +484,12 @@ class Store:
                         ),
                     )
                 self._metric(db, source["id"], "events_ingested", len(unique))
+                # Lets the detectors tell "nothing new" from "look again" without
+                # scanning the machine's whole history to find out.
+                db.execute(
+                    "INSERT INTO meta VALUES(?,'1') ON CONFLICT(key) DO UPDATE SET value=CAST(value AS INTEGER)+1",
+                    ("ingest_seq:" + source["machine_id"],),
+                )
                 db.execute("UPDATE meta SET value=CAST(value AS INTEGER)+? WHERE key='sender_pending_count'", (len(unique),))
                 self._metric(
                     db,

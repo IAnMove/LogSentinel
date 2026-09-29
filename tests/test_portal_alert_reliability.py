@@ -361,3 +361,65 @@ def test_regex_timeout_on_one_line_is_counted_and_detection_continues(queue, mon
     assert int(store.meta("detector_slow_lines")) == sum(1 for s in signals.SIGNALS if not s.get("service"))
     with store.connect() as db:
         assert db.execute("SELECT count(*) FROM signal_scans").fetchone()[0] == 2
+
+
+def statements(store):
+    """Record every SQL statement the store runs, to see what a pass costs."""
+    log = []
+    original = store.connect
+
+    from contextlib import contextmanager
+
+    @contextmanager
+    def tracing():
+        with original() as db:
+            db.set_trace_callback(log.append)
+            yield db
+
+    store.connect = tracing
+    return log
+
+
+def test_an_idle_machine_costs_no_history_scan_until_something_arrives(queue):
+    from logsentinel.portal.signal_scan import scan_signals
+
+    store, machine, source = queue
+    analyzer = Analyzer(store)
+    store.ingest(source, [dict(origin="a", message="Out of memory: Killed process 42", service="kernel")])
+    assert scan_signals(analyzer) == 1
+    assert store.rows("problems")  # the first pass did its job
+
+    log = statements(store)
+    assert scan_signals(analyzer) == 0  # discovers there is nothing left, once
+    assert any("signal_scans" in s and "LEFT JOIN" in s for s in log)
+    log.clear()
+    for _ in range(3):
+        assert scan_signals(analyzer) == 0
+    assert not any("LEFT JOIN" in s for s in log)  # idle: no scan of the machine's events
+
+    store.ingest(source, [dict(origin="b", message="No space left on device", service="kernel")])
+    log.clear()
+    assert scan_signals(analyzer) == 1  # new data wakes it
+    assert any("LEFT JOIN" in s for s in log)
+
+
+def test_a_failed_pass_is_retried_and_never_marked_idle(queue, monkeypatch):
+    from logsentinel.portal import signal_scan
+
+    store, machine, source = queue
+    store.ingest(source, [dict(origin="a", message="Out of memory: Killed process 42", service="kernel")])
+    real = signal_scan.scan_originals
+    calls = []
+
+    def flaky(analyzer, machine_id, events):
+        calls.append(1)
+        if len(calls) == 1:
+            raise RuntimeError("synthetic detector failure")
+        return real(analyzer, machine_id, events)
+
+    monkeypatch.setattr(signal_scan, "scan_originals", flaky)
+    analyzer = Analyzer(store)
+    signal_scan.scan_signals(analyzer)
+    assert store.meta("signal_idle:" + machine["id"]) is None
+    assert signal_scan.scan_signals(analyzer) == 1
+    assert len(calls) == 2
