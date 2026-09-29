@@ -189,3 +189,16 @@ async def test_sender_waits_the_pause_the_receiver_asked_for(tmp_path, monkeypat
     # 900 is honoured verbatim, and backoff restarts from its base afterwards
     # instead of inheriting the pause.
     assert delays == [900, 4, 8]
+
+
+@pytest.mark.asyncio
+async def test_a_sender_that_pinned_a_private_ca_never_falls_back_to_public_ones(tmp_path):
+    from logsentinel.portal.forward import forward
+
+    spool = tmp_path / "spool"
+    spool.mkdir()
+    (spool / "receiver-ca.pem").write_text("not read in this test")
+    (spool / "receiver-ca.pinned").touch()
+    (spool / "receiver-ca.pem").unlink()
+    with pytest.raises(ValueError, match="pinned receiver certificate"):
+        await forward("", "https://central.invalid:8767", "source", "token", str(spool), True, journal=True)

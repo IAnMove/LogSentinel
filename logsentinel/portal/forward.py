@@ -82,6 +82,16 @@ async def forward(
         cleanup_due = 0
         headers = {"Authorization": "Bearer " + token}
         ca_path = store.directory / "receiver-ca.pem"
+        pinned = store.directory / "receiver-ca.pinned"
+        if ca_path.exists():
+            # Remember that this sender trusts one private authority, so losing
+            # the file can never quietly widen trust to every public one.
+            pinned.touch(mode=0o600)
+        elif pinned.exists():
+            raise ValueError(
+                "The pinned receiver certificate (receiver-ca.pem) is missing; refusing to fall "
+                "back to the system authorities. Restore it from the enrollment package."
+            )
         verify = str(ca_path) if ca_path.exists() else True
         try:
             async with httpx.AsyncClient(
