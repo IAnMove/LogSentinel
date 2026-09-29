@@ -387,17 +387,21 @@ class Analyzer:
                 "priority_ceiling", 4
             )
 
-        triggers = []
+        triggers, skipped = [], []
         for event in events:
             hit_priority = priority(event)
             hit_keyword = keyword(event)
-            if mode == "priority" and (hit_priority or hit_keyword):
-                triggers.append(event)
-            elif mode == "keywords" and hit_keyword:
-                triggers.append(event)
-            elif mode == "adaptive" and (hit_priority or hit_keyword):
-                triggers.append(event)
-        return triggers, [event["id"] for event in events if event not in triggers]
+            hit = (
+                hit_keyword
+                if mode == "keywords"
+                else hit_priority or hit_keyword  # "priority" and its "adaptive" alias
+                if mode in ("priority", "adaptive")
+                else False
+            )
+            # One pass and no `event not in triggers`, which compared whole
+            # dictionaries against every trigger: quadratic in the batch.
+            (triggers if hit else skipped).append(event if hit else event["id"])
+        return triggers, skipped
 
     async def _cycle(self):
         from .review_queue import ReviewQueue
