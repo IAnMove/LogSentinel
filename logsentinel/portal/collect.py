@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 import gzip
+import io
 import bz2
 import lzma
 import zlib
@@ -26,9 +27,79 @@ from .source_paths import open_source, validate_source_handle, validate_source_p
 
 MAX_LINE = 256_000
 MAX_FOLDER_FILES = 100
+# An xz header can ask the decoder for a gigabyte of dictionary; an archive that
+# needs more than this to be read is refused rather than allowed to exhaust memory.
+XZ_MEMORY_LIMIT = 128 * 1024 * 1024
 MAX_ARCHIVE_BYTES = 64 * 1024 * 1024
 MAX_EXPANDED_BYTES = 128 * 1024 * 1024
 HASH_CHUNK = 1024 * 1024
+
+
+class LimitedXZ(io.RawIOBase):
+    """Read an xz file through decoders with a memory ceiling, seekably.
+
+    lzma.LZMAFile has no such limit; LZMADecompressor does. Like LZMAFile this
+    reads concatenated streams and supports seek (backwards by starting over)."""
+
+    def __init__(self, raw):
+        self.raw = raw
+        self.position = 0
+        self._restart()
+
+    def _restart(self):
+        self.raw.seek(0)
+        self.decoder = lzma.LZMADecompressor(memlimit=XZ_MEMORY_LIMIT)
+        self.pending = b""
+        self.position = 0
+
+    def readable(self):
+        return True
+
+    def seekable(self):
+        return True
+
+    def tell(self):
+        return self.position
+
+    def seek(self, offset, whence=io.SEEK_SET):
+        if whence != io.SEEK_SET:
+            raise io.UnsupportedOperation("only absolute seeks are supported")
+        if offset < self.position:
+            self._restart()
+        while self.position < offset:
+            if not self.read(min(1 << 20, offset - self.position)):
+                break
+        return self.position
+
+    def readinto(self, buffer):
+        while not self.pending:
+            if self.decoder.eof:
+                # A finished stream may be followed by zero padding and another
+                # stream; only a clean end of the file ends the data.
+                rest = self.decoder.unused_data
+                while not rest.strip(b"\0"):
+                    rest = self.raw.read(64 * 1024)
+                    if not rest:
+                        return 0
+                self.decoder = lzma.LZMADecompressor(memlimit=XZ_MEMORY_LIMIT)
+                chunk = rest.lstrip(b"\0")
+            elif self.decoder.needs_input:
+                chunk = self.raw.read(64 * 1024)
+                if not chunk:
+                    raise EOFError("Compressed file ended before the end-of-stream marker")
+            else:
+                chunk = b""
+            self.pending = self.decoder.decompress(chunk, max_length=len(buffer))
+        n = min(len(buffer), len(self.pending))
+        buffer[:n] = self.pending[:n]
+        self.pending = self.pending[n:]
+        self.position += n
+        return n
+
+
+def open_xz(handle):
+    handle.seek(0)
+    return io.BufferedReader(LimitedXZ(handle))
 
 
 def file_digest(path, handle=None):
@@ -365,7 +436,9 @@ class Collector:
                 handle.seek(0)
                 if path.suffix == ".gz":
                     return gzip.GzipFile(fileobj=handle, mode="rb")
-                return {".xz": lzma.LZMAFile, ".bz2": bz2.BZ2File}[path.suffix](handle, "rb")
+                if path.suffix == ".xz":
+                    return open_xz(handle)
+                return bz2.BZ2File(handle, "rb")
         else:
             generation = old.get(
                 "generation", f"{stat.st_dev}:{stat.st_ino}:{stat.st_ctime_ns}"
@@ -427,6 +500,10 @@ class Collector:
         except (EOFError, lzma.LZMAError, zlib.error, gzip.BadGzipFile) as exc:
             # A cut-off or damaged archive is a fact about that file, not a
             # crash: readers treat ValueError as "this source cannot be read".
+            if isinstance(exc, lzma.LZMAError) and "emory" in str(exc):
+                raise ValueError(
+                    f"Compressed source needs more than {XZ_MEMORY_LIMIT >> 20} MiB of memory to read"
+                ) from None
             raise ValueError(
                 "Compressed source is truncated or corrupt: " + type(exc).__name__
             ) from None

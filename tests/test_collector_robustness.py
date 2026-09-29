@@ -205,3 +205,59 @@ def test_a_truncated_archive_is_a_readable_error_not_a_crash(folder, suffix, com
     with pytest.raises(ValueError, match="truncated or corrupt"):
         for _ in range(40):  # each poll reads one batch; the cut is at the end
             collector.file(source, archive)
+
+
+def xz_bytes(data, dictionary=None):
+    import lzma
+
+    if dictionary is None:
+        return lzma.compress(data)
+    return lzma.compress(data, format=lzma.FORMAT_XZ, filters=[{"id": lzma.FILTER_LZMA2, "dict_size": dictionary}])
+
+
+def test_xz_reader_handles_seeks_padding_and_concatenated_streams():
+    import io
+    import lzma
+
+    from logsentinel.portal.collect import open_xz
+
+    first = b"".join(b"line %06d of the first stream\n" % i for i in range(20000))
+    second = b"second stream line\n" * 500
+    blob = xz_bytes(first) + b"\0\0\0\0" + xz_bytes(second)  # stream padding between streams
+    # The standard library stops at padding between streams; xz itself reads on.
+    expected = first + second
+    assert lzma.LZMAFile(io.BytesIO(xz_bytes(first) + xz_bytes(second))).read() == expected
+    reader = open_xz(io.BytesIO(blob))
+    assert reader.read() == expected
+    for target in (0, 12345, len(first) - 3, len(first) + 5, 7):  # forward, backward and across streams
+        reader.seek(target)
+        assert reader.tell() == target and reader.read(50) == expected[target : target + 50]
+    reader.seek(0)
+    assert reader.readline() == b"line 000000 of the first stream\n"
+
+
+def test_an_xz_archive_that_demands_too_much_memory_is_refused(monkeypatch):
+    import io
+    import lzma
+
+    from logsentinel.portal import collect
+
+    monkeypatch.setattr(collect, "XZ_MEMORY_LIMIT", 8 * 1024 * 1024)
+    hostile = xz_bytes(b"x" * 1000, dictionary=256 * 1024 * 1024)
+    with pytest.raises(lzma.LZMAError, match="[Mm]emory"):
+        collect.open_xz(io.BytesIO(hostile)).read()
+    small = xz_bytes(b"ordinary\n", dictionary=1024 * 1024)  # the default preset itself wants 8 MiB
+    assert collect.open_xz(io.BytesIO(small)).read() == b"ordinary\n"
+
+
+def test_an_xz_source_over_the_limit_is_reported_as_a_bad_source(folder, monkeypatch):
+    from logsentinel.portal import collect
+
+    store, source, logs = folder
+    monkeypatch.setattr(collect, "XZ_MEMORY_LIMIT", 8 * 1024 * 1024)
+    archive = logs / "hostile.log.xz"
+    archive.write_bytes(xz_bytes(b"line\n" * 100, dictionary=256 * 1024 * 1024))
+    collector = Collector(store)
+    assert collector.file(source, archive) == 0
+    with pytest.raises(ValueError, match="needs more than 8 MiB of memory"):
+        collector.file(source, archive)
