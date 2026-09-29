@@ -118,6 +118,9 @@ class Store:
             CREATE TABLE IF NOT EXISTS sender_quota(source_id TEXT PRIMARY KEY,window_start REAL,bytes INTEGER,events INTEGER);
             """
             )
+            # Read the version only once nobody else can be migrating: two
+            # processes starting together must not both apply the same step.
+            db.execute("BEGIN IMMEDIATE")
             version = schema_version(db)
             if version is not None and version > SCHEMA_VERSION:
                 raise RuntimeError(
@@ -130,7 +133,8 @@ class Store:
                 db.execute(
                     "UPDATE meta SET value=? WHERE key='schema_version'", (str(target),)
                 )
-                db.commit()
+            # One transaction for every pending step: a second process waits for
+            # this one and then finds nothing left to do.
             db.execute(
                 "INSERT OR IGNORE INTO meta VALUES('settings',?)",
                 (dumps(Settings().model_dump()),),

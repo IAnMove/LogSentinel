@@ -85,3 +85,22 @@ def test_restore_accepts_older_backups_and_rejects_newer_ones(tmp_path):
     bad = runner.invoke(app, ["restore", str(future), "--data-dir", str(tmp_path / "rejected")])
     assert bad.exit_code != 0
     assert not (tmp_path / "rejected").exists()
+
+
+def test_processes_starting_together_migrate_once_without_failing(tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+
+    store = Store(tmp_path)
+    with store.connect() as db:
+        for name in ("signal_hits_event", "events_segment", "usage_created", "usage_job", "events_urgent"):
+            db.execute(f"DROP INDEX {name}")
+        db.execute("ALTER TABLE events DROP COLUMN urgent")
+        db.execute("UPDATE meta SET value='1' WHERE key='schema_version'")
+
+    def start(_):
+        with Store(tmp_path).connect() as db:
+            return schema_version(db)
+
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        versions = list(pool.map(start, range(6)))
+    assert versions == [SCHEMA_VERSION] * 6
