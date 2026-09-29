@@ -112,3 +112,51 @@ def test_the_muted_text_colour_of_every_light_theme_reads_on_its_own_backgrounds
                 assert _contrast(values["muted"], values[background]) >= 4.5, (a or b, background)
                 checked += 1
     assert checked >= 4
+
+
+def test_the_launcher_installs_only_when_pyproject_changes_and_never_upgrades_pip(tmp_path):
+    """Run the real script against stand-ins for python and the virtual environment."""
+    import os
+    import shutil
+    import subprocess
+
+    if not shutil.which("bash") or not shutil.which("sha256sum"):
+        pytest.skip("needs bash and sha256sum")
+    root = tmp_path / "checkout"
+    root.mkdir()
+    shutil.copy(ROOT / "portal", root / "portal")
+    (root / "pyproject.toml").write_text('version = "1"\n')
+    log = tmp_path / "calls.log"
+    fakebin = tmp_path / "bin"
+    fakebin.mkdir()
+    # python3: passes the version probe, and "-m venv" makes a venv whose python
+    # and logsentinel only record how they were called.
+    (fakebin / "python3").write_text(
+        f"""#!/bin/sh
+case "$1" in
+  -) exit 0 ;;
+  -m) mkdir -p "$3/bin"
+      printf '#!/bin/sh\\necho "pip $*" >> {log}\\n' > "$3/bin/python"
+      printf '#!/bin/sh\\necho "start $*" >> {log}\\n' > "$3/bin/logsentinel"
+      chmod +x "$3/bin/python" "$3/bin/logsentinel" ;;
+esac
+"""
+    )
+    (fakebin / "python3").chmod(0o755)
+    env = dict(os.environ, PATH=f"{fakebin}:{os.environ['PATH']}")
+
+    def launch(*args):
+        subprocess.run(["bash", str(root / "portal"), *args], env=env, check=True, capture_output=True)
+        return log.read_text().splitlines()
+
+    first = launch("--port", "9001")
+    assert sum(line.startswith("pip") for line in first) == 1
+    assert "pip -m pip install -q -e " + str(root) in first[0]
+    assert not any("-U" in line or "--upgrade" in line for line in first)
+    assert first[-1] == "start portal --port 9001"
+    second = launch()
+    assert sum(line.startswith("pip") for line in second) == 1  # no second install
+    assert second[-1] == "start portal"
+    (root / "pyproject.toml").write_text('version = "2"\n')
+    third = launch()
+    assert sum(line.startswith("pip") for line in third) == 2  # dependencies may have changed
