@@ -1,5 +1,6 @@
 """Prompt-injection floors: detection, deterministic finding, chat filter limits."""
 
+import pytest
 from helpers import machine_source
 from logsentinel.portal.analysis import Analyzer
 from logsentinel.portal.injection import (
@@ -236,3 +237,21 @@ def test_detector_stays_linear_on_hostile_input():
     looks_like_instruction("​" * 250000)
     looks_like_instruction("you are now " + "a " * 60000)
     assert time.perf_counter() - started < 3
+
+
+@pytest.mark.parametrize(
+    "pattern, broad",
+    [
+        (".{20,}", True),
+        ("[a-z]", True),
+        ("\\w+", True),
+        ("^.*$", True),
+        (r"\S", True),
+        ("Failed password", False),
+        (r"cron\[\d+\]: .* finished", False),
+        ("Started cron.timer", False),
+        (r"sshd.*Accepted publickey for ana", False),
+    ],
+)
+def test_a_proposed_filter_that_matches_ordinary_lines_is_too_broad(pattern, broad):
+    assert overbroad_pattern({"kind": "regex", "pattern": pattern}) is broad

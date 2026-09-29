@@ -62,17 +62,23 @@ def overbroad_pattern(rule):
         return True
     try:
         compiled = regex.compile(pattern, regex.IGNORECASE)
+        # Typical lines of several lengths and kinds. A filter that matches most
+        # of them (".{20,}" matches any ordinary log line) would hide the log.
         probes = (
             "",
             "ok",
             "Failed password for root",
             "Out of memory: Kill process 1",
             "Started cron.timer.",
+            "Accepted publickey for ana from 192.0.2.10 port 22 ssh2",
+            "systemd[1]: Started Daily apt download activities.",
+            "kernel: EXT4-fs error (device sda1): ext4_find_entry: reading directory",
+            "app[4711]: request completed in 35 ms status=200 path=/health",
         )
         hits = sum(bool(compiled.search(probe, timeout=0.02)) for probe in probes)
     except (regex.error, TimeoutError):
         return True
-    return hits >= 4
+    return hits >= 5
 
 
 def sanitize_chat_filter(proposal):
