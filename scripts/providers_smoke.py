@@ -5,7 +5,6 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import json
-import socket
 import tempfile
 import threading
 import time
@@ -55,16 +54,20 @@ with tempfile.TemporaryDirectory(prefix="sentinel-providers-") as directory:
     cfg.llm.api_key = "synthetic-private-key"
     cfg.llm.enable_thinking = False
     store.set_meta("settings", cfg.model_dump_json())
-    with socket.socket() as sock:
-        sock.bind(("127.0.0.1", 0))
-        port = sock.getsockname()[1]
     server = uvicorn.Server(
-        uvicorn.Config(app, host="127.0.0.1", port=port, log_level="error")
+        uvicorn.Config(app, host="127.0.0.1", port=0, log_level="error")
     )
     thread = threading.Thread(target=server.run, daemon=True)
     thread.start()
-    while not server.started:
+    for _ in range(400):
+        if server.started:
+            break
         time.sleep(0.05)
+    else:
+        raise SystemExit("The portal did not start")
+    # uvicorn bound port 0 itself, so no other process can take the port between
+    # choosing it and serving on it.
+    port = server.servers[0].sockets[0].getsockname()[1]
     errors = []
     try:
         with sync_playwright() as pw:

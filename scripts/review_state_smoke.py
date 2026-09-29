@@ -2,7 +2,6 @@
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-import socket
 import tempfile
 import threading
 import time
@@ -25,17 +24,19 @@ with tempfile.TemporaryDirectory(prefix="sentinel-review-ui-") as directory:
     ReviewQueue(analyzer).prepare(store.get("machine", machine_id), cfg, 0)
     event = store.events()[0]
     model_id = analyzer.save_finding(machine_id, dict(title="Synthetic model finding", summary="Synthetic evidence", severity="HIGH", category="access", evidence_ids=[event["id"]]), [event["id"]])
-    with socket.socket() as sock:
-        sock.bind(("127.0.0.1", 0))
-        port = sock.getsockname()[1]
-    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="error"))
+    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=0, log_level="error"))
     thread = threading.Thread(target=server.run, daemon=True)
     thread.start()
     try:
-        for _ in range(100):
+        for _ in range(400):
             if server.started:
                 break
             time.sleep(.05)
+        else:
+            raise SystemExit("The portal did not start")
+        # uvicorn bound port 0 itself, so no other process can take the port between
+        # choosing it and serving on it.
+        port = server.servers[0].sockets[0].getsockname()[1]
         errors = []
         with sync_playwright() as pw:
             browser = pw.chromium.launch(headless=True, args=["--no-sandbox"])
