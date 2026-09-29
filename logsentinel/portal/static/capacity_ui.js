@@ -433,10 +433,7 @@ async function mountCapacitySummary(root, machine = scope) {
     root.replaceChildren(p);
   }
   await update();
-  const poll = setInterval(() => {
-    if (!root.isConnected) return clearInterval(poll);
-    update().catch(() => {});
-  }, 10000);
+  pollWhileVisible(() => root.isConnected, 10000, update);
 }
 async function capacityView(root) {
   const live = el("div"),
@@ -869,8 +866,7 @@ async function capacityView(root) {
     simulate();
   }
   await update();
-  const poll = setInterval(() => {
-    if (!root.isConnected) return clearInterval(poll);
-    update().catch((error) => notice(error.message, true));
-  }, 10000);
+  pollWhileVisible(() => root.isConnected, 10000, update, (error) =>
+    notice(error.message, true),
+  );
 }

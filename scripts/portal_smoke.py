@@ -60,7 +60,53 @@ with tempfile.TemporaryDirectory(prefix="sentinel-browser-") as d:
                 app.state.store.meta("admin_token")
             )
             page.get_by_role("button", name="Entrar al portal").click()
+            page.get_by_role("button", name="Resumen", exact=True).wait_for()
+            # Accessibility of navigation: one current page, focus on the new
+            # heading, no live region rebuilt every few seconds.
+            assert page.locator('#nav button[aria-current="page"]').count() == 1
+            assert page.locator("#content[aria-live], #monitor-status[aria-live]").count() == 0
             page.get_by_role("button", name="Máquinas", exact=True).click()
+            page.wait_for_function("document.activeElement && document.activeElement.id === 'page-title'")
+            assert page.locator('#nav button[aria-current="page"]').inner_text().strip() == "Máquinas"
+            # Polling never overlaps itself and sleeps in a hidden tab.
+            overlap = page.evaluate(
+                """async () => {
+                  let calls = 0, release;
+                  const gate = new Promise((r) => (release = r));
+                  const stop = pollWhileVisible(() => true, 15, async () => { calls++; await gate; });
+                  await new Promise((r) => setTimeout(r, 200));
+                  const inFlight = calls;
+                  release(); stop();
+                  return inFlight;
+                }"""
+            )
+            assert overlap == 1, overlap
+            hidden = page.evaluate(
+                """async () => {
+                  Object.defineProperty(document, "hidden", { value: true, configurable: true });
+                  let calls = 0;
+                  const stop = pollWhileVisible(() => true, 15, async () => { calls++; });
+                  await new Promise((r) => setTimeout(r, 150));
+                  const whileHidden = calls;
+                  Object.defineProperty(document, "hidden", { value: false, configurable: true });
+                  document.dispatchEvent(new Event("visibilitychange"));
+                  await new Promise((r) => setTimeout(r, 60));
+                  stop();
+                  return [whileHidden, calls];
+                }"""
+            )
+            assert hidden[0] == 0 and hidden[1] >= 1, hidden
+            timed_out = page.evaluate(
+                """async () => {
+                  const original = window.fetch;
+                  window.fetch = (path, options) => new Promise((_, reject) =>
+                    options.signal.addEventListener("abort", () => reject(new DOMException("x", "AbortError"))));
+                  try { await api("/api/monitor", undefined, undefined, 30); return "resolved"; }
+                  catch (error) { return error.message; }
+                  finally { window.fetch = original; }
+                }"""
+            )
+            assert "no respondió a tiempo" in timed_out, timed_out
             page.get_by_role("button", name="Añadir", exact=True).click()
             page.get_by_label("Nombre", exact=True).fill("Servidor de prueba")
             page.get_by_role("button", name="Guardar", exact=True).click()

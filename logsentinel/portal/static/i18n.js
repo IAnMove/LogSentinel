@@ -578,6 +578,7 @@ Object.assign(translations, {
   "Esperando primera muestra": "Waiting for the first sample",
   "Sin mediciones recientes": "No recent measurements",
   Copiado: "Copied",
+  "El portal no respondió a tiempo": "The portal did not answer in time",
   "Ver detalles": "View details",
   Intervalo: "Interval",
   "Medición parcial": "Partial measurement",
