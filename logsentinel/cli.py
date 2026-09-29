@@ -715,6 +715,9 @@ def portal(data_dir: str = typer.Option("~/.local/share/logsentinel/portal", "--
         for label, path in (("certificate", tls_cert), ("private key", tls_key)):
             if path and not Path(path).expanduser().is_file():
                 raise typer.BadParameter(f"Cannot read the TLS {label}: {path}")
+    from logsentinel.portal.logs import configure as configure_logging
+
+    configure_logging()
     application = create_app(data_dir)
     console.print(f"Portal: http://127.0.0.1:{port}")
     # stdout is often captured by journald and then read back as log evidence.

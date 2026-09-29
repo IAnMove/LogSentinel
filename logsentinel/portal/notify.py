@@ -12,6 +12,7 @@ from pathlib import Path
 import shutil
 import time
 import httpx
+from .logs import report
 from .network import CheckedAsyncTransport
 from .rules import matches, redact, sanitize
 from .store import uid, dumps
@@ -378,6 +379,7 @@ class Outbox:
                         status = "unknown"
                         error = "Delivery interrupted after sending may have started; remote acceptance unknown"
                     except Exception as exc:
+                        report("delivery to " + str(dest.get("name", "destination")), exc, trace=False)
                         status = (
                             "retry"
                             if isinstance(exc, RuntimeError) and row["attempts"] < 2

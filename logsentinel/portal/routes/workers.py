@@ -6,6 +6,7 @@ import asyncio
 import time
 
 from ..analysis import safe_error
+from ..logs import report
 from ..rules import (
     redact,
 )
@@ -38,9 +39,10 @@ def build_workers(ctx):
             for source in store.objects("source"):
                 try:
                     await asyncio.to_thread(collector.poll, source)
-                except Exception:
+                except Exception as exc:
                     failed = True
                     store.set_meta("collector_error", "Collector worker failed")
+                    report("collector", exc)
             monitor.capture_heartbeat = time.time()
             health_monitor.beat("capture")
             if not failed:
@@ -62,6 +64,7 @@ def build_workers(ctx):
                 raise
             except Exception as exc:
                 store.set_meta("worker_error", redact(str(exc))[:200])
+                report("analysis worker", exc)
             health_monitor.beat("analysis")
             await asyncio.sleep(1)
 
@@ -76,6 +79,7 @@ def build_workers(ctx):
                 raise
             except Exception as exc:
                 store.set_meta("detector_worker_error", safe_error(exc))
+                report("detector worker", exc)
             await asyncio.sleep(1)
 
     async def delivering():
@@ -90,6 +94,7 @@ def build_workers(ctx):
                     "delivery_worker_error",
                     safe_error(exc, (store.settings().llm.api_key,)),
                 )
+                report("delivery worker", exc)
             health_monitor.beat("notifications")
             await asyncio.sleep(2)
 
@@ -102,6 +107,7 @@ def build_workers(ctx):
                 raise
             except Exception as exc:
                 store.set_meta("telemetry_worker_error", safe_error(exc))
+                report("metrics worker", exc)
             health_monitor.beat("metrics")
             await asyncio.sleep(2)
 
@@ -114,6 +120,7 @@ def build_workers(ctx):
                 raise
             except Exception as exc:
                 store.set_meta("health_worker_error", safe_error(exc))
+                report("health worker", exc)
             await asyncio.sleep(5)
 
     return collecting, working, detecting, delivering, measuring, supervising

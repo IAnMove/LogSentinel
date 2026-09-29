@@ -13,6 +13,7 @@ from .compaction import compact, public_group, representation
 from .freshness import SEVERE, happened_recently, live_cutoff, newest_instant
 from .models import Settings, Verdict
 from .injection import looks_like_instruction
+from .logs import report
 from .rules import excluded, redact, sanitize, protected_secrets
 from .store import dumps, uid
 
@@ -994,6 +995,7 @@ class ReviewQueue:
                     attempts = db.execute("SELECT attempts FROM jobs WHERE id=?", (job,)).fetchone()[0]
                 batch["retry_at"] = time.time() + min(300, 5 * 2 ** min(6, max(attempts, batch.get("verification_attempts", 0))))
             error = safe_error(exc, (cfg.llm.api_key,))
+            report("model " + phase, exc)
             if phase.startswith("verification"):
                 gave_up = batch.get("verification_attempts", 0) >= 3
                 if gave_up:

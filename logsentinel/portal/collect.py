@@ -15,6 +15,7 @@ import threading
 from datetime import timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from .journal_stream import read_journal
+from .logs import report
 from contextlib import nullcontext
 from pathlib import Path
 import httpx
@@ -240,6 +241,8 @@ class Collector:
                     {"status": "error", "checked": time.time(), "error": str(exc)[:300]}
                 ),
             )
+            # The interface shows the message; the log keeps where it came from.
+            report("source " + str(source.get("name", source["id"])), exc)
         return total
 
     @staticmethod
