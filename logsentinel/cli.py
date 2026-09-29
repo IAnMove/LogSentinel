@@ -526,6 +526,10 @@ def config_init(
 
 SYSTEM_UNIT_DIR = Path("/etc/systemd/system")
 
+# Senders keep one or two connections each; this leaves room for a large fleet
+# while bounding what an unauthenticated client can hold open.
+INGEST_MAX_CONNECTIONS = 200
+
 # Applied to every generated unit. A log reader needs no privilege beyond reading
 # the files it was granted, so the unit drops capabilities and write access up front
 # instead of relying on the operator to remember.
@@ -746,6 +750,9 @@ def portal(data_dir: str = typer.Option("~/.local/share/logsentinel/portal", "--
                 proxy_headers=False,
                 ssl_certfile=tls_cert,
                 ssl_keyfile=tls_key,
+                # The panel is loopback only; this listener answers the network,
+                # so a flood of connections gets a 503 rather than all the memory.
+                limit_concurrency=INGEST_MAX_CONNECTIONS,
             )
         ),
     ]

@@ -265,3 +265,24 @@ def test_successful_logins_do_not_spend_the_failure_budget(tmp_path):
         assert [c.post("/login", json={"token": "wrong"}).status_code for _ in range(11)] == [401] * 10 + [429]
         # The lockout applies to guesses; it must not be bypassable by the right key.
         assert c.post("/login", json={"token": key}).status_code == 429
+
+
+def test_reception_listener_bounds_its_concurrent_connections(tmp_path, monkeypatch):
+    import uvicorn
+
+    seen = []
+    monkeypatch.setattr(uvicorn, "Server", lambda config: seen.append(config) or None)
+    monkeypatch.setattr(cli.asyncio, "run", lambda coroutine: coroutine.close())
+    cert = tmp_path / "cert.pem"
+    key = tmp_path / "key.pem"
+    cert.write_text("x")
+    key.write_text("x")
+    result = CliRunner().invoke(
+        cli.app,
+        ["portal", "--data-dir", str(tmp_path / "data"), "--ingest-listen", "127.0.0.1:8767",
+         "--tls-cert", str(cert), "--tls-key", str(key)],
+    )
+    assert result.exit_code == 0, result.output
+    reception = next(c for c in seen if c.port == 8767)
+    assert reception.limit_concurrency == cli.INGEST_MAX_CONNECTIONS
+    assert next(c for c in seen if c.port == 8765).limit_concurrency is None
