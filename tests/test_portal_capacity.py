@@ -3,7 +3,7 @@ import time
 
 import pytest
 
-from test_portal_api import client, machine_source
+from helpers import machine_source
 from logsentinel.portal.analysis import Analyzer, SYSTEM
 from logsentinel.portal.capacity import capacity_report, coverage_signal, recent_coverage
 from logsentinel.portal.batch_budget import input_ceiling

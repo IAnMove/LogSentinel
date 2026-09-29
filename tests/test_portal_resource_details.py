@@ -1,7 +1,7 @@
 import asyncio
 from types import SimpleNamespace
 
-from test_portal_api import client, machine_source
+from helpers import machine_source
 from logsentinel.portal.disk_info import DiskScans
 from logsentinel.portal.telemetry_data import LinuxSampler, TelemetryConfig
 

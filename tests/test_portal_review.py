@@ -8,7 +8,7 @@ from logsentinel.portal.analysis import Analyzer, ReviewClient, safe_error
 from logsentinel.portal.models import Finding, Machine
 from logsentinel.portal.monitor import Monitor
 from logsentinel.portal.store import Store
-from tests.test_portal_api import client
+
 
 
 def test_recovery_does_not_strand_interrupted_last_attempt(tmp_path):

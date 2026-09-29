@@ -1,7 +1,7 @@
 import json
 import time
 
-from test_portal_api import client, machine_source
+from helpers import machine_source
 from logsentinel.portal.model_timing import endpoint_id
 
 

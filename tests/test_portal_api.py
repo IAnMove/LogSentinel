@@ -6,28 +6,7 @@ from logsentinel.portal.app import create_app
 from logsentinel.portal.analysis import ReviewClient
 
 
-@pytest.fixture
-def client(tmp_path):
-    app = create_app(tmp_path, background=False)
-    with TestClient(app, base_url="http://localhost") as c:
-        c.headers["X-LogSentinel"] = "portal"
-        assert (
-            c.post(
-                "/login", json={"token": app.state.store.meta("admin_token")}
-            ).status_code
-            == 200
-        )
-        yield c, app.state.store
-
-
-def machine_source(c):
-    m = c.post("/api/objects/machine", json={"name": "A"}).json()["id"]
-    r = c.post(
-        "/api/objects/source",
-        json={"name": "remote", "machine_id": m, "kind": "push", "enabled": True},
-    )
-    assert r.status_code == 200, r.text
-    return m, r.json()["id"]
+from helpers import machine_source
 
 
 def test_auth_csrf_and_host_are_required(tmp_path):

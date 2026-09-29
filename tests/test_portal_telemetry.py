@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 from pydantic import ValidationError
-from test_portal_api import client, machine_source
+from helpers import machine_source
 from logsentinel.portal.analysis import ReviewClient
 from logsentinel.portal.models import Machine
 from logsentinel.portal.telemetry_data import (

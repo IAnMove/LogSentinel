@@ -1,6 +1,6 @@
 """Prompt-injection floors: detection, deterministic finding, chat filter limits."""
 
-from test_portal_api import client, machine_source
+from helpers import machine_source
 from logsentinel.portal.analysis import Analyzer
 from logsentinel.portal.injection import (
     apply_injection_signals,

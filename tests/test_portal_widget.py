@@ -1,5 +1,5 @@
 import hashlib
-from test_portal_api import client, machine_source
+from helpers import machine_source
 
 
 def test_widget_key_is_revocable_and_cannot_access_logs_settings_or_login(client):

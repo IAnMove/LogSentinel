@@ -8,8 +8,8 @@ from logsentinel.portal.app import create_app
 from logsentinel.portal.forward import forward
 from logsentinel.portal.models import Machine, Source
 from logsentinel.portal.store import Store
+from helpers import until
 
-pytestmark = pytest.mark.usefixtures("idle_sender_disk")
 
 
 @pytest.mark.asyncio
@@ -82,7 +82,7 @@ async def test_slow_delivery_does_not_stop_capture(tmp_path):
 
     task = asyncio.create_task(run_workers(capture, deliver, 0.05, store, False))
     await sending.wait()
-    await asyncio.sleep(0.35)
+    await until(lambda: len(captured) >= 3)  # capture keeps running while delivery is stuck
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task

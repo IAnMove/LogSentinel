@@ -3,7 +3,7 @@ import time
 import asyncio
 import pytest
 
-from test_portal_api import client, machine_source
+from helpers import machine_source
 from test_portal_telemetry import configured, sample
 from logsentinel.portal.models import Destination
 from logsentinel.portal.app import create_app

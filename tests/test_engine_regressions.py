@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock
 from logsentinel.config import Config
 from logsentinel.core.engine import SentinelEngine
 from logsentinel.core.models import Incident, LogEntry, LLMVerdict, MemoryRule, MemoryRuleType, Category, AlertStatus
+from helpers import until
 
 
 def make_engine(tmp_path, **kwargs):
@@ -119,7 +120,7 @@ def test_a_slow_model_does_not_stop_ingestion(tmp_path):
         for n in range(ANALYSIS_WORKERS + 5):
             await asyncio.wait_for(
                 engine.ingest_log(LogEntry(service='sshd', message=f'Failed password for user{n}x', raw='x')), 1)
-        await asyncio.sleep(0.05)
+        await until(lambda: len(started) == ANALYSIS_WORKERS)
         blocked_workers = len(started)
         release.set()
         await engine.stop()
@@ -152,7 +153,7 @@ def test_an_analysis_failure_is_still_reported_to_the_supervisor(tmp_path):
     async def run():
         await engine.start()
         await engine.ingest_log(LogEntry(service='sshd', message='Failed password for root', raw='x'))
-        await asyncio.sleep(0.05)
+        await until(lambda: engine._analysis_error is not None)
         try:
             with pytest.raises(RuntimeError, match='database is locked'):
                 engine.raise_if_failed()

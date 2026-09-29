@@ -8,6 +8,7 @@ import pytest
 
 from logsentinel.portal import logs
 from logsentinel.portal.logs import RedactingFormatter, configure, once_per, report
+from helpers import until
 
 
 @pytest.fixture(autouse=True)
@@ -106,7 +107,7 @@ async def test_a_crashing_worker_step_is_logged_and_the_loop_survives(tmp_path, 
 
     monkeypatch.setattr(ctx.monitor, "tick", broken)
     task = asyncio.create_task(working())
-    await asyncio.sleep(0.2)
+    await until(lambda: "analysis worker failed" in stream.getvalue())
     task.cancel()
     await asyncio.gather(task, return_exceptions=True)
     assert "analysis worker failed: RuntimeError" in stream.getvalue()
