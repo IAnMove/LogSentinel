@@ -354,3 +354,15 @@ def test_signal_rules_are_loaded_once_per_scan(data, monkeypatch):
     monkeypatch.setattr(store, "objects", counted)
     apply_signals(Analyzer(store), machine_id=machine, events=store.events(limit=5000))
     assert reads == ["rule"]
+
+
+def test_triage_prompt_explains_every_sensitivity_level_the_setting_offers():
+    from typing import get_args
+
+    from logsentinel.portal.analysis import TRIAGE_SYSTEM
+    from logsentinel.portal.models import Settings
+
+    levels = get_args(Settings.model_fields["sensitivity"].annotation)
+    assert levels
+    for level in levels:
+        assert level + " -" in TRIAGE_SYSTEM, level
