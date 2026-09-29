@@ -11,6 +11,19 @@ from fastapi.responses import JSONResponse
 from ..limits import BodyLimit
 
 
+def cache_policy(path, status):
+    """Everything is private and fresh except the public static files.
+
+    Those carry no data: scripts and styles are revalidated (the server answers
+    a conditional request with a tiny 304), and the artwork, whose file names
+    carry a version, may be reused for a day. Before this, every page load
+    downloaded about 400 KB of scripts and the theme's images again.
+    """
+    if path.startswith("/static/") and status in (200, 304):
+        return "public, max-age=86400" if path.endswith(".png") else "no-cache"
+    return "no-store"
+
+
 def register_access(app, ctx):
     auth = ctx.auth
     # Failed logins in the last minute, per client address.
@@ -18,8 +31,8 @@ def register_access(app, ctx):
 
     app.add_middleware(BodyLimit)
 
-    @app.middleware("http")
-    async def guard(request, call_next):
+    async def admit(request, call_next):
+        """Refuse what may not pass; otherwise hand the request on."""
         host = request.url.hostname
         if host not in ("localhost", "127.0.0.1", "::1"):
             return JSONResponse(
@@ -48,11 +61,19 @@ def register_access(app, ctx):
                     return JSONResponse(
                         {"detail": "CSRF header required"}, status_code=403
                     )
-        response = await call_next(request)
+        return await call_next(request)
+
+    @app.middleware("http")
+    async def guard(request, call_next):
+        # Every response gets the protective headers, refusals included: the
+        # early 400/401/403 answers used to leave here without them.
+        response = await admit(request, call_next)
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["Referrer-Policy"] = "no-referrer"
-        response.headers["Cache-Control"] = "no-store"
+        response.headers["Cache-Control"] = cache_policy(
+            request.url.path, response.status_code
+        )
         response.headers["Content-Security-Policy"] = (
             "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self'; frame-ancestors 'none'; base-uri 'none'"
         )

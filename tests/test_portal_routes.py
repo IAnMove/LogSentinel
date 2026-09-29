@@ -53,3 +53,35 @@ def test_the_panel_serves_the_page_and_static_files_without_a_session(app):
         assert visitor.get("/").status_code == 200
         assert visitor.get("/static/app.js").status_code == 200
         assert visitor.get("/healthz").status_code in (200, 503)
+
+
+def test_static_files_are_cached_sensibly_and_everything_else_is_not(app):
+    with TestClient(app, base_url="http://localhost") as visitor:
+        script = visitor.get("/static/app.js")
+        assert script.status_code == 200 and script.headers["cache-control"] == "no-cache"
+        again = visitor.get("/static/app.js", headers={"If-None-Match": script.headers["etag"]})
+        assert again.status_code == 304 and again.headers["cache-control"] == "no-cache"
+        image = visitor.get("/static/tentri-icon-mono-v1.png")
+        assert image.status_code == 200 and image.headers["cache-control"] == "public, max-age=86400"
+        assert visitor.get("/").headers["cache-control"] == "no-store"
+        assert visitor.get("/api/state").headers["cache-control"] == "no-store"
+        assert visitor.get("/static/missing.js").headers["cache-control"] == "no-store"
+        # The protective headers are unchanged on every kind of response.
+        for path in ("/static/app.js", "/", "/api/state"):
+            headers = visitor.get(path).headers
+            assert headers["x-content-type-options"] == "nosniff"
+            assert "default-src 'self'" in headers["content-security-policy"]
+
+
+def test_refusals_carry_the_protective_headers_too(app):
+    with TestClient(app, base_url="http://localhost") as visitor:
+        cases = [
+            visitor.get("/api/state"),                                        # 401: no session
+            visitor.post("/login", json={"token": "x"}),                      # 403: no CSRF header
+            visitor.get("/", headers={"host": "evil.example"}),               # 400: untrusted host
+        ]
+        for response in cases:
+            assert response.status_code in (400, 401, 403), response.status_code
+            assert response.headers["cache-control"] == "no-store"
+            assert response.headers["x-frame-options"] == "DENY"
+            assert "default-src 'self'" in response.headers["content-security-policy"]
