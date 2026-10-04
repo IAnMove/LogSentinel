@@ -224,3 +224,65 @@ def test_exposures_over_a_day_are_one_problem_that_keeps_updating(site):
     run(store)
     (found,) = problems(store)
     assert "2 requests from 2 clients" in found["data"]["summary"]
+
+
+def logins(count, *, ip="203.0.113.9", target="/wp-login.php", status=200, method="POST", start=None, spread=5):
+    base = time.time() - 600 if start is None else start
+    return [line(ip=ip, status=status, target=target, method=method, when=base + n * spread) for n in range(count)]
+
+
+def test_one_client_hammering_a_login_page_is_a_high_finding(site):
+    store, source = site
+    send(store, source, logins(25))
+    run(store)
+    (found,) = problems(store)
+    assert found["severity"] == "HIGH" and found["data"]["category"] == "authentication"
+    assert found["data"]["reasoning"] == "web_login_attempts"
+    summary = found["data"]["summary"]
+    assert "25 requests from 1 clients" in summary and "/wp-login.php (25)" in summary and "203.0.113.9 (25)" in summary
+    assert "does not show that any attempt succeeded" in summary
+
+
+def test_many_visitors_logging_in_is_a_busy_site_not_an_attack(site):
+    store, source = site
+    crowd = [line(ip=f"198.51.100.{n}", method="POST", target="/login", status=302, when=time.time() - 300 + n) for n in range(1, 61)]
+    send(store, source, crowd)
+    run(store)
+    assert not problems(store)
+
+
+@pytest.mark.parametrize("busiest, expected", [(14, 0), (15, 1)])
+def test_the_busiest_client_must_account_for_fifteen_of_the_attempts(site, busiest, expected):
+    store, source = site
+    base = time.time() - 600
+    # Twelve other visitors: over twenty attempts in one window either way.
+    others = [line(ip=f"198.51.100.{n}", method="POST", target="/login", when=base + n) for n in range(1, 13)]
+    send(store, source, logins(busiest, target="/login", start=base, spread=3) + others)
+    run(store)
+    assert len(problems(store)) == expected
+
+
+def test_fewer_than_twenty_attempts_are_not_a_finding(site):
+    store, source = site
+    send(store, source, logins(19))
+    run(store)
+    assert not problems(store)
+
+
+@pytest.mark.parametrize(
+    "request_line",
+    [dict(method="GET", target="/login"), dict(method="POST", target="/api/orders"), dict(method="POST", target="/contact"), dict(method="HEAD", target="/wp-login.php")],
+)
+def test_only_posts_to_login_pages_count(site, request_line):
+    store, source = site
+    send(store, source, logins(40, **request_line))
+    run(store)
+    assert not problems(store)
+
+
+@pytest.mark.parametrize("target", ["/login", "/users/sign_in", "/administrator/index.php", "/api/v2/login", "/xmlrpc.php", "/%6cogin", "/shop/account/login?next=/"])
+def test_common_login_pages_are_recognised(site, target):
+    store, source = site
+    send(store, source, logins(25, target=target))
+    run(store)
+    assert [p["data"]["reasoning"] for p in problems(store)] == ["web_login_attempts"]

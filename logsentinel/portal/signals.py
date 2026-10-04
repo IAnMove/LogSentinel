@@ -176,6 +176,10 @@ def apply_signals(analyzer, limit=500, *, machine_id=None, events=None, notify=T
             for source_id, evidence in batches:
                 if len(evidence) < spec["min"]:
                     continue
+                # A condition on what the window holds, for findings that are
+                # about one client rather than about the source as a whole.
+                if spec.get("confirm") and not spec["confirm"](evidence):
+                    continue
                 save_signal(analyzer, batch_machine, spec, evidence, spanish, source_id, notify=notify)
                 created += 1
     return created

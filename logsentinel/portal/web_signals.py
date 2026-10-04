@@ -123,6 +123,29 @@ def secret_served(event):
     )
 
 
+LOGIN_PATH = re.compile(
+    r"(?:^|/)(?:wp-login\.php|xmlrpc\.php|login|signin|sign-in|log-in|user/login|users/sign_in"
+    r"|accounts?/login|admin/login|administrator/index\.php|api/(?:v\d+/)?login)(?:/|$)",
+    re.ASCII,
+)
+
+
+def login_attempt(event):
+    return request(event).get("method") == "POST" and bool(LOGIN_PATH.search(path_text(event)))
+
+
+def one_client_sends(minimum):
+    """A window qualifies only when a single client alone made at least `minimum` of its requests.
+
+    The same total spread over many visitors is a busy site, not an attack.
+    """
+
+    def confirm(hits):
+        return Counter(request(e).get("ip") for e in hits).most_common(1)[0][1] >= minimum
+
+    return confirm
+
+
 def server_error(event):
     return 500 <= request(event).get("status", 0) <= 599
 
@@ -143,6 +166,24 @@ WEB_SIGNALS = (
             "Puede ser un fallo de la aplicación o un ataque que lo provoca.",
             "The web server repeatedly answered with 5xx errors within five minutes. "
             "It may be an application failure or an attack that causes one.",
+        ),
+    },
+    {
+        "id": "web_login_attempts",
+        "min": 20,
+        "window_seconds": 300,
+        "severity": "HIGH",
+        "category": "authentication",
+        "service": is_web,
+        "match": login_attempt,
+        "confirm": one_client_sends(15),
+        "digest": web_digest,
+        "title": ("Intentos repetidos de inicio de sesión web", "Repeated web login attempts"),
+        "summary": (
+            "Un mismo cliente envió muchas peticiones POST a páginas de inicio de sesión en cinco minutos. "
+            "Puede ser fuerza bruta o relleno de credenciales; no prueba que ningún intento haya acertado.",
+            "One client sent many POST requests to login pages within five minutes. "
+            "It may be brute force or credential stuffing; it does not show that any attempt succeeded.",
         ),
     },
     {
