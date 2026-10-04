@@ -143,3 +143,84 @@ def test_requests_in_other_sources_do_not_complete_a_burst(site):
     send(store, other, burst(6), "b")
     run(store)
     assert not problems(store)
+
+
+PROBES = ["/.env", "/.git/config", "/phpmyadmin/index.php", "/backup.sql", "/vendor/phpunit/src/x.php", "/.aws/credentials"]
+
+
+def probes(count, *, status=404, ip="203.0.113.9", start=None):
+    base = time.time() - 600 if start is None else start
+    return [line(ip=ip, status=status, target=PROBES[n % len(PROBES)], when=base + n) for n in range(count)]
+
+
+def test_repeated_probing_for_sensitive_paths_is_a_quiet_low_finding(site):
+    store, source = site
+    send(store, source, probes(8) + probes(6, ip="198.51.100.2", start=time.time() - 590), "scan")
+    run(store)
+    (found,) = problems(store)
+    assert found["severity"] == "LOW" and found["data"]["reasoning"] == "web_sensitive_probes"
+    summary = found["data"]["summary"]
+    assert "14 requests from 2 clients" in summary and "/.env (" in summary and "/phpmyadmin/index.php (" in summary
+    assert "203.0.113.9 (8)" in summary
+
+
+def test_ordinary_traffic_and_a_few_probes_are_not_probing(site):
+    store, source = site
+    ordinary = ["/index.html", "/api/users", "/.well-known/acme-challenge/token", "/wp-login.php", "/images/old.jpg", "/app.sql.php"]
+    send(store, source, [line(target=ordinary[n % len(ordinary)], status=404, when=time.time() - 300 + n) for n in range(60)], "ok")
+    send(store, source, probes(9), "few")
+    run(store)
+    assert not problems(store)
+
+
+@pytest.mark.parametrize("target", ["/%2e%65nv", "/%252e%2565nv", "/.ENV", "/..%5c.git%5cHEAD", "/.git/config?x=1"])
+def test_disguised_requests_for_a_secret_are_still_probes(site, target):
+    store, source = site
+    send(store, source, [line(status=404, target=target, when=time.time() - 300 + n) for n in range(10)])
+    run(store)
+    assert [p["data"]["reasoning"] for p in problems(store)] == ["web_sensitive_probes"]
+
+
+def test_a_query_that_merely_mentions_a_secret_is_not_a_probe(site):
+    store, source = site
+    send(store, source, [line(status=404, target="/index.php?file=.env", when=time.time() - 300 + n) for n in range(20)])
+    run(store)
+    assert not problems(store)
+
+
+@pytest.mark.parametrize("target", ["/.env", "/.git/config", "/backup.sql", "/.env.production", "/id_rsa"])
+def test_a_secret_answered_with_success_is_a_finding_at_once(site, target):
+    store, source = site
+    send(store, source, [line(status=200, target=target)])
+    run(store)
+    (found,) = problems(store)
+    assert found["severity"] == "MEDIUM" and found["data"]["reasoning"] == "web_secret_served"
+    assert "catch-all" in found["data"]["summary"] and "(1)" in found["data"]["summary"]
+
+
+@pytest.mark.parametrize(
+    "request_line",
+    [
+        dict(status=404, target="/.env"),
+        dict(status=403, target="/.git/config"),
+        dict(status=301, target="/.env"),
+        dict(status=200, target="/.env", method="POST"),
+        dict(status=200, target="/.well-known/acme-challenge/x"),
+        dict(status=200, target="/index.html"),
+    ],
+)
+def test_refused_or_ordinary_requests_are_not_an_exposure(site, request_line):
+    store, source = site
+    send(store, source, [line(**request_line)])
+    run(store)
+    assert not [p for p in problems(store) if p["data"]["reasoning"] == "web_secret_served"]
+
+
+def test_exposures_over_a_day_are_one_problem_that_keeps_updating(site):
+    store, source = site
+    send(store, source, [line(status=200, target="/.env", when=time.time() - 7200)], "first")
+    run(store)
+    send(store, source, [line(status=200, target="/.git/config", ip="198.51.100.4", when=time.time() - 60)], "second")
+    run(store)
+    (found,) = problems(store)
+    assert "2 requests from 2 clients" in found["data"]["summary"]

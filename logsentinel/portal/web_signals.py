@@ -8,8 +8,11 @@ chosen by the visitor, so it is bounded and limited to printable ASCII first.
 
 from __future__ import annotations
 
+import re
 from collections import Counter
 from datetime import datetime, timezone
+from functools import lru_cache
+from urllib.parse import unquote
 
 from .freshness import event_instant
 from .web_access import WEB_SERVICE
@@ -68,6 +71,58 @@ def web_digest(hits, spanish):
     )
 
 
+@lru_cache(maxsize=4096)
+def decoded(text):
+    """What a server makes of a path or query: URL-decoded twice, slashes and case folded.
+
+    Twice because double encoding is the usual way past a filter. Matching runs on
+    this, never on the raw text, so %2e%65nv and .ENV are the same request.
+    """
+    for _ in range(2):
+        text = unquote(text)
+    return text.replace("\\", "/").lower()
+
+
+# Files that must never be served: secrets, repositories, keys, dumps and backups.
+SECRET_PATH = re.compile(
+    r"(?:^|/)\.env(?:\.[a-z0-9_-]{1,32})?$"
+    r"|/\.(?:git|svn|hg|aws|ssh|docker)(?:/|$)"
+    r"|(?:^|/)\.(?:htpasswd|git-credentials|npmrc|netrc|pgpass)$"
+    r"|(?:^|/)id_(?:rsa|dsa|ecdsa|ed25519)$"
+    r"|(?:^|/)(?:wp-config|config|configuration|settings|database|secrets|credentials)\.[a-z0-9]{2,5}\.(?:bak|old|orig|save|swp|txt)$"
+    r"|\.(?:sql|sqlite3?|db|bak|old|orig|swp)(?:\.(?:gz|zip|tar|7z|bz2|xz))?$"
+    r"|(?:^|/)(?:backup|dump|db|database|site|www|web)\.(?:zip|tar|tgz|tar\.gz|7z|rar)$",
+    re.ASCII,
+)
+# Panels and exploit endpoints that are only ever asked for by someone looking
+# for them. WordPress login paths are left out: on a WordPress site they are
+# ordinary traffic, and the login detector watches them.
+SCANNER_PATH = re.compile(
+    r"/(?:phpmyadmin|pma|adminer(?:\.php)?|phpinfo\.php|server-status|server-info|boaform|hnap1"
+    r"|jmx-console|_ignition|telescope)(?:/|$)"
+    r"|/actuator(?:/|$)|/vendor/phpunit/|/cgi-bin/|/manager/html|/solr/admin|/eval-stdin\.php",
+    re.ASCII,
+)
+
+
+def path_text(event):
+    return decoded(path_of(request(event).get("target", "")))
+
+
+def sensitive_probe(event):
+    path = path_text(event)
+    return bool(SECRET_PATH.search(path) or SCANNER_PATH.search(path))
+
+
+def secret_served(event):
+    seen = request(event)
+    return (
+        seen.get("method") == "GET"
+        and seen.get("status") in (200, 206)
+        and bool(SECRET_PATH.search(path_text(event)))
+    )
+
+
 def server_error(event):
     return 500 <= request(event).get("status", 0) <= 599
 
@@ -88,6 +143,43 @@ WEB_SIGNALS = (
             "Puede ser un fallo de la aplicación o un ataque que lo provoca.",
             "The web server repeatedly answered with 5xx errors within five minutes. "
             "It may be an application failure or an attack that causes one.",
+        ),
+    },
+    {
+        "id": "web_sensitive_probes",
+        "min": 10,
+        "window_seconds": 600,
+        "severity": "LOW",
+        "category": "security",
+        "service": is_web,
+        "match": sensitive_probe,
+        "digest": web_digest,
+        "title": ("Sondeo de rutas sensibles", "Probing for sensitive paths"),
+        "summary": (
+            "Varias peticiones buscan archivos de configuración, repositorios, copias de seguridad o paneles "
+            "de administración. Es ruido habitual en internet, pero muestra qué se está buscando.",
+            "Several requests look for configuration files, repositories, backups or admin panels. "
+            "It is routine background noise on the internet, but it shows what is being looked for.",
+        ),
+    },
+    {
+        "id": "web_secret_served",
+        "min": 1,
+        # A day: one rolling problem per source instead of one per request.
+        "window_seconds": 86400,
+        "severity": "MEDIUM",
+        "category": "security",
+        "service": is_web,
+        "match": secret_served,
+        "digest": web_digest,
+        "title": ("Ruta sensible servida por el servidor web", "Sensitive path served by the web server"),
+        "summary": (
+            "Una petición a un archivo que no debería publicarse (configuración, repositorio, copia de seguridad "
+            "o claves) recibió una respuesta correcta. Puede ser el archivo real o una página genérica que el "
+            "servidor devuelve para cualquier ruta: comprueba el contenido.",
+            "A request for a file that should never be public (configuration, repository, backup or keys) was "
+            "answered successfully. It may be the real file or a catch-all page the server returns for any path: "
+            "check the content.",
         ),
     },
 )
