@@ -166,8 +166,8 @@ líneas que llegan por un emisor remoto, o reenviadas por syslog, se reconocen i
 lee necesita permiso sobre esos archivos (por ejemplo, el grupo `adm` en Debian y Ubuntu).
 
 **Qué se guarda y qué ve el modelo.** Cada petición es un evento con la hora que escribió el servidor, el cliente, el método, la ruta con su consulta, el estado, el
-tamaño, el origen y el agente; la línea original sigue intacta. **Ninguna llega al modelo**, sea cual sea el modo de análisis de la fuente: se marcan como
-«muestreadas» y los detectores trabajan sobre todas. En una carpeta que mezcla `access.log` y `error.log`, el error sí sigue el flujo normal, sin las peticiones como contexto.
+tamaño, el origen y el agente; la línea original sigue intacta. **Ninguna entra en la revisión automática del modelo**, sea cual sea el modo de análisis de la fuente: se marcan como
+«muestreadas» y los detectores trabajan sobre todas. En una carpeta que mezcla `access.log` y `error.log`, el error sí sigue el flujo normal, sin las peticiones como contexto, como vecinas en la verificación ni en la búsqueda de la investigación. La única excepción es el asistente: si le preguntas por un problema web, esas peticiones son su evidencia y se le envían (con los secretos ocultos y respetando `remote_allowed`).
 
 **Qué detecta.** Cada detector abre un problema por fuente que se va actualizando, con un resumen de cuántas peticiones fueron, de cuántos clientes, entre qué horas,
 con qué códigos y a qué rutas (sin la consulta, donde acaban los tokens).

@@ -10,6 +10,7 @@ from .models import Model
 from .problem_context import context_for, validate_chat, chat_system
 from .rules import excluded, sanitize
 from .store import dumps
+from .web_access import is_web_event
 
 
 class SearchPlan(Model):
@@ -86,6 +87,10 @@ def related_events(store, problem, plan, minutes, max_scan=2000):
                 skipped += 1
                 continue
             if event["id"] in seed_ids:
+                continue
+            # Related events are found by words, and a request is full of
+            # words a visitor chose; the problem's own evidence is already in.
+            if is_web_event(event):
                 continue
             message = (
                 event.get("message", "") + " " + dumps(event.get("metadata", {}))

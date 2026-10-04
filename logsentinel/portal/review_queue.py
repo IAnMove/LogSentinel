@@ -467,6 +467,9 @@ class ReviewQueue:
         by_id = {e["id"]: e for e in self.store.events(ids=wanted, limit=100)}
         originals = [by_id[i] for i in wanted if i in by_id]
         originals += [e for e in self.store.neighbors(wanted) if e["id"] not in by_id]
+        # The neighbours of an error are whatever was written next to it, which
+        # in a folder that holds an access log is visitors' requests.
+        originals = [e for e in originals if not is_web_event(e)]
         with self.store.connect() as db:
             oldest = db.execute(
                 "SELECT min(s.created) FROM events e JOIN segments s ON s.id=e.segment_id WHERE e.id IN (SELECT value FROM json_each(?))",
