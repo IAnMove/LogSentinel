@@ -56,6 +56,8 @@ Revisión general de fiabilidad, seguridad y mantenimiento (rama `review/hardeni
 - **Una línea larga ya no cuelga el portal.** `grouping_key` quitaba los contadores finales con una expresión cuadrática: 8 KB de « 1» tardaban unos diez segundos y 256 KB, horas, bloqueando también la recepción. Ahora se hace por palabras, en tiempo lineal.
 - **Una línea de más de 256 KB ya no para la fuente.** Antes lanzaba un error sin avanzar el cursor y la fuente se quedaba leyendo la misma línea para siempre; el emisor reintentaba sin fin. Ahora se conserva su principio con una nota visible («line cut: about N more bytes were not stored»), se anota `cut_bytes` en el evento y se sigue con la siguiente.
 
+- **La rotación numerada ya no repite líneas.** Con la rotación por defecto de logrotate (`app.log` pasa a `app.log.1`, éste a `app.log.2`), el nombre `app.log.1` conservaba el cursor del archivo del ciclo anterior y el archivo recién llegado se leía de cero con un origen nuevo: cada línea contaba una vez más en cada ciclo (cuatro veces tras cinco ciclos, lo que además inflaba los contadores de ráfagas). El cursor se busca ahora por archivo y no solo por nombre.
+
 ### Mantenimiento
 
 - `create_app` (1 300 líneas) se divide en módulos por área en `logsentinel/portal/routes/`; las rutas y su resolución son las mismas.

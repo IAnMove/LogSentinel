@@ -418,7 +418,13 @@ class Collector:
         old = self.store.cursor(source["id"], key) or {}
         sig = [stat.st_dev, stat.st_ino]
         offset = 0
-        if not old:
+        # A cursor belongs to a file, not to the name it had when it was
+        # written. After a rotation the same file turns up under a new name, and
+        # the name it now has may already carry the cursor of the file that
+        # used to be there: with numbered rotation, app.log.1 holds the cursor
+        # of last cycle's app.log.1, and trusting it re-read the whole file
+        # under a new generation, so every line counted again each cycle.
+        if not old or old.get("identity") != sig:
             with self.store.connect() as db:
                 for row in db.execute(
                     "SELECT data FROM cursors WHERE source_id=?", (source["id"],)
