@@ -58,6 +58,8 @@ Revisión general de fiabilidad, seguridad y mantenimiento (rama `review/hardeni
 
 - **La rotación numerada ya no repite líneas.** Con la rotación por defecto de logrotate (`app.log` pasa a `app.log.1`, éste a `app.log.2`), el nombre `app.log.1` conservaba el cursor del archivo del ciclo anterior y el archivo recién llegado se leía de cero con un origen nuevo: cada línea contaba una vez más en cada ciclo (cuatro veces tras cinco ciclos, lo que además inflaba los contadores de ráfagas). El cursor se busca ahora por archivo y no solo por nombre.
 
+- **«Importar histórico» activado después ahora importa.** En un archivo normal que ya se estaba leyendo, el cursor quedaba al final y la opción no hacía nada, aunque la guía rápida y el asistente prometían lo contrario (con los archivos comprimidos sí funcionaba). El cursor recuerda que nació saltándose lo existente y, si luego se activa el histórico, relee desde el principio con la misma generación: los orígenes son posiciones y lo ya leído no se duplica.
+
 ### Mantenimiento
 
 - `create_app` (1 300 líneas) se divide en módulos por área en `logsentinel/portal/routes/`; las rutas y su resolución son las mismas.

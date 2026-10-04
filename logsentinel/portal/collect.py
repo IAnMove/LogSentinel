@@ -479,20 +479,32 @@ class Collector:
                 "generation", f"{stat.st_dev}:{stat.st_ino}:{stat.st_ctime_ns}"
             )
             opener = (lambda *args: nullcontext(handle)) if handle else open
+            seeded = False
             if old.get("identity") == sig and stat.st_size >= old.get("offset", 0):
                 offset = old.get("offset", 0)
-                with opener(path, "rb") as f:
-                    f.seek(max(0, offset - 64))
-                    check = f.read(min(64, offset))
-                if hashlib.sha256(check).hexdigest() != old.get(
-                    "tail", hashlib.sha256(b"").hexdigest()
-                ):
+                if old.get("seeded") and source.get("history"):
+                    # The source started without history, so what was already
+                    # in the file was never read. History is on now: read it
+                    # all again from the start under the same generation.
+                    # Origins are positions, so the lines read since are
+                    # recognised and stored once.
                     offset = 0
-                    generation = f"{stat.st_dev}:{stat.st_ino}:{stat.st_ctime_ns}"
+                else:
+                    seeded = bool(old.get("seeded"))
+                    with opener(path, "rb") as f:
+                        f.seek(max(0, offset - 64))
+                        check = f.read(min(64, offset))
+                    if hashlib.sha256(check).hexdigest() != old.get(
+                        "tail", hashlib.sha256(b"").hexdigest()
+                    ):
+                        offset = 0
+                        seeded = False
+                        generation = f"{stat.st_dev}:{stat.st_ino}:{stat.st_ctime_ns}"
             elif old:
                 generation = f"{stat.st_dev}:{stat.st_ino}:{stat.st_ctime_ns}"
             elif not source.get("history"):
                 offset = stat.st_size
+                seeded = True
         entries = []
         used = 0
         done = False
@@ -572,6 +584,8 @@ class Collector:
             "offset": end,
             "tail": tail,
         }
+        if not compressed and seeded:
+            cursor["seeded"] = True
         if compressed:
             cursor.update(stamp=stamp, stable=True, done=done, digest=digest)
         count = self.store.ingest(source, entries, key, cursor)
