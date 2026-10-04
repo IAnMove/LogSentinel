@@ -156,6 +156,87 @@ def not_found(event):
     return request(event).get("status") == 404
 
 
+# Fragments typical of attacks on a web application. They run on text a stranger
+# chose, so every repetition is bounded, none is nested, and they see at most the
+# few kilobytes parse_access_line() keeps. "+" is how a query writes a space.
+_SP = r"(?:\s|\+)"
+ATTACKS = (
+    (
+        "sql",
+        ("inyección SQL", "SQL injection"),
+        re.compile(
+            rf"union(?:{_SP}|/\*\*/)+(?:all{_SP}+)?select"
+            rf"|['\"]{_SP}*or{_SP}*['\"]?\d+['\"]?{_SP}*={_SP}*['\"]?\d"
+            rf"|\b(?:sleep|benchmark)\({_SP}*\d|waitfor{_SP}+delay|information_schema"
+            rf"|;{_SP}*(?:drop|truncate){_SP}+table",
+            re.ASCII,
+        ),
+    ),
+    (
+        "xss",
+        ("XSS", "XSS"),
+        re.compile(
+            r"<script|javascript:|\bon(?:error|load|mouseover|focus)\s*="
+            r"|<svg[^>]{0,40}\bon\w{1,20}=|<img[^>]{0,60}\bonerror",
+            re.ASCII,
+        ),
+    ),
+    (
+        "traversal",
+        ("recorrido de rutas", "path traversal"),
+        re.compile(
+            r"(?:\.\./){3,}|\.\./+etc/|/etc/(?:passwd|shadow)|/proc/self/|(?:^|/)(?:boot|win)\.ini|c:/windows",
+            re.ASCII,
+        ),
+    ),
+    (
+        "jndi",
+        ("JNDI (Log4Shell)", "JNDI (Log4Shell)"),
+        re.compile(r"\$\{[^}]{0,60}jndi", re.ASCII),
+    ),
+    (
+        "command",
+        ("ejecución de comandos", "command execution"),
+        re.compile(
+            rf"[;|`]{_SP}*(?:cat|ls|id|whoami|uname|wget|curl|nc|ncat|bash|sh|python3?|perl|php)\b(?:{_SP}|$)"
+            rf"|\$\({_SP}*(?:cat|ls|id|whoami|uname|wget|curl|bash|sh)\b"
+            rf"|/bin/(?:ba|z)?sh|cmd(?:\.exe)?{_SP}*/c|powershell"
+            rf"|\b(?:base64_decode|shell_exec|passthru|system|eval)\("
+            rf"|php://(?:input|filter)|auto_prepend_file|allow_url_include"
+            rf"|\(\){_SP}*\{{{_SP}*:;{_SP}*\}}",
+            re.ASCII,
+        ),
+    ),
+)
+
+
+@lru_cache(maxsize=4096)
+def attack_kinds(target, agent, referer):
+    """Which kinds of attack fragment a request carries, in the order of ATTACKS.
+
+    The agent and referer are checked too: Log4Shell and Shellshock are usually
+    thrown in a header, not in the path.
+    """
+    text = " ".join((decoded(target), decoded(agent), decoded(referer)))
+    return tuple(kind for kind, _, pattern in ATTACKS if pattern.search(text))
+
+
+def kinds_of(event):
+    seen = request(event)
+    return attack_kinds(seen.get("target", ""), seen.get("agent", ""), seen.get("referer", ""))
+
+
+def carries_attack(event):
+    return bool(kinds_of(event))
+
+
+def attack_digest(hits, spanish):
+    names = {kind: label[0 if spanish else 1] for kind, label, _ in ATTACKS}
+    counts = Counter(kind for event in hits for kind in kinds_of(event))
+    kinds = ", ".join(f"{names[kind]} ({counts[kind]})" for kind, _, _ in ATTACKS if counts[kind])
+    return web_digest(hits, spanish) + (" Tipos: " if spanish else " Kinds: ") + kinds + "."
+
+
 def server_error(event):
     return 500 <= request(event).get("status", 0) <= 599
 
@@ -212,6 +293,23 @@ WEB_SIGNALS = (
             "que recorre una lista. Es ruido habitual en internet; no indica que haya entrado.",
             "One client asked within a few minutes for many different paths that do not exist, the way a scanner "
             "walks a list. It is routine background noise on the internet; it does not show a break-in.",
+        ),
+    },
+    {
+        "id": "web_attack_payloads",
+        "min": 5,
+        "window_seconds": 600,
+        "severity": "LOW",
+        "category": "security",
+        "service": is_web,
+        "match": carries_attack,
+        "digest": attack_digest,
+        "title": ("Peticiones con cargas de ataque", "Requests carrying attack payloads"),
+        "summary": (
+            "Varias peticiones llevan fragmentos típicos de ataque. Los códigos de respuesta indican si el "
+            "servidor las rechazó; un 200 o un 500 merece revisar la aplicación.",
+            "Several requests carry typical attack fragments. The status codes show whether the server rejected "
+            "them; a 200 or a 500 deserves a look at the application.",
         ),
     },
     {

