@@ -300,8 +300,13 @@ def grouping_key(event):
     text = regex.sub(r"\b(?:\d{1,3}\.){3}\d{1,3}\b", "#ip", text)
     text = regex.sub(r"\[\d+\]", "[#]", text)
     text = regex.sub(r"\bpid[=:]?\s*\d+", "pid=#", text, flags=regex.I)
-    text = regex.sub(r"(?:\s+\d+)+\s*$", "", text)
-    text = regex.sub(r"\s+", " ", text).strip()
+    # Trailing counters ("... took 12 34") are not part of what the line says.
+    # Done by tokens: the regex that did it, (?:\s+\d+)+\s*$, is quadratic on a
+    # long run of numbers, and a sender chooses the line.
+    words = text.split()
+    while words and words[-1].isdecimal() and (len(words) > 1 or text[:1].isspace()):
+        words.pop()
+    text = " ".join(words)
     return (event.get("source_id") or "", event.get("service") or "", text)
 
 
