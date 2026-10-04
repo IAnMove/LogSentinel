@@ -286,3 +286,43 @@ def test_common_login_pages_are_recognised(site, target):
     send(store, source, logins(25, target=target))
     run(store)
     assert [p["data"]["reasoning"] for p in problems(store)] == ["web_login_attempts"]
+
+
+def walk(count, *, ip="203.0.113.9", status=404, start=None, spread=1, paths=None):
+    base = time.time() - 600 if start is None else start
+    return [
+        line(ip=ip, status=status, target=(paths[n % len(paths)] if paths else f"/dir{n}/index.php"), when=base + n * spread)
+        for n in range(count)
+    ]
+
+
+def test_one_client_walking_a_list_of_missing_paths_is_a_quiet_finding(site):
+    store, source = site
+    send(store, source, walk(70) + [line(ip="192.0.2.8", target="/") for _ in range(30)])
+    run(store)
+    (found,) = problems(store)
+    assert found["severity"] == "LOW" and found["data"]["reasoning"] == "web_path_enumeration"
+    assert "203.0.113.9 (70)" in found["data"]["summary"] and "404 (70)" in found["data"]["summary"]
+
+
+def test_a_broken_link_requested_again_and_again_is_not_enumeration(site):
+    store, source = site
+    send(store, source, walk(120, paths=["/old-page", "/missing.css"]))
+    run(store)
+    assert not problems(store)
+
+
+def test_missing_paths_spread_over_many_visitors_are_not_enumeration(site):
+    store, source = site
+    send(store, source, [line(ip=f"198.51.100.{n % 200 + 1}", status=404, target=f"/gone{n}", when=time.time() - 300 + n // 4) for n in range(100)])
+    run(store)
+    assert not problems(store)
+
+
+@pytest.mark.parametrize("distinct, expected", [(29, 0), (30, 1)])
+def test_thirty_different_missing_paths_make_a_walk(site, distinct, expected):
+    store, source = site
+    paths = [f"/p{n}" for n in range(distinct)]
+    send(store, source, walk(70, paths=paths))
+    run(store)
+    assert len(problems(store)) == expected

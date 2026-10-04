@@ -134,16 +134,26 @@ def login_attempt(event):
     return request(event).get("method") == "POST" and bool(LOGIN_PATH.search(path_text(event)))
 
 
-def one_client_sends(minimum):
-    """A window qualifies only when a single client alone made at least `minimum` of its requests.
+def one_client_sends(minimum, *, distinct_paths=0):
+    """A window qualifies only when a single client alone made `minimum` of its requests.
 
-    The same total spread over many visitors is a busy site, not an attack.
+    The same total spread over many visitors is a busy site, not an attack. With
+    `distinct_paths`, that client must also have asked for that many different
+    paths: a scanner walks a list, a broken link is asked for again and again.
     """
 
     def confirm(hits):
-        return Counter(request(e).get("ip") for e in hits).most_common(1)[0][1] >= minimum
+        by_client = {}
+        for event in hits:
+            seen = request(event)
+            by_client.setdefault(seen.get("ip"), []).append(path_of(seen.get("target", "")))
+        return any(len(paths) >= minimum and len(set(paths)) >= distinct_paths for paths in by_client.values())
 
     return confirm
+
+
+def not_found(event):
+    return request(event).get("status") == 404
 
 
 def server_error(event):
@@ -184,6 +194,24 @@ WEB_SIGNALS = (
             "Puede ser fuerza bruta o relleno de credenciales; no prueba que ningún intento haya acertado.",
             "One client sent many POST requests to login pages within five minutes. "
             "It may be brute force or credential stuffing; it does not show that any attempt succeeded.",
+        ),
+    },
+    {
+        "id": "web_path_enumeration",
+        "min": 60,
+        "window_seconds": 300,
+        "severity": "LOW",
+        "category": "security",
+        "service": is_web,
+        "match": not_found,
+        "confirm": one_client_sends(40, distinct_paths=30),
+        "digest": web_digest,
+        "title": ("Enumeración de rutas por un cliente", "Path enumeration by one client"),
+        "summary": (
+            "Un mismo cliente pidió en pocos minutos muchas rutas distintas que no existen, como hace un escáner "
+            "que recorre una lista. Es ruido habitual en internet; no indica que haya entrado.",
+            "One client asked within a few minutes for many different paths that do not exist, the way a scanner "
+            "walks a list. It is routine background noise on the internet; it does not show a break-in.",
         ),
     },
     {
