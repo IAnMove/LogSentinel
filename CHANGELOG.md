@@ -50,6 +50,12 @@ Revisión general de fiabilidad, seguridad y mantenimiento (rama `review/hardeni
 - La CLI antigua: `audit.*denied` nunca coincidía, el modelo bloqueaba la lectura de logs hasta dos minutos, los archivos de datos eran legibles por todos.
 - Una prueba de telemetría fallaba entre las 00:00 y las 00:05 UTC.
 
+### Arreglado tras la segunda revisión (octubre)
+
+- **Registros web y modelo.** Las peticiones de un registro de acceso ya no llegan al modelo como vecinas de una línea en la verificación, ni en la muestra del asistente sin problema elegido, ni en la búsqueda de la investigación. El asistente las sigue viendo cuando preguntas por un problema web, porque son su evidencia.
+- **Una línea larga ya no cuelga el portal.** `grouping_key` quitaba los contadores finales con una expresión cuadrática: 8 KB de « 1» tardaban unos diez segundos y 256 KB, horas, bloqueando también la recepción. Ahora se hace por palabras, en tiempo lineal.
+- **Una línea de más de 256 KB ya no para la fuente.** Antes lanzaba un error sin avanzar el cursor y la fuente se quedaba leyendo la misma línea para siempre; el emisor reintentaba sin fin. Ahora se conserva su principio con una nota visible («line cut: about N more bytes were not stored»), se anota `cut_bytes` en el evento y se sigue con la siguiente.
+
 ### Mantenimiento
 
 - `create_app` (1 300 líneas) se divide en módulos por área en `logsentinel/portal/routes/`; las rutas y su resolución son las mismas.

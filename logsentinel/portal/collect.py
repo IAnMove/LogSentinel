@@ -168,6 +168,20 @@ def machine_zone(store, source):
         return timezone.utc
 
 
+def fit_line(text, dropped):
+    """A line cut at the limit, ending in a note that says so and how much went.
+
+    The note is part of the stored text so that anyone reading the event, or the
+    evidence of a problem, sees it was cut. The result still fits MAX_LINE once
+    encoded: bytes that were not valid UTF-8 grow when they are replaced.
+    """
+    note = f" ... [line cut: about {dropped} more bytes were not stored]"
+    room = MAX_LINE - len(note.encode()) - 8
+    while len(text.encode()) > room:
+        text = text[: max(1, int(len(text) * 0.9))]
+    return text + note
+
+
 def normalize(line, path, origin, tz=None):
     entry = FileTailerCollector.parse_log_line(line, source_path=path, tz=tz)
     # Read the message, not the raw line, so access lines forwarded through
@@ -489,10 +503,29 @@ class Collector:
                     if not line:
                         done = True
                         break
-                    if len(line) > MAX_LINE:
-                        raise ValueError(
-                            "Event exceeds 256 KB; change source format or explicit source limit policy"
-                        )
+                    dropped = 0
+                    if len(line) > MAX_LINE and not line.endswith(b"\n"):
+                        # An event this long cannot be stored whole. Keep its
+                        # beginning, where the cause of a failure usually is,
+                        # and step over the rest so the cursor moves on. It used
+                        # to raise here, which left the cursor in place: the
+                        # source read the same line, failed, and stopped there
+                        # for good.
+                        ended = False
+                        while True:
+                            chunk = f.readline(MAX_LINE)
+                            dropped += len(chunk)
+                            if not chunk:
+                                break
+                            if chunk.endswith(b"\n"):
+                                ended = True
+                                break
+                        if not ended and not compressed:
+                            # Still being written: wait for its end like any line.
+                            f.seek(begin)
+                            break
+                        dropped += len(line) - MAX_LINE
+                        line = line[:MAX_LINE] + b"\n"
                     if compressed and begin + len(line) > MAX_EXPANDED_BYTES:
                         done = True
                         f.seek(begin)
@@ -501,12 +534,17 @@ class Collector:
                         f.seek(begin)
                         break
                     text = line.decode("utf-8", errors="replace").rstrip("\r\n")
+                    if dropped:
+                        text = fit_line(text, dropped)
                     if source.get("multiline") and text.startswith((" ", "\t")) and entries:
                         entries[-1]["message"] += "\n" + text
                         entries[-1]["raw"] += "\n" + text
                     elif text:
                         entries.append(normalize(text, key, f"{generation}:{begin}", zone))
-                    used += len(line)
+                        if dropped:
+                            entries[-1]["metadata"]["cut_bytes"] = dropped
+                            self.store.metric(source["id"], "lines_cut", 1)
+                    used += len(line) + dropped
                 end = f.tell()
                 tail = ""
                 if not compressed:
