@@ -23,6 +23,7 @@ from logsentinel.collectors.file_tailer import FileTailerCollector
 from logsentinel.collectors.journald import JournaldCollector
 from logsentinel.config import JournaldSourceConfig
 from .store import dumps
+from .web_access import WEB_SERVICE, parse_access_line
 from .source_paths import open_source, validate_source_handle, validate_source_path, UnsafeSourcePath
 
 MAX_LINE = 256_000
@@ -169,6 +170,20 @@ def machine_zone(store, source):
 
 def normalize(line, path, origin, tz=None):
     entry = FileTailerCollector.parse_log_line(line, source_path=path, tz=tz)
+    # Read the message, not the raw line, so access lines forwarded through
+    # syslog (nginx and Apache can log there) are recognised as well.
+    request = parse_access_line(entry.message)
+    if request:
+        # Date the event by the server's own clock. Reading a line now says
+        # nothing about when it happened: a history import or a catch-up after
+        # downtime would otherwise date every request "now".
+        entry = entry.model_copy(
+            update=dict(
+                timestamp=request.time,
+                service=WEB_SERVICE,
+                metadata=dict(entry.metadata, timestamp_inferred=False, web=request.fields()),
+            )
+        )
     return dict(entry.model_dump(mode="json"), origin=origin)
 
 
