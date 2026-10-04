@@ -843,7 +843,7 @@ async function setupView(root) {
     next("Terminar y activar análisis automático", async (d) => {
       await api("/api/settings", d);
       await api("/api/setup/complete", {});
-      sessionStorage.setItem("setup-dismissed", "1");
+      setSessionFlag("setup-dismissed", "1");
       view = "summary";
       await refresh();
       notice(

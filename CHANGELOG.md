@@ -62,6 +62,8 @@ Revisión general de fiabilidad, seguridad y mantenimiento (rama `review/hardeni
 
 - **Cancelar una verificación ya no deja un hallazgo grave en silencio.** El triaje guarda los candidatos HIGH y CRITICAL sin avisar, a la espera de la verificación. Si el trabajo se cancelaba antes (porque cambió el modelo, caducó la evidencia o una regla de exclusión la cubre), el problema quedaba abierto y sin notificación. Ahora se avisa como «sin verificar», igual que cuando la verificación falla.
 
+- **El portal ya no se queda en blanco con el almacenamiento del navegador bloqueado.** `sessionStorage` se leía y escribía sin protección en tres sitios (a diferencia de `localStorage`), y al lanzar una excepción `refresh()` fallaba antes de mostrar nada tras iniciar sesión. Ahora pasa por dos ayudantes que ignoran el error. No lo he probado en un navegador real (solo sintaxis, el chequeo de traducciones y la batería de Python).
+
 ### Mantenimiento
 
 - `httpx` deja de aceptar una ruta en `verify=` en su próxima versión mayor. El emisor y el alta con CA propia pasan ahora un contexto TLS que solo confía en esa CA (`network.private_authority`), y una regla de pytest convierte esa obsolescencia en error para que no vuelva.

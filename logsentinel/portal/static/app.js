@@ -227,7 +227,7 @@ async function refresh() {
   if (
     !S.machine.length &&
     !S.setup?.completed &&
-    !sessionStorage.getItem("setup-dismissed")
+    !sessionFlag("setup-dismissed")
   )
     view = "setup";
   $("#login").hidden = true;
@@ -255,7 +255,7 @@ function navigate(v) {
     chatDraft = "";
   }
   if (view === "setup" && v !== "setup")
-    sessionStorage.setItem("setup-dismissed", "1");
+    setSessionFlag("setup-dismissed", "1");
   view = v;
   edit = null;
   offset = 0;
