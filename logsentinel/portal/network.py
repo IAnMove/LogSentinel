@@ -1,6 +1,7 @@
 """Connect to checked numeric destinations while retaining the original TLS name."""
 
 import socket
+import ssl
 import time
 
 import anyio
@@ -58,6 +59,17 @@ class CheckedSyncBackend(httpcore.SyncBackend):
             except httpcore.ConnectError as exc:
                 failure = exc
         raise failure
+
+
+def private_authority(ca_file):
+    """Trust exactly the certificate authority in this file and no other.
+
+    httpx used to take the path itself (verify="ca.pem"), and deprecates that in
+    favour of passing a context; the next major version removes it. Giving a file
+    to create_default_context() loads only that file, so a sender that pinned
+    its own authority still cannot fall back to the public ones.
+    """
+    return ssl.create_default_context(cafile=str(ca_file))
 
 
 class CheckedAsyncTransport(httpx.AsyncHTTPTransport):

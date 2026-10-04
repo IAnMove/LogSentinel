@@ -6,7 +6,7 @@ import time
 from pathlib import Path
 from urllib.parse import urlsplit
 import httpx
-from .network import CheckedAsyncTransport
+from .network import CheckedAsyncTransport, private_authority
 from .collect import Collector
 from .models import Source, check_url
 from .store import Store
@@ -92,7 +92,7 @@ async def forward(
                 "The pinned receiver certificate (receiver-ca.pem) is missing; refusing to fall "
                 "back to the system authorities. Restore it from the enrollment package."
             )
-        verify = str(ca_path) if ca_path.exists() else True
+        verify = private_authority(ca_path) if ca_path.exists() else True
         try:
             async with httpx.AsyncClient(
                 transport=CheckedAsyncTransport(verify=verify),

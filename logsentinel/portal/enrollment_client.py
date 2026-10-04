@@ -12,7 +12,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 import httpx
-from .network import CheckedTransport
+from .network import CheckedTransport, private_authority
 
 from .enroll import PACKAGE_VERSION, fingerprint
 
@@ -69,7 +69,7 @@ def claim(package, spool, client=None):
     if package.get("ca_certificate"):
         ca_path = spool / "receiver-ca.pem"
         _write_private(ca_path, package["ca_certificate"])
-        verify = str(ca_path)
+        verify = private_authority(ca_path)
     receiver = package["receiver"].rstrip("/")
     owned = client is None
     client = client or httpx.Client(
