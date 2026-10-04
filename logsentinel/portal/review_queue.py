@@ -107,6 +107,13 @@ class ReviewQueue:
                 "UPDATE jobs SET status='cancelled',error=?,updated=? WHERE id=?",
                 (reason, time.time(), job),
             )
+        # Triage saves a severe candidate without alerting, because the alert
+        # waits for the verification this job was going to run. Cancelling the
+        # job ends that wait. The evidence goes back to the queue, but if it has
+        # expired or an exclusion now covers it, nothing will ever review it
+        # again, and the problem would stay open and silent.
+        if batch.get("problems"):
+            self.alert_unverified(batch, batch["problems"])
 
     def create(
         self,

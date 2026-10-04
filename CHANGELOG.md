@@ -60,6 +60,8 @@ Revisión general de fiabilidad, seguridad y mantenimiento (rama `review/hardeni
 
 - **«Importar histórico» activado después ahora importa.** En un archivo normal que ya se estaba leyendo, el cursor quedaba al final y la opción no hacía nada, aunque la guía rápida y el asistente prometían lo contrario (con los archivos comprimidos sí funcionaba). El cursor recuerda que nació saltándose lo existente y, si luego se activa el histórico, relee desde el principio con la misma generación: los orígenes son posiciones y lo ya leído no se duplica.
 
+- **Cancelar una verificación ya no deja un hallazgo grave en silencio.** El triaje guarda los candidatos HIGH y CRITICAL sin avisar, a la espera de la verificación. Si el trabajo se cancelaba antes (porque cambió el modelo, caducó la evidencia o una regla de exclusión la cubre), el problema quedaba abierto y sin notificación. Ahora se avisa como «sin verificar», igual que cuando la verificación falla.
+
 ### Mantenimiento
 
 - `create_app` (1 300 líneas) se divide en módulos por área en `logsentinel/portal/routes/`; las rutas y su resolución son las mismas.
