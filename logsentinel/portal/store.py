@@ -21,6 +21,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from .models import Settings, destination_identity
+from .web_access import is_web_event
 
 
 def uid():
@@ -482,7 +483,10 @@ class Store:
                             now,
                             item.get("timestamp", ""),
                             item.get("service", "unknown"),
-                            "pending",
+                            # Decided here, not when the review queue gets to it: a
+                            # busy site would otherwise fill the queue with lines
+                            # the model never reads and keep real ones waiting.
+                            "sampled" if is_web_event(item) else "pending",
                             item["origin"],
                             int(type(priority) is int and 0 <= priority <= 3),
                         ),

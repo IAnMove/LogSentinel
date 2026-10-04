@@ -11,6 +11,7 @@ from fastapi.responses import PlainTextResponse
 
 from ..models import Rule
 from ..research import InvestigationRequest
+from ..web_access import WEB_SERVICE
 from ..rules import (
     NOISE_PRESETS,
     excluded,
@@ -187,8 +188,10 @@ def register_problems(app, ctx):
             db.execute("BEGIN IMMEDIATE")
             cursor = db.execute(
                 "UPDATE events SET status='pending' WHERE source_id=? AND status IN ('capacity','oversized','sampled','excluded','error') "
+                # Web requests are never reviewed by the model; queueing them again would only make the queue discard them.
+                "AND service!=? "
                 "AND id NOT IN (SELECT value FROM jobs j,json_each(j.event_ids) WHERE j.status IN ('pending','running','retry'))",
-                (source["id"],),
+                (source["id"], WEB_SERVICE),
             )
             count = cursor.rowcount
         store.audit("reanalyze", source["id"], str(count))

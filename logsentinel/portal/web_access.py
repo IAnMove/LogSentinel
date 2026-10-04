@@ -76,6 +76,11 @@ class AccessRecord:
         }
 
 
+def is_web_event(event) -> bool:
+    """True for an event normalize() recognised as a web request."""
+    return bool((event.get("metadata") or {}).get("web"))
+
+
 def _instant(match):
     month = _MONTHS.get(match["month"])
     zone = match["zone"]
