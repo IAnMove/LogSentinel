@@ -9,6 +9,7 @@ from .store import dumps
 from .freshness import SEVERE, event_instant
 from .rules import excluded
 from .ssh_notifications import is_sshd
+from .web_signals import WEB_SIGNALS
 
 
 SIGNALS = (
@@ -63,7 +64,7 @@ SIGNALS = (
             "Several SSH failures occurred within five minutes. That does not prove compromise.",
         ),
     },
-)
+) + WEB_SIGNALS
 
 
 def deterministic_signal(finding):
@@ -149,6 +150,12 @@ def apply_signals(analyzer, limit=500, *, machine_id=None, events=None, notify=T
             for e in eligible:
                 if spec.get("service") and not spec["service"](e.get("service")):
                     continue
+                if "match" in spec:
+                    # Over fields already parsed and bounded, so nothing here
+                    # can be made slow by a hostile line.
+                    if spec["match"](e):
+                        hits.append(e)
+                    continue
                 try:
                     found = regex.search(spec["pattern"], e.get("message") or "", timeout=0.02)
                 except TimeoutError:
@@ -184,6 +191,7 @@ def save_signal(analyzer, machine_id, spec, hits, spanish, source_id="", *, noti
             "title": spec["title"][idx],
             "summary": spec["summary"][idx]
             + " "
+            + (spec["digest"](hits, spanish) + " " if spec.get("digest") else "")
             + ("Señal determinista; el modelo no la ha interpretado." if spanish else "Deterministic signal; the model has not interpreted it."),
             "severity": spec["severity"],
             "category": spec["category"],
