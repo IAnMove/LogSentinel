@@ -11,6 +11,7 @@ Revisión general de fiabilidad, seguridad y mantenimiento (rama `review/hardeni
 
 - **Avisos.** Un hallazgo HIGH o CRITICAL que el modelo no pudo verificar (la verificación no cabe, falla tres veces o queda incierta) se notifica marcado como *sin verificar* en lugar de quedarse en silencio. Un lote revisado tarde (cola larga, caída del modelo) avisa si los eventos son de las últimas seis horas y el hallazgo es grave; el histórico antiguo sigue en silencio.
 - **Caídas del modelo.** Si el servidor del modelo no responde, el lote no gasta sus tres intentos: se reintenta con espera creciente.
+- **Registros web.** Una línea de `access.log` de Apache o nginx ya no se trata como texto libre: se reconoce, se fecha con la hora del servidor y no se envía nunca al modelo, tampoco como contexto de otra línea. Quien ya alimentaba registros de acceso verá esas peticiones como «muestreadas» en la cobertura y los hallazgos de los nuevos detectores en lugar de lotes para el modelo. Los `error.log` no cambian.
 - **Alta de emisores.** El instalador y `logsentinel enroll` exigen la huella SHA-256 del certificado del central (`--ca-fingerprint`, o pegarla en un terminal). Los scripts que instalaban un emisor sin ella dejan de funcionar hasta que la reciben; véase `GUIA_EQUIPOS.md`.
 - **Base de datos.** Migraciones numeradas (versión 3): índices que faltaban, marca de urgencia por evento. Los trabajos terminados, el historial de entregas, el consumo de tokens y la auditoría dejan de crecer sin límite. `VACUUM` solo se ejecuta cuando compensa y hay disco para una copia. Las copias de seguridad se hacen de forma atómica, se rechazan si no caben y solo se conservan las cinco últimas.
 - **Orden de revisión.** Con cola mayor que un lote se revisan antes los originales con prioridad de syslog 0–3.
@@ -36,6 +37,8 @@ Revisión general de fiabilidad, seguridad y mantenimiento (rama `review/hardeni
 - Registro del servidor con traza, redactado y sin repeticiones (`logsentinel.portal.logs`).
 - `SECURITY.md`, `CONTRIBUTING.md`, `README.en.md` y este archivo; el README empieza por el producto e incluye «Garantías y límites».
 - Más casos en el corpus de evaluación (español, traza multilínea, secretos, OpenSSH 9.8, inyección en español, ruido de servidores de modelos).
+
+- Vista de seguridad web (`logsentinel/portal/web_access.py`, `web_signals.py`): lector estricto del formato común y combinado, y seis detectores deterministas (errores 5xx, intentos de login, secretos servidos, sondeos, enumeración de rutas y cargas de ataque) con un resumen de clientes, códigos y rutas en cada problema. Las señales admiten ahora `match`, `digest` y `confirm`. Ver `OPERACION.md`.
 
 ### Arreglado
 
@@ -66,6 +69,14 @@ Cada uno está comprobado contra el código actual y no se ha hecho todavía:
 - **Métricas.** Días hasta llenar el disco (regresión lineal sobre los resúmenes diarios), presión PSI, límites de cgroup, temperaturas y SMART.
 - **Evaluación.** Caso «aguja en pajar» (un fallo entre cientos de líneas rutinarias), control negativo de 24 h, y que `evaluate_review.py` distinga una caída de infraestructura (código de salida propio) de un fallo de calidad.
 - **Feedback de la CLI antigua.** Diferenciar falsa alarma, cambio legítimo de hábito y autorización temporal; correlación SSH, `sudo`, proceso y conexión saliente.
+
+### Pendiente (ideas surgidas al trabajar en los registros web)
+
+- **Resumen de los fallos SSH.** `ssh_auth_failures` dice «varios fallos» sin cuántos, desde cuántas direcciones, qué usuarios probaron ni si hubo un acceso aceptado. Los detectores web ya resumen así; falta el equivalente, con la lista de usuarios acotada y sin enviarla a los destinos externos sin decidirlo (a veces se escribe la contraseña en el campo de usuario).
+- **GeoIP.** País y proveedor por dirección, con una base local (DB-IP Lite no pide cuenta; GeoLite2 sí) descargada de forma explícita y verificada, nunca automática.
+- **`reasoning_effort`** hacia Ollama por `/v1`, para que el razonamiento no consuma el presupuesto de salida del JSON.
+- **Cobertura de las fuentes web.** Una fuente de acceso sana aparece con el 100 % «por selección de fuente», con estilo de aviso en el monitor y en «Cobertura y capacidad». Falta un contador propio para las peticiones web y un texto que diga que es lo esperado.
+- **Umbrales de los detectores web** configurables, y un panel por fuente web. Un panel de visitas es otro producto y queda fuera.
 
 ### Sin cambiar a propósito
 

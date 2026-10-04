@@ -37,6 +37,11 @@ the top bar).
   marked **unverified**. "Not reviewed" never means "no problems".
 - OOM, full or read-only disks, `sudo` rejections and SSH bursts are detected
   on the originals without waiting for the model.
+- Apache and nginx access logs (common and combined formats) are recognised on their own, stored with the server's own
+  timestamp and **never sent to the model**: their address, path and agent are chosen by whoever visits, and a busy
+  site writes more than a model can read. Six detectors work on every request: 5xx bursts, login floods, secrets
+  served, probing, path scanning and attack fragments. See `OPERACION.md` (Spanish). Behind a proxy the client is the
+  proxy unless the server rewrites it; this is not a visitor dashboard and it blocks nothing.
 - Credentials the code recognises (key=value, JSON, `Authorization`, URL
   passwords, cookies, PEM keys, known token prefixes) are hidden before text
   goes to the model or to a notification destination. That is a list, not a
