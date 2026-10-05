@@ -181,6 +181,10 @@ def register_ingest(app, store):
             count = store.ingest(source, entries)
         except OSError:
             raise HTTPException(507, "Storage full; retain and retry these events") from None
+        except ValueError as exc:
+            # Paused or deleted machine: not the sender's fault and not a crash.
+            # The sender keeps its queue and tries again, as the text says.
+            raise HTTPException(409, str(exc)) from None
         old_health = json.loads(store.meta("health:" + id) or "{}")
         old_health.update(checked=time.time(), new_events=count)
         if "heartbeat" not in old_health:

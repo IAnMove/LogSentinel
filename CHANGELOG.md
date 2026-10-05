@@ -81,6 +81,8 @@ Revisión general de fiabilidad, seguridad y mantenimiento (rama `review/hardeni
 
 - **Un `refresh()` lento ya no borra lo que estás escribiendo.** El sondeo de 15 segundos decide si redibujar antes de pedir el estado; si la respuesta tarda y entretanto has abierto un formulario o cambiado de vista, la página se reconstruía y el campo quedaba vacío (reproducido en Chromium con una respuesta retrasada). Ahora se actualizan los datos y la barra de estado y se deja la pantalla como está. Nuevo recorrido de navegador `scripts/refresh_race_smoke.py`, que falla sin el cambio y entra en la CI.
 
+- **Pausar una máquina justo mientras llegan sus eventos da 409, no 500.** Si la pausa cae entre la comprobación del emisor y el guardado, `store.ingest` lanzaba un `ValueError` sin manejar. El emisor ya conservaba su cola con cualquier error; ahora recibe la respuesta que dice que debe reintentar.
+
 ### Mantenimiento
 
 - `httpx` deja de aceptar una ruta en `verify=` en su próxima versión mayor. El emisor y el alta con CA propia pasan ahora un contexto TLS que solo confía en esa CA (`network.private_authority`), y una regla de pytest convierte esa obsolescencia en error para que no vuelva.
