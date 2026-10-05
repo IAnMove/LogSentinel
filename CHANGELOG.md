@@ -87,6 +87,7 @@ Revisión general de fiabilidad, seguridad y mantenimiento (rama `review/hardeni
 
 ### Mantenimiento
 
+- CI: Python 3.11 entra en la matriz (el proyecto declara `>=3.10`, pero se probaban 3.10, 3.12, 3.13 y 3.14) y `pip` usa caché. Se probó 3.11 en local con la batería completa y los doce recorridos de navegador.
 - `httpx` deja de aceptar una ruta en `verify=` en su próxima versión mayor. El emisor y el alta con CA propia pasan ahora un contexto TLS que solo confía en esa CA (`network.private_authority`), y una regla de pytest convierte esa obsolescencia en error para que no vuelva.
 - `create_app` (1 300 líneas) se divide en módulos por área en `logsentinel/portal/routes/`; las rutas y su resolución son las mismas.
 - Las fixtures compartidas viven en `conftest.py`; las pruebas ya no dependen de la presión de disco del equipo ni de esperas fijas.
