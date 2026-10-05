@@ -79,6 +79,8 @@ Revisión general de fiabilidad, seguridad y mantenimiento (rama `review/hardeni
 - **El filtro de metadatos de la nube reconoce NAT64 y 6to4.** `http://[64:ff9b::a9fe:a9fe]/` y `http://[2002:a9fe:a9fe::1]/` llevan la IPv4 169.254.169.254 dentro de una IPv6 y pasaban; el nombre corto `metadata` tampoco estaba. Las direcciones de la LAN y las públicas, también vía NAT64, siguen permitidas.
 - **Más rutas que una fuente no puede leer:** históricos de shell y de clientes (`.bash_history`, `.mysql_history`...), `.my.cnf`, `.htpasswd`, `/etc/wireguard`, `/etc/ssl/private` y las conexiones guardadas de NetworkManager.
 
+- **Un `refresh()` lento ya no borra lo que estás escribiendo.** El sondeo de 15 segundos decide si redibujar antes de pedir el estado; si la respuesta tarda y entretanto has abierto un formulario o cambiado de vista, la página se reconstruía y el campo quedaba vacío (reproducido en Chromium con una respuesta retrasada). Ahora se actualizan los datos y la barra de estado y se deja la pantalla como está. Nuevo recorrido de navegador `scripts/refresh_race_smoke.py`, que falla sin el cambio y entra en la CI.
+
 ### Mantenimiento
 
 - `httpx` deja de aceptar una ruta en `verify=` en su próxima versión mayor. El emisor y el alta con CA propia pasan ahora un contexto TLS que solo confía en esa CA (`network.private_authority`), y una regla de pytest convierte esa obsolescencia en error para que no vuelva.

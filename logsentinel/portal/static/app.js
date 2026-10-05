@@ -223,7 +223,18 @@ function formData(form) {
   return result;
 }
 async function refresh() {
+  // What the person was looking at when this started. The answer can take
+  // seconds on a loaded machine, and the 15-second poll decides to run before it
+  // asks. If they have moved to another view, or opened a form to edit, by the
+  // time it arrives, rebuilding the page now would throw away what they typed.
+  const viewAtStart = view,
+    editAtStart = edit;
   S = await api("/api/state");
+  if (view !== viewAtStart || edit !== editAtStart) {
+    // Keep the data and the status bar current; the next refresh redraws.
+    drawMonitor(S.monitor);
+    return;
+  }
   if (
     !S.machine.length &&
     !S.setup?.completed &&

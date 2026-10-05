@@ -44,6 +44,7 @@ jobs:
       - run: python scripts/portal_smoke.py
       - run: python scripts/setup_smoke.py
       - run: python scripts/problem_smoke.py
+      - run: python scripts/refresh_race_smoke.py
       - run: python scripts/metrics_smoke.py
       - run: python scripts/providers_smoke.py
       - run: python scripts/capacity_smoke.py
