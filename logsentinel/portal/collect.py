@@ -27,6 +27,9 @@ from .web_access import WEB_SERVICE, parse_access_line
 from .source_paths import open_source, validate_source_handle, validate_source_path, UnsafeSourcePath
 
 MAX_LINE = 256_000
+# A journal record can carry fields of any size with --all; this is the most
+# read for one record before it is cut to MAX_LINE.
+JOURNAL_RECORD_CEILING = 8 * 1024 * 1024
 MAX_FOLDER_FILES = 100
 # An xz header can ask the decoder for a gigabyte of dictionary; an archive that
 # needs more than this to be read is refused rather than allowed to exhaust memory.
@@ -636,6 +639,12 @@ class Collector:
         # the next record on every poll.
         budget = source['max_batch_bytes']
         raw, limited = read_journal(cmd, budget * (2 if cursor.get('cursor') else 1))
+        if limited and b"\n" not in raw[: budget * (2 if cursor.get("cursor") else 1)]:
+            # The first record alone is bigger than the batch. Reading again
+            # with room for one record of any size the store can cut keeps the
+            # source moving; raising here left the cursor in place and the
+            # source reading the same record, failing, for ever.
+            raw, limited = read_journal(cmd, budget + JOURNAL_RECORD_CEILING)
         collector = JournaldCollector(JournaldSourceConfig())
         entries = []
         last = None
@@ -663,16 +672,19 @@ class Collector:
                     raise ValueError("Journal cursor unavailable: possible retention gap; cursor preserved")
                 cursor_verified = True
                 continue
-            if used + len(line) > budget:
+            if used + len(line) > budget and last is not None:
+                # A batch holds at least one record, however big: one that is
+                # over the limit is cut below rather than left behind.
                 limited = True
                 break
             used += len(line)
             last = mark
             e = collector._parse_json_line(text)
             if e:
-                entries.append(
-                    dict(e.model_dump(mode="json"), origin="journal:" + last)
-                )
+                stored = dict(e.model_dump(mode="json"), origin="journal:" + last)
+                if bound_event(stored):
+                    self.store.metric(source["id"], "lines_cut", 1)
+                entries.append(stored)
             elif data.get("MESSAGE") is None:
                 skipped += 1
         if skipped:
