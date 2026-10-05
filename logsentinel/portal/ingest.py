@@ -14,6 +14,7 @@ import json
 import time
 
 from fastapi import FastAPI, Request, HTTPException
+from fastapi.responses import JSONResponse
 
 from .limits import BodyLimit
 from .store import dumps
@@ -202,6 +203,15 @@ def create_ingest_app(store, telemetry=None):
         openapi_url=None,
     )
     app.state.store = store
+
+    @app.exception_handler(json.JSONDecodeError)
+    @app.exception_handler(UnicodeDecodeError)
+    async def unreadable_body(request, exc):
+        # A body that is not valid JSON (or not even valid text) is the sender's
+        # mistake, or a stranger's. Without this it was a 500 and a traceback in
+        # the journal, from a port that answers anyone. The reason is not
+        # echoed: nothing here needs to describe the parser to the caller.
+        return JSONResponse({"detail": "Send a valid JSON body"}, status_code=400)
 
     # Senders batch up to 500 events of 256 KB, but a well-behaved batch stays
     # far below the limit, which bounds what any one request can make us hold.

@@ -64,6 +64,8 @@ Revisión general de fiabilidad, seguridad y mantenimiento (rama `review/hardeni
 
 - **El portal ya no se queda en blanco con el almacenamiento del navegador bloqueado.** `sessionStorage` se leía y escribía sin protección en tres sitios (a diferencia de `localStorage`), y al lanzar una excepción `refresh()` fallaba antes de mostrar nada tras iniciar sesión. Ahora pasa por dos ayudantes que ignoran el error. No lo he probado en un navegador real (solo sintaxis, el chequeo de traducciones y la batería de Python).
 
+- **El receptor responde 400, no 500, a un cuerpo que no es JSON.** `/enroll`, `/ingest` y `/heartbeat` lanzaban una excepción sin manejar, con traza en el journal, ante `{{` o bytes inválidos. `/enroll` no pide autenticación, así que cualquiera con acceso al puerto podía llenar el registro de trazas. Una petición con token malo sigue recibiendo 401 antes de que se lea el cuerpo.
+
 ### Mantenimiento
 
 - `httpx` deja de aceptar una ruta en `verify=` en su próxima versión mayor. El emisor y el alta con CA propia pasan ahora un contexto TLS que solo confía en esa CA (`network.private_authority`), y una regla de pytest convierte esa obsolescencia en error para que no vuelva.
