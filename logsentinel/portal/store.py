@@ -650,6 +650,11 @@ class Store:
         rows = {e["id"]: e for e in self.events(ids=list(selected), limit=limit)}
         return [rows[id] for id in selected if id in rows]
 
+    def count_rejected(self):
+        """Events a receiver refused as invalid and the sender set aside."""
+        with self.connect() as db:
+            return db.execute("SELECT count(*) FROM events WHERE status='rejected'").fetchone()[0]
+
     def mark(self, ids, status):
         if not ids:
             return

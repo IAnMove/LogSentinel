@@ -58,6 +58,8 @@ Revisión general de fiabilidad, seguridad y mantenimiento (rama `review/hardeni
 
 - **Un evento que el receptor rechaza ya no bloquea la cola del emisor.** Ante un 400 o 422 el emisor reenviaba el mismo lote cada minuto para siempre, con todo lo posterior esperando y el latido en «ok». Ahora reduce el lote a un evento hasta dar con el rechazado, lo aparta con estado `rejected` (visible en `spool-status`) y continúa. Los 401/403/409/429 y los errores del servidor se tratan como antes.
 
+- **Una entrega atascada se ve en el central.** El latido del emisor solo reflejaba la captura, así que una cola bloqueada aparecía en «ok». Ahora, si la entrega lleva más de diez minutos fallando, el latido marca la fuente en error con el código `delivery_blocked` y comunica cuántos eventos se apartaron como rechazados; la ficha de la fuente lo muestra. Los emisores antiguos siguen aceptados.
+
 ### Arreglado tras la segunda revisión (octubre)
 
 - **Registros web y modelo.** Las peticiones de un registro de acceso ya no llegan al modelo como vecinas de una línea en la verificación, ni en la muestra del asistente sin problema elegido, ni en la búsqueda de la investigación. El asistente las sigue viendo cuando preguntas por un problema web, porque son su evidencia.

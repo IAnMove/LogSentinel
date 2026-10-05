@@ -35,6 +35,7 @@ class SenderHeartbeat(BaseModel):
     disk_free_bytes: int = Field(default=0, ge=0, le=10**15)
     io_pressure_percent: float | None = Field(default=None, ge=0, le=100)
     build: str = Field(default="", max_length=80, pattern=r"^[A-Za-z0-9_.-]*$")
+    rejected: int = Field(default=0, ge=0, le=1000000000)
 
 
 def register_ingest(app, store):
@@ -110,6 +111,7 @@ def register_ingest(app, store):
                 else ("ok" if state.ok else "error")
             ),
             sender_pending=body["pending"],
+            sender_rejected=state.rejected,
             error=(
                 ""
                 if state.ok or not control["capture_allowed"]

@@ -732,10 +732,12 @@ function senderHealthSummary(health) {
     disk_free_reserve: ["Pausa por espacio libre insuficiente", "Paused: low free disk space"],
     journal_retention_gap: ["Hueco de cobertura: cursor del journal no disponible", "Coverage gap: journal cursor unavailable"],
     control_unavailable: ["Sin autorización reciente del receptor", "Receiver control lease unavailable"],
+    delivery_blocked: ["Entrega atascada: el receptor rechaza o no responde desde hace más de 10 min", "Delivery stuck: the receiver has refused or not answered for over 10 min"],
   };
   const code = sender.capture_code || sender.delivery_code;
   const label = labels[code];
   let text = " · " + bilingual("Cola del cliente: ", "Client queue: ") + health.sender_pending;
+  if (health.sender_rejected) text += " · " + health.sender_rejected + bilingual(" rechazados por el receptor (ver spool-status)", " refused by the receiver (see spool-status)");
   if (sender.quota_bytes)
     text += " · " + Math.round(sender.used_bytes / 1048576) + "/" + Math.round(sender.quota_bytes / 1048576) + " MiB";
   if (code) text += " · " + (label ? bilingual(...label) : code);
