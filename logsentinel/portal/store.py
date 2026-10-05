@@ -354,7 +354,11 @@ class Store:
             if (
                 used_bytes + size > limit_bytes
                 or used_events + count > settings.sender_events_per_hour
-            ):
+            ) and (used_bytes or used_events):
+                # An empty window admits one request however large, because the
+                # alternative is refusing it for good: no wait can make a request
+                # fit an allowance it is bigger than on its own. The size of one
+                # request is bounded by the body limit, and the next one waits.
                 return max(1, int(start + QUOTA_WINDOW - now))
             db.execute(
                 "INSERT OR REPLACE INTO sender_quota VALUES(?,?,?,?)",

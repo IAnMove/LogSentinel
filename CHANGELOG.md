@@ -68,6 +68,8 @@ Revisión general de fiabilidad, seguridad y mantenimiento (rama `review/hardeni
 
 - **Dos lecturas ocultaban menos secretos que el resto.** `/api/state` devolvía los problemas tal como se guardaron, de modo que un secreto añadido después (un destino nuevo cuya URL ya aparecía en un problema) volvía a la pantalla; `/api/problems` sí lo saneaba. Y el prompt para pegar en otro servicio solo ocultaba la clave del modelo, no los tokens y URLs de los destinos ni las claves de acceso retiradas. Ambos usan ya `protected_secrets`.
 
+- **Una petición mayor que la cuota horaria ya no se rechaza para siempre.** Con una cuota de 1 MiB/h y lotes de 2 MiB, el emisor recibía 429 una y otra vez, también con la ventana vacía, y no avanzaba nunca. Una ventana vacía admite ahora una petición (acotada por el límite de cuerpo); la siguiente espera.
+
 ### Mantenimiento
 
 - `httpx` deja de aceptar una ruta en `verify=` en su próxima versión mayor. El emisor y el alta con CA propia pasan ahora un contexto TLS que solo confía en esa CA (`network.private_authority`), y una regla de pytest convierte esa obsolescencia en error para que no vuelva.
