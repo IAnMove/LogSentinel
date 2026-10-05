@@ -50,6 +50,10 @@ Revisión general de fiabilidad, seguridad y mantenimiento (rama `review/hardeni
 - La CLI antigua: `audit.*denied` nunca coincidía, el modelo bloqueaba la lectura de logs hasta dos minutos, los archivos de datos eran legibles por todos.
 - Una prueba de telemetría fallaba entre las 00:00 y las 00:05 UTC.
 
+### Arreglado tras la tercera revisión (octubre)
+
+- **Ningún evento guardado o enviado supera los 256 KB, se mida como se mida.** El corte de ayer solo actuaba sobre líneas largas en disco; una traza multilínea unida o una línea con bytes inválidos (cada uno pasa a tres al decodificar) podían llegar a 300 KB, y el receptor rechazaba con 400 el lote entero. El límite se aplica ahora al texto ya decodificado y unido, en el colector y en el receptor, que recorta en vez de rechazar (hasta cuatro veces el límite; más allá no es una línea de log). El tamaño de captura del emisor baja de 262 144 a 256 000 por la misma razón.
+
 ### Arreglado tras la segunda revisión (octubre)
 
 - **Registros web y modelo.** Las peticiones de un registro de acceso ya no llegan al modelo como vecinas de una línea en la verificación, ni en la muestra del asistente sin problema elegido, ni en la búsqueda de la investigación. El asistente las sigue viendo cuando preguntas por un problema web, porque son su evidencia.

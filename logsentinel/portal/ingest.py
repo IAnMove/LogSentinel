@@ -18,7 +18,7 @@ from fastapi.responses import JSONResponse
 
 from .limits import BodyLimit
 from .store import dumps
-from .collect import machine_zone, normalize
+from .collect import MAX_LINE, bound_event, machine_zone, normalize
 from .enroll import register_enrollment
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
@@ -146,7 +146,9 @@ def register_ingest(app, store):
                 or not isinstance(item.get("id"), str)
                 or not 1 <= len(item["id"]) <= 200
                 or not isinstance(item.get("raw"), str)
-                or len(item["raw"].encode()) > 256_000
+                # Four times the stored limit: enough for a sender that has not
+                # yet learnt to cut, and still a bound on what one item costs.
+                or len(item["raw"].encode()) > 4 * MAX_LINE
             ):
                 raise HTTPException(400, "Invalid event")
             if log_format == "journal":
@@ -164,6 +166,11 @@ def register_ingest(app, store):
                 entries.append(dict(entry.model_dump(mode="json"), origin=item["id"]))
             else:
                 entries.append(normalize(item["raw"], "remote", item["id"], zone))
+        # An event over the stored limit is cut, as the collector cuts its own,
+        # instead of refused: refusing the whole batch for one long line left a
+        # sender that had not cut it retrying the same batch for ever.
+        for stored in entries:
+            bound_event(stored)
         return await asyncio.to_thread(persist, id, source, items, entries)
 
     def persist(id, source, items, entries):

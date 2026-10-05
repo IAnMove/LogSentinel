@@ -17,7 +17,9 @@ class SenderLimits(Model):
     high_water_percent: int = Field(default=85, ge=20, le=95)
     resume_percent: int = Field(default=60, ge=10, le=90)
     io_pressure_percent: int = Field(default=25, ge=1, le=100)
-    capture_batch_bytes: int = Field(default=262144, ge=4096, le=2000000)
+    # The stored event limit: a journal record the sender captures must also
+    # be one the receiver stores whole.
+    capture_batch_bytes: int = Field(default=256_000, ge=4096, le=2000000)
 
     @model_validator(mode="after")
     def watermarks(self):

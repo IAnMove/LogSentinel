@@ -173,13 +173,33 @@ def fit_line(text, dropped):
 
     The note is part of the stored text so that anyone reading the event, or the
     evidence of a problem, sees it was cut. The result still fits MAX_LINE once
-    encoded: bytes that were not valid UTF-8 grow when they are replaced.
+    encoded.
     """
     note = f" ... [line cut: about {dropped} more bytes were not stored]"
     room = MAX_LINE - len(note.encode()) - 8
     while len(text.encode()) > room:
         text = text[: max(1, int(len(text) * 0.9))]
     return text + note
+
+
+def bound_event(entry, dropped=0):
+    """Keep a stored event within MAX_LINE, whatever made it bigger.
+
+    The reader cuts a line that is too long on disk, but an event can also grow
+    after reading: bytes that are not valid UTF-8 become three bytes each when
+    they are replaced, and multiline mode joins a trace of many lines into one
+    event. The receiver refuses an event over the limit, and a sender that keeps
+    one in its queue is stuck on it, so the bound is applied to the decoded,
+    joined text, here, before anything is stored or sent.
+    """
+    over = len(entry["raw"].encode()) - MAX_LINE
+    cut = dropped + max(0, over)
+    if not cut:
+        return False
+    entry["raw"] = fit_line(entry["raw"], cut)
+    entry["message"] = fit_line(entry["message"], cut)
+    entry.setdefault("metadata", {})["cut_bytes"] = cut
+    return True
 
 
 def normalize(line, path, origin, tz=None):
@@ -514,6 +534,7 @@ class Collector:
                 offset = stat.st_size
                 seeded = True
         entries = []
+        pending_cut = {}
         used = 0
         done = False
         zone = machine_zone(self.store, source)
@@ -560,16 +581,13 @@ class Collector:
                         f.seek(begin)
                         break
                     text = line.decode("utf-8", errors="replace").rstrip("\r\n")
-                    if dropped:
-                        text = fit_line(text, dropped)
                     if source.get("multiline") and text.startswith((" ", "\t")) and entries:
                         entries[-1]["message"] += "\n" + text
                         entries[-1]["raw"] += "\n" + text
+                        pending_cut[id(entries[-1])] = pending_cut.get(id(entries[-1]), 0) + dropped
                     elif text:
                         entries.append(normalize(text, key, f"{generation}:{begin}", zone))
-                        if dropped:
-                            entries[-1]["metadata"]["cut_bytes"] = dropped
-                            self.store.metric(source["id"], "lines_cut", 1)
+                        pending_cut[id(entries[-1])] = dropped
                     used += len(line) + dropped
                 end = f.tell()
                 tail = ""
@@ -586,6 +604,9 @@ class Collector:
             raise ValueError(
                 "Compressed source is truncated or corrupt: " + type(exc).__name__
             ) from None
+        cut_lines = sum(bound_event(e, pending_cut.get(id(e), 0)) for e in entries)
+        if cut_lines:
+            self.store.metric(source["id"], "lines_cut", cut_lines)
         cursor = {
             "identity": sig,
             "generation": generation,
