@@ -83,6 +83,8 @@ Revisión general de fiabilidad, seguridad y mantenimiento (rama `review/hardeni
 
 - **Pausar una máquina justo mientras llegan sus eventos da 409, no 500.** Si la pausa cae entre la comprobación del emisor y el guardado, `store.ingest` lanzaba un `ValueError` sin manejar. El emisor ya conservaba su cola con cualquier error; ahora recibe la respuesta que dice que debe reintentar.
 
+- **La reserva del presupuesto de contexto coincide con lo que añade la llamada.** El techo de bytes de un lote reservaba 128 bytes fijos, pero la llamada al modelo añade la cláusula de datos no fiables y la frase de idioma (unos 174), así que un lote empaquetado al máximo podía pasarse del presupuesto comprobado y cancelarse antes de llegar al modelo. La reserva se calcula ahora con las mismas constantes que usa la llamada.
+
 ### Mantenimiento
 
 - `httpx` deja de aceptar una ruta en `verify=` en su próxima versión mayor. El emisor y el alta con CA propia pasan ahora un contexto TLS que solo confía en esa CA (`network.private_authority`), y una regla de pytest convierte esa obsolescencia en error para que no vuelva.
