@@ -87,6 +87,8 @@ Revisión general de fiabilidad, seguridad y mantenimiento (rama `review/hardeni
 
 - **Las cabeceras JSON mal escritas de un destino se explican.** Al guardar, el mensaje era el del propio navegador («Expected property name or '}' in JSON at position 1»), en inglés y sin decir de qué campo. Ahora dice, en el idioma del portal, que deben ser un objeto JSON válido y da un ejemplo; también rechaza JSON válido que no sea un objeto (`[1, 2]`, `42`, `null`). Nuevo recorrido `scripts/headers_smoke.py`.
 
+- **Un sondeo que falla se anuncia una vez.** El aviso de error del sondeo de 15 segundos reescribía el mismo texto en la región `role="status"` en cada intento, de modo que un lector de pantalla lo repetía cada 15 segundos mientras durara el fallo. Ahora lo dice una vez y calla hasta que el sondeo vuelve a funcionar. Se comprueba en `scripts/refresh_race_smoke.py`.
+
 ### Mantenimiento
 
 - `scripts/portal_smoke.py` registra quién llama a `render()` y `refresh()` desde el paso del destino y, si el clic en «Guardar» agota el tiempo, vuelca esas llamadas con su pila. Ese clic ha fallado de forma intermitente en CI con «element was detached from the DOM» y leyendo el código no se explica; la próxima vez el fallo dirá qué reconstruyó la página.

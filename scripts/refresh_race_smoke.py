@@ -1,4 +1,5 @@
-"""Real Chromium check that a slow refresh never rebuilds a form someone is typing in.
+"""Real Chromium checks of the 15-second poll: a failing poll is announced once, and a
+slow refresh never rebuilds a form someone is typing in.
 
 The page polls the portal state every 15 seconds and redraws the summary. The poll
 decides to run before it asks, and on a loaded machine the answer can take seconds.
@@ -41,6 +42,27 @@ with tempfile.TemporaryDirectory(prefix="sentinel-race-") as d:
         page.get_by_role("button", name="Entrar al portal").click()
         page.get_by_role("button", name="Resumen", exact=True).wait_for()
 
+        # A new installation opens on the setup wizard; the poll runs on the summary.
+        page.get_by_role("button", name="Resumen", exact=True).click()
+        page.wait_for_function("view === 'summary'")
+
+        # A poll that keeps failing is announced once. #notice is a live region, and
+        # writing the same text into it again makes a screen reader read it again.
+        page.evaluate(
+            """() => { window.__announced = 0;
+                new MutationObserver(() => window.__announced++).observe(
+                  document.querySelector('#notice'), {childList: true, characterData: true, subtree: true}); }"""
+        )
+        page.route("**/api/state", lambda route: route.abort())
+        for _ in range(3):
+            # Becoming visible again runs the poll at once instead of in 15 seconds.
+            page.evaluate("() => document.dispatchEvent(new Event('visibilitychange'))")
+            page.wait_for_timeout(500)
+        page.unroute("**/api/state")
+        announced = page.evaluate("window.__announced")
+        assert page.locator("#notice.error").is_visible(), "the failure is shown"
+        assert announced == 1, f"the same poll failure was announced {announced} times"
+
         # A slow state response, as on a loaded machine.
         page.evaluate(
             """(delay) => { const f = window.fetch; window.fetch = (u, o) =>
@@ -64,4 +86,4 @@ with tempfile.TemporaryDirectory(prefix="sentinel-race-") as d:
         page.get_by_role("button", name="Añadir", exact=True).wait_for()
         assert not errors, errors
         browser.close()
-print("PASS: a slow refresh does not rebuild a form that was opened while it waited")
+print("PASS: a failing poll is announced once; a slow refresh does not rebuild a form opened while it waited")

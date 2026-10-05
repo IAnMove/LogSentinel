@@ -1898,6 +1898,10 @@ pollWhileVisible(
     );
   },
 );
+// #notice is a live region: writing the same text into it again makes a screen
+// reader read it again. A poll that keeps failing says so once, then stays quiet
+// until it has worked.
+let lastPollError = "";
 pollWhileVisible(() => true, 15000, async () => {
   if ($("#shell").hidden || view !== "summary" || $("#modal").open) return;
   // This rebuilds the whole content section every 15 seconds. Keeping the data
@@ -1910,5 +1914,10 @@ pollWhileVisible(() => true, 15000, async () => {
   if (selection && !selection.isCollapsed) return;
   const top = window.scrollY;
   await refresh();
+  lastPollError = "";
   if (window.scrollY !== top) window.scrollTo(0, top);
-}, (e) => notice(e.message, true));
+}, (e) => {
+  if (e.message === lastPollError) return;
+  lastPollError = e.message;
+  notice(e.message, true);
+});
