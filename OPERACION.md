@@ -199,7 +199,26 @@ Las rutas y los fragmentos se comparan tras decodificar la URL dos veces y pasar
   más. Las notificaciones incluyen direcciones y rutas.
 - **Lo que no es.** No es un panel de visitas ni mide visitantes únicos, y no bloquea nada: «No bloquees direcciones automáticamente» sigue valiendo.
 
-## 11. Sobre las ilustraciones
+## 11. Qué lee cada sondeo de archivos y carpetas
+
+Una fuente de archivo o carpeta se sondea cada unos 2 segundos. En cada sondeo se lee, **por archivo**, como máximo **1000 líneas o `max_batch_bytes`**
+(2 MB en el portal, 256 KB en un emisor), lo que ocurra antes. Los archivos de una carpeta no se quitan el turno unos a otros, pero las fuentes se sondean en
+secuencia. Con líneas de unos 100 bytes eso son unas 500 líneas por segundo y archivo: un histórico de 100 MB tarda en torno a media hora en entrar (estimación,
+no medida). Al ver «pendientes» durante un rato tras activar una fuente grande, es lo normal.
+
+- **Archivos nuevos y «Importar histórico al iniciar».** Sin la opción, una fuente empieza por el final de cada archivo que encuentra y salta los rotados
+  (`.gz`, `.xz`, `.bz2`). Activarla después **sí importa** lo que se saltó, sin duplicar lo ya leído.
+- **Archivos comprimidos.** Se importan cuando su tamaño y fecha no han cambiado durante un sondeo entero, así que llegan uno o dos sondeos después del archivo
+  normal. Se descomprimen desde el principio en cada sondeo hasta su posición, de modo que un archivo muy grande tarda cuadráticamente más (esto sale de leer
+  el código, no está medido).
+- **Líneas de más de 256 KB.** Se corta el final: se guarda el principio, con una nota en el texto («line cut: about N more bytes were not stored») y `cut_bytes`
+  en el evento, y se sigue con la línea siguiente. Una línea que aún se está escribiendo, sin salto de línea, espera a su final.
+- **Rotación.** El cursor sigue al archivo, no al nombre, así que `app.log` → `app.log.1` → `app.log.2` no repite líneas. Dos casos sí releen cuando el histórico
+  está activado, porque el archivo resultante es nuevo y no se puede saber que su contenido ya se leyó: `copytruncate` (la copia es un archivo nuevo) y la
+  compresión retrasada (`app.log.2.gz` es un archivo nuevo con lo que antes se leyó como texto). Sin «Importar histórico» no ocurre.
+- **Un archivo borrado** se sigue drenando mientras alguien escriba en él y se suelta a los cinco minutos sin actividad.
+
+## 12. Sobre las ilustraciones
 
 Las imágenes de Tentri (`logsentinel/portal/static/tentri-*.png`) son arte
 generado para este proyecto. No son una marca oficial de Omarchy ni de ningún otro

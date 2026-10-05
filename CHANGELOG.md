@@ -72,6 +72,8 @@ Revisión general de fiabilidad, seguridad y mantenimiento (rama `review/hardeni
 
 - **Una fuente de archivo suelta el descriptor de un archivo borrado.** Se quedaba abierto mientras el portal siguiera en marcha (las carpetas ya lo hacían bien); ahora pasa a la vigilancia de rotación, que lo cierra tras cinco minutos en silencio.
 
+- **El colector documenta sus límites reales** (`OPERACION.md`, sección 11): 1000 líneas o `max_batch_bytes` por archivo y sondeo, qué hace «Importar histórico» al activarse después, los archivos comprimidos, las líneas cortadas y los dos casos de rotación que releen con el histórico activado (`copytruncate` y compresión retrasada).
+
 ### Mantenimiento
 
 - `httpx` deja de aceptar una ruta en `verify=` en su próxima versión mayor. El emisor y el alta con CA propia pasan ahora un contexto TLS que solo confía en esa CA (`network.private_authority`), y una regla de pytest convierte esa obsolescencia en error para que no vuelva.

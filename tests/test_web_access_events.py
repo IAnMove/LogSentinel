@@ -65,7 +65,8 @@ def test_an_imported_history_keeps_the_dates_the_server_wrote(folder):
     (logs / "access.log").write_text(LINE + "\n" + old + "\nnot a request\n")
     (logs / "access.log.1.gz").write_bytes(gzip.compress((old.replace("03/Mar", "04/Mar") + "\n").encode()))
     collector = Collector(store)
-    # The collector reads one file per pass, newest first.
+    # An archive is imported only once its size and date stay unchanged for a
+    # whole poll, so the compressed file arrives a pass or two after the plain one.
     assert sum(collector.poll(source) for _ in range(3)) == 4
     events = store.events(limit=100)
     dated = sorted(e["event_time"][:10] for e in events if e["service"] == "web-access")
