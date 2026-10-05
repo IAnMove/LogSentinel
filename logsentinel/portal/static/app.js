@@ -257,6 +257,27 @@ async function refresh() {
   drawMonitor(S.monitor);
   await render();
 }
+// Opening or closing a form rebuilds the page, and the button that was pressed
+// goes with it, so focus fell back to <body> and a keyboard or screen-reader user
+// started again from the top. Open: the first field. Close: the page heading,
+// where moving to another view already puts it.
+function openForm(value) {
+  edit = value;
+  render()
+    .then(() => {
+      const first = $(
+        "#content form input:not([type=hidden]):not([disabled]), #content form select, #content form textarea",
+      );
+      (first || $("#page-title")).focus();
+    })
+    .catch((e) => notice(e.message, true));
+}
+function closeForm() {
+  edit = null;
+  render()
+    .then(() => $("#page-title").focus({ preventScroll: true }))
+    .catch((e) => notice(e.message, true));
+}
 function navigate(v) {
   // Only a navigation animates the content in. A background refresh rebuilds
   // the same view and must not flash.
@@ -575,10 +596,7 @@ function objectView(root) {
     ),
     button(
       t("Añadir"),
-      () => {
-        edit = {};
-        render();
-      },
+      () => openForm({}),
       "",
     ),
   );
@@ -591,10 +609,7 @@ function objectView(root) {
         : [t("Nombre"), t("Máquina"), t("Tipo"), t("Estado"), t("Acciones")],
       items.map((obj) => {
         const b = [
-          button(t("Editar"), () => {
-            edit = obj;
-            render();
-          }),
+          button(t("Editar"), () => openForm(obj)),
         ];
         if (kind === "machine") {
           if (obj.deletion_pending) b.length = 0;
@@ -915,10 +930,7 @@ function objectForm(kind, o) {
   submit.type = "submit";
   tools.append(
     submit,
-    button(t("Cancelar"), () => {
-      edit = null;
-      render();
-    }),
+    button(t("Cancelar"), closeForm),
   );
   f.append(tools);
   f.onsubmit = async (ev) => {

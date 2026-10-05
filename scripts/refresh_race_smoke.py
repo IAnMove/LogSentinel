@@ -1,5 +1,6 @@
 """Real Chromium checks of the 15-second poll: a failing poll is announced once, and a
-slow refresh never rebuilds a form someone is typing in.
+slow refresh never rebuilds a form someone is typing in. Opening or closing a form moves
+focus somewhere sensible.
 
 The page polls the portal state every 15 seconds and redraws the summary. The poll
 decides to run before it asks, and on a loaded machine the answer can take seconds.
@@ -73,6 +74,10 @@ with tempfile.TemporaryDirectory(prefix="sentinel-race-") as d:
         page.evaluate("() => { window.__slow = refresh(); }")
         page.get_by_role("button", name="Máquinas", exact=True).click()
         page.get_by_role("button", name="Añadir", exact=True).click()
+        # Opening a form rebuilds the page and the pressed button goes with it. Focus
+        # must land in the form, not fall back to <body> and send a keyboard or
+        # screen-reader user back to the top.
+        page.wait_for_function("() => !!(document.activeElement && document.activeElement.closest('#content form'))")
         field = page.get_by_label("Nombre", exact=True)
         field.fill("Servidor a medio escribir")
         handle = field.element_handle()
@@ -82,6 +87,8 @@ with tempfile.TemporaryDirectory(prefix="sentinel-race-") as d:
         assert page.get_by_label("Nombre", exact=True).input_value() == "Servidor a medio escribir"
         # Once the form is closed the next refresh redraws as usual.
         page.get_by_role("button", name="Cancelar", exact=True).click()
+        # Closing it puts focus on the page heading, as moving to another view does.
+        page.wait_for_function("() => document.activeElement.id === 'page-title'")
         page.evaluate("() => refresh()")
         page.get_by_role("button", name="Añadir", exact=True).wait_for()
         assert not errors, errors

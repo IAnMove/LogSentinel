@@ -91,6 +91,8 @@ Revisión general de fiabilidad, seguridad y mantenimiento (rama `review/hardeni
 
 - **Una fuente web sana ya no parece un hueco de cobertura.** El monitor y «Cobertura y capacidad» contaban sus peticiones entre lo «apartado por selección de fuente», con estilo de aviso, aunque la fuente funcione como debe. Ahora las cuentan aparte, en tono neutro (`coverage.web` en el monitor y `retained.web` en el informe de capacidad) y dejan el aviso para lo que una selección deja fuera de verdad. Nuevo recorrido `scripts/web_coverage_smoke.py`.
 
+- **Al abrir o cerrar un formulario el foco ya no cae en `body`.** Pulsar Añadir, Editar o Cancelar reconstruye la página y el botón pulsado desaparece con ella, de modo que quien usa teclado o lector de pantalla volvía a empezar desde arriba. Abrir lleva el foco al primer campo; cancelar, al encabezado de la página, como ya hacía cambiar de vista. Comprobado en `scripts/refresh_race_smoke.py`.
+
 ### Mantenimiento
 
 - `scripts/portal_smoke.py` registra quién llama a `render()` y `refresh()` desde el paso del destino y, si el clic en «Guardar» agota el tiempo, vuelca esas llamadas con su pila. Ese clic ha fallado de forma intermitente en CI con «element was detached from the DOM» y leyendo el código no se explica; la próxima vez el fallo dirá qué reconstruyó la página.
