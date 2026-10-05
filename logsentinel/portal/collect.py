@@ -391,6 +391,14 @@ class Collector:
             current = path.stat()
         except FileNotFoundError:
             current = None
+        if handle and current is None:
+            # The file was deleted. Keep draining what its writer may still add
+            # through the rotation watch, which lets go once it stays quiet. A
+            # folder does this in release_vanished(); a single file never did,
+            # so its descriptor stayed open for as long as the portal ran.
+            self.retire(source, path, handle)
+            del self.handles[key]
+            return 0
         if handle and current:
             previous = os.fstat(handle.fileno())
             if (previous.st_dev, previous.st_ino) != (current.st_dev, current.st_ino):

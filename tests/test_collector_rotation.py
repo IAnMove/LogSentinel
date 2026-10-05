@@ -86,3 +86,30 @@ def test_a_file_that_replaces_another_at_the_same_name_is_read_from_its_start(fo
     (logs / "app.log").write_text("brand new\n")
     drain(collector, source)
     assert counts(store) == Counter({"old content": 1, "brand new": 1})
+
+
+def test_a_deleted_single_file_is_handed_to_the_rotation_watch_and_then_let_go(tmp_path, monkeypatch):
+    from logsentinel.portal import collect
+
+    store = Store(tmp_path / "data")
+    machine = store.put("machine", Machine(name="A").model_dump())
+    path = tmp_path / "app.log"
+    path.write_text("one\n")
+    source = dict(
+        Source(machine_id=machine, name="a", kind="file", path=str(path), enabled=True, history=True).model_dump(),
+        id="s",
+    )
+    collector = Collector(store)
+    try:
+        assert collector.poll(source) == 1
+        assert len(collector.handles) == 1
+        os.unlink(path)
+        collector.poll(source)
+        assert not collector.handles, "the descriptor of a deleted file must not stay in the live table"
+        assert len(collector.retired) == 1, "it drains through the rotation watch first"
+        start = collect.time.monotonic()
+        monkeypatch.setattr(collect.time, "monotonic", lambda: start + 400)
+        collector.poll(source)
+        assert not collector.retired, "and is closed once it has been quiet"
+    finally:
+        collector.close()
