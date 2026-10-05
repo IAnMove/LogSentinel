@@ -14,6 +14,8 @@ METADATA_HOSTS = {
     "metadata.goog",
     "metadata.azure.com",
     "instance-data",
+    # Google's short name, which a resolver completes from its search domain.
+    "metadata",
 }
 METADATA_NETWORKS = (
     ipaddress.ip_network("169.254.0.0/16"),
@@ -116,11 +118,33 @@ class Settings(Model):
         return self
 
 
+NAT64 = ipaddress.ip_network("64:ff9b::/96")
+SIX_TO_FOUR = ipaddress.ip_network("2002::/16")
+
+
+def embedded_ipv4(ip):
+    """The IPv4 address an IPv6 one carries, when it is a form that routes to it.
+
+    ::ffff:a.b.c.d is a mapped address, 64:ff9b::/96 is what a NAT64 gateway
+    translates to IPv4, and 2002::/16 is 6to4. Each can name 169.254.169.254
+    without the string looking like it, so each is unwrapped before the check.
+    """
+    if ip.version != 6:
+        return None
+    if ip.ipv4_mapped is not None:
+        return ip.ipv4_mapped
+    if ip in NAT64:
+        return ipaddress.IPv4Address(int(ip) & 0xFFFFFFFF)
+    if ip in SIX_TO_FOUR:
+        return ipaddress.IPv4Address((int(ip) >> 80) & 0xFFFFFFFF)
+    return None
+
+
 def _blocked_ip(address):
     ip = ipaddress.ip_address(address)
-    mapped = getattr(ip, "ipv4_mapped", None)
-    if mapped is not None:
-        ip = mapped
+    inner = embedded_ipv4(ip)
+    if inner is not None:
+        ip = inner
     return any(ip in network for network in METADATA_NETWORKS)
 
 

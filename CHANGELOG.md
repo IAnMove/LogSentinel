@@ -76,6 +76,8 @@ Revisión general de fiabilidad, seguridad y mantenimiento (rama `review/hardeni
 
 - **Un destino de archivo con una ruta que no es un nombre simple se rechaza al guardarlo** (`../../x`, `sub/x`, `..`), no en el primer aviso. La comprobación al enviar se mantiene para los destinos guardados antes.
 
+- **El filtro de metadatos de la nube reconoce NAT64 y 6to4.** `http://[64:ff9b::a9fe:a9fe]/` y `http://[2002:a9fe:a9fe::1]/` llevan la IPv4 169.254.169.254 dentro de una IPv6 y pasaban; el nombre corto `metadata` tampoco estaba. Las direcciones de la LAN y las públicas, también vía NAT64, siguen permitidas.
+
 ### Mantenimiento
 
 - `httpx` deja de aceptar una ruta en `verify=` en su próxima versión mayor. El emisor y el alta con CA propia pasan ahora un contexto TLS que solo confía en esa CA (`network.private_authority`), y una regla de pytest convierte esa obsolescencia en error para que no vuelva.
