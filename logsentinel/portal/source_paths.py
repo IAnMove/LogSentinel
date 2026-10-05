@@ -13,12 +13,24 @@ SENSITIVE_NAMES = {
     "id_rsa", "id_ed25519", "id_ecdsa", "id_dsa", "shadow", "gshadow", "sudoers",
     ".netrc", ".pgpass", ".git-credentials", ".npmrc", ".pypirc", ".env",
     "credentials", "credentials.json", "authorized_keys", "master.key",
+    # Shell and client histories hold commands typed with passwords in them, and
+    # these files carry a password or a key in their own text.
+    ".bash_history", ".zsh_history", ".mysql_history", ".psql_history",
+    ".python_history", ".lesshst", ".my.cnf", ".htpasswd", "wpa_supplicant.conf",
+    "privatekey",
 }
 # Whatever sits under these belongs to a person's credentials, not to a log.
 SENSITIVE_DIRS = {".ssh", ".gnupg", ".aws", ".kube", ".docker", ".password-store"}
 SENSITIVE_SUFFIXES = {".pem", ".key", ".p12", ".pfx", ".kdbx", ".jks", ".keystore"}
 # Not log files, and /proc/<pid>/environ holds a process's environment secrets.
 NOT_LOGS = (Path("/proc"), Path("/dev"))
+# System places where the files are credentials whatever they are called: VPN
+# keys, private TLS keys and the saved Wi-Fi and VPN passwords of NetworkManager.
+CREDENTIAL_TREES = (
+    Path("/etc/wireguard"),
+    Path("/etc/ssl/private"),
+    Path("/etc/NetworkManager/system-connections"),
+)
 
 
 def is_sensitive(candidate):
@@ -33,7 +45,7 @@ def is_sensitive(candidate):
         or candidate == Path("/etc/passwd")
         or candidate.is_relative_to("/etc/sudoers.d")
         or any(part in SENSITIVE_DIRS for part in candidate.parts)
-        or any(candidate.is_relative_to(root) for root in NOT_LOGS)
+        or any(candidate.is_relative_to(root) for root in NOT_LOGS + CREDENTIAL_TREES)
     )
 
 

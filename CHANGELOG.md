@@ -77,6 +77,7 @@ Revisión general de fiabilidad, seguridad y mantenimiento (rama `review/hardeni
 - **Un destino de archivo con una ruta que no es un nombre simple se rechaza al guardarlo** (`../../x`, `sub/x`, `..`), no en el primer aviso. La comprobación al enviar se mantiene para los destinos guardados antes.
 
 - **El filtro de metadatos de la nube reconoce NAT64 y 6to4.** `http://[64:ff9b::a9fe:a9fe]/` y `http://[2002:a9fe:a9fe::1]/` llevan la IPv4 169.254.169.254 dentro de una IPv6 y pasaban; el nombre corto `metadata` tampoco estaba. Las direcciones de la LAN y las públicas, también vía NAT64, siguen permitidas.
+- **Más rutas que una fuente no puede leer:** históricos de shell y de clientes (`.bash_history`, `.mysql_history`...), `.my.cnf`, `.htpasswd`, `/etc/wireguard`, `/etc/ssl/private` y las conexiones guardadas de NetworkManager.
 
 ### Mantenimiento
 
