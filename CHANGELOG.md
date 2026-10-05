@@ -56,6 +56,8 @@ Revisión general de fiabilidad, seguridad y mantenimiento (rama `review/hardeni
 
 - **Un registro del journal mayor que el lote ya no para la fuente.** Igual que ayer con los archivos: lanzaba error en cada sondeo sin avanzar el cursor. Ahora se relee con margen para un registro (hasta 8 MiB), se recorta a 256 KB con la nota de corte y el cursor sigue.
 
+- **Un evento que el receptor rechaza ya no bloquea la cola del emisor.** Ante un 400 o 422 el emisor reenviaba el mismo lote cada minuto para siempre, con todo lo posterior esperando y el latido en «ok». Ahora reduce el lote a un evento hasta dar con el rechazado, lo aparta con estado `rejected` (visible en `spool-status`) y continúa. Los 401/403/409/429 y los errores del servidor se tratan como antes.
+
 ### Arreglado tras la segunda revisión (octubre)
 
 - **Registros web y modelo.** Las peticiones de un registro de acceso ya no llegan al modelo como vecinas de una línea en la verificación, ni en la muestra del asistente sin problema elegido, ni en la búsqueda de la investigación. El asistente las sigue viendo cuando preguntas por un problema web, porque son su evidencia.

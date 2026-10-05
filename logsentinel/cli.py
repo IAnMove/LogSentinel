@@ -958,6 +958,7 @@ def spool_status(spool: str = typer.Option(..., "--spool")) -> None:
     with sqlite3.connect(path.as_uri() + "?mode=ro", uri=True) as db:
         count = db.execute("SELECT value FROM meta WHERE key='sender_pending_count'").fetchone()
         counts = dict(pending=int(count[0]) if count else None)
+        counts["rejected"] = db.execute("SELECT count(*) FROM events WHERE status='rejected'").fetchone()[0]
         oldest = db.execute("SELECT min(received) FROM events WHERE status='pending'").fetchone()[0]
         workers = {key: json.loads(value) for key, value in db.execute("SELECT key,value FROM meta WHERE key IN ('sender_capture','sender_delivery','sender_quarantine','sender_control')")}
         cfg=json.loads(db.execute("SELECT value FROM meta WHERE key='settings'").fetchone()[0])

@@ -115,9 +115,15 @@ async def forward(
                         # Recover acknowledgements committed just before a crash.
                         await blocking(store.discard_sent)
                         cleanup_due = time.monotonic() + 3600
+                    # After the receiver refused a batch as invalid, send one event
+                    # at a time until the one it refuses is found and set aside.
+                    # The mode lives in the spool so a restart keeps it.
+                    probing = await blocking(store.meta, "sender_probe") == "1"
                     rows = await asyncio.to_thread(
-                        store.events, source_id="sender", status="pending", limit=100
+                        store.events, source_id="sender", status="pending", limit=1 if probing else 100
                     )
+                    if probing and not rows:
+                        await blocking(store.set_meta, "sender_probe", "")
                     payload, size = {"events": []}, 0
                     if journal:
                         payload["format"] = "journal"
@@ -167,6 +173,36 @@ async def forward(
                         await blocking(status, store, "delivery", True)
                         return True
                     except (httpx.HTTPError, ValueError, TypeError) as failure:
+                        refused = (
+                            isinstance(failure, httpx.HTTPStatusError)
+                            and failure.response.status_code in (400, 422)
+                        )
+                        if refused and payload["events"]:
+                            # The receiver says the batch is invalid. That is a
+                            # fact about one event, not about the connection, and
+                            # sending the same batch again can only get the same
+                            # answer: it used to, for ever, with everything behind
+                            # it waiting. Narrow the batch to one event; when a
+                            # single event is refused, set it aside with a status
+                            # of its own, keep it in the spool for inspection, and
+                            # carry on with the next.
+                            if len(payload["events"]) > 1:
+                                await blocking(store.set_meta, "sender_probe", "1")
+                                await asyncio.to_thread(
+                                    status, store, "delivery", False,
+                                    "Receiver refused the batch; isolating the event it refuses",
+                                    **error_detail(failure),
+                                )
+                                return True
+                            await blocking(store.mark, [payload["events"][0]["id"]], "rejected")
+                            await blocking(store.set_meta, "sender_probe", "")
+                            await blocking(store.metric, source["id"], "events_rejected", 1)
+                            await asyncio.to_thread(
+                                status, store, "delivery", True,
+                                "One event was refused by the receiver and set aside (see spool-status)",
+                                **error_detail(failure),
+                            )
+                            return True
                         # A quota refusal states how long to wait, so honour it
                         # instead of spending retries on a predictable rejection.
                         wait = 0

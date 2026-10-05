@@ -127,7 +127,8 @@ qué componente falla mientras el portal está en marcha.
   `Retry-After` y el emisor espera y reintenta sin perder nada.
 - Con la cuota de almacenamiento llena responde **507**: el emisor conserva su cola
   y su cursor y reintenta. Conserva los archivos originales hasta resolverlo.
-- `logsentinel spool-status --spool RUTA` muestra el estado de la cola de un emisor.
+- `logsentinel spool-status --spool RUTA` muestra el estado de la cola de un emisor, incluidos los eventos **rechazados**: si el receptor contesta 400 o 422 a un
+  lote, el emisor pasa a enviar de uno en uno, aparta el evento rechazado con estado `rejected` (queda en la cola para inspeccionarlo) y sigue con los demás.
 - Para detectar un emisor que se calló, pon en la fuente un **Plazo sin señal del emisor remoto**
   de 180 s (por defecto es 0: no vigila la ausencia).
 - Tres permisos distintos, que no deben mezclarse: **leer los logs del cliente**
