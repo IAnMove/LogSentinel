@@ -136,7 +136,9 @@ async def test_outgoing_contracts(tmp_path, monkeypatch, kind):
 @pytest.mark.asyncio
 async def test_file_destination_contained(tmp_path):
     s = Store(tmp_path)
-    d = Destination(name="bad", kind="file", path="../../outside").model_dump()
+    # Saving such a path is refused now, but a destination stored before that rule
+    # existed can still hold one, so the send keeps its own check.
+    d = dict(Destination(name="bad", kind="file").model_dump(), path="../../outside")
     with pytest.raises(ValueError):
         await Outbox(s).send(d, {"delivery_id": "x"})
 

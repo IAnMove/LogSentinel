@@ -74,6 +74,8 @@ Revisión general de fiabilidad, seguridad y mantenimiento (rama `review/hardeni
 
 - **El colector documenta sus límites reales** (`OPERACION.md`, sección 11): 1000 líneas o `max_batch_bytes` por archivo y sondeo, qué hace «Importar histórico» al activarse después, los archivos comprimidos, las líneas cortadas y los dos casos de rotación que releen con el histórico activado (`copytruncate` y compresión retrasada).
 
+- **Un destino de archivo con una ruta que no es un nombre simple se rechaza al guardarlo** (`../../x`, `sub/x`, `..`), no en el primer aviso. La comprobación al enviar se mantiene para los destinos guardados antes.
+
 ### Mantenimiento
 
 - `httpx` deja de aceptar una ruta en `verify=` en su próxima versión mayor. El emisor y el alta con CA propia pasan ahora un contexto TLS que solo confía en esa CA (`network.private_authority`), y una regla de pytest convierte esa obsolescencia en error para que no vuelva.

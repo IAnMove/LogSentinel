@@ -180,6 +180,16 @@ class Destination(Model):
                 )
         if self.url:
             check_url(self.url)
+        if self.kind == "file" and self.path:
+            # The same rule the sender applies, enforced when the destination is
+            # saved so a bad name is refused where it is typed, not discovered
+            # at the first alert.
+            if (
+                self.path in (".", "..")
+                or "/" in self.path
+                or "\\" in self.path
+            ):
+                raise ValueError("File destination must be a filename within notifications/")
         if self.enabled:
             if self.kind == "telegram" and not (self.token and self.chat_id):
                 raise ValueError("Telegram requires token and chat ID")
