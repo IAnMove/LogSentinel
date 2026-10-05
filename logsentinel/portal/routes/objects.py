@@ -56,7 +56,9 @@ def register_objects(app, ctx):
             stats=store.stats(),
             worker_error=store.meta("worker_error"),
             last_analysis=store.meta("last_analysis"),
-            problems=store.rows("problems"),
+            # Sanitised on every read, as /api/problems is: a secret added after a
+            # problem was saved would otherwise come back in its stored text.
+            problems=sanitize(store.rows("problems"), protected_secrets(store)),
             jobs=store.rows("jobs", 30),
             deliveries=store.rows("deliveries", 50),
         )
