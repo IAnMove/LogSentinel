@@ -461,6 +461,26 @@ function syncNotificationForm(form) {
   updateNotificationGuide(form);
 }
 
+// The browser's own message for bad JSON ("Unexpected token } in JSON at
+// position 14") is English, names no field and says nothing about what is wanted.
+function parseHeaders(text) {
+  if (!text.trim()) return {};
+  const reason = new Error(
+    bilingual(
+      'Las cabeceras deben ser un objeto JSON válido, por ejemplo {"X-Token": "valor"}.',
+      'Headers must be a valid JSON object, for example {"X-Token": "value"}.',
+    ),
+  );
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw reason;
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw reason;
+  return parsed;
+}
+
 function notificationFormData(form) {
   const data = formData(form);
   // Hidden drafts stay in this form only; send just this provider's fields.
@@ -475,8 +495,7 @@ function notificationFormData(form) {
     if (name === "clear") {
       if (input.checked)
         data.clear_secrets = ["url", "token", "secret", "headers"];
-    } else if (name === "headers")
-      data.headers = input.value ? JSON.parse(input.value) : {};
+    } else if (name === "headers") data.headers = parseHeaders(input.value);
     else
       data[name] =
         input.type === "number" ? Number(input.value) : input.value.trim();

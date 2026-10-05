@@ -85,6 +85,8 @@ Revisión general de fiabilidad, seguridad y mantenimiento (rama `review/hardeni
 
 - **La reserva del presupuesto de contexto coincide con lo que añade la llamada.** El techo de bytes de un lote reservaba 128 bytes fijos, pero la llamada al modelo añade la cláusula de datos no fiables y la frase de idioma (unos 174), así que un lote empaquetado al máximo podía pasarse del presupuesto comprobado y cancelarse antes de llegar al modelo. La reserva se calcula ahora con las mismas constantes que usa la llamada.
 
+- **Las cabeceras JSON mal escritas de un destino se explican.** Al guardar, el mensaje era el del propio navegador («Expected property name or '}' in JSON at position 1»), en inglés y sin decir de qué campo. Ahora dice, en el idioma del portal, que deben ser un objeto JSON válido y da un ejemplo; también rechaza JSON válido que no sea un objeto (`[1, 2]`, `42`, `null`). Nuevo recorrido `scripts/headers_smoke.py`.
+
 ### Mantenimiento
 
 - `scripts/portal_smoke.py` registra quién llama a `render()` y `refresh()` desde el paso del destino y, si el clic en «Guardar» agota el tiempo, vuelca esas llamadas con su pila. Ese clic ha fallado de forma intermitente en CI con «element was detached from the DOM» y leyendo el código no se explica; la próxima vez el fallo dirá qué reconstruyó la página.
