@@ -89,6 +89,8 @@ Revisión general de fiabilidad, seguridad y mantenimiento (rama `review/hardeni
 
 - **Un sondeo que falla se anuncia una vez.** El aviso de error del sondeo de 15 segundos reescribía el mismo texto en la región `role="status"` en cada intento, de modo que un lector de pantalla lo repetía cada 15 segundos mientras durara el fallo. Ahora lo dice una vez y calla hasta que el sondeo vuelve a funcionar. Se comprueba en `scripts/refresh_race_smoke.py`.
 
+- **Una fuente web sana ya no parece un hueco de cobertura.** El monitor y «Cobertura y capacidad» contaban sus peticiones entre lo «apartado por selección de fuente», con estilo de aviso, aunque la fuente funcione como debe. Ahora las cuentan aparte, en tono neutro (`coverage.web` en el monitor y `retained.web` en el informe de capacidad) y dejan el aviso para lo que una selección deja fuera de verdad. Nuevo recorrido `scripts/web_coverage_smoke.py`.
+
 ### Mantenimiento
 
 - `scripts/portal_smoke.py` registra quién llama a `render()` y `refresh()` desde el paso del destino y, si el clic en «Guardar» agota el tiempo, vuelca esas llamadas con su pila. Ese clic ha fallado de forma intermitente en CI con «element was detached from the DOM» y leyendo el código no se explica; la próxima vez el fallo dirá qué reconstruyó la página.
@@ -117,7 +119,6 @@ Cada uno está comprobado contra el código actual y no se ha hecho todavía:
 - **Resumen de los fallos SSH.** `ssh_auth_failures` dice «varios fallos» sin cuántos, desde cuántas direcciones, qué usuarios probaron ni si hubo un acceso aceptado. Los detectores web ya resumen así; falta el equivalente, con la lista de usuarios acotada y sin enviarla a los destinos externos sin decidirlo (a veces se escribe la contraseña en el campo de usuario).
 - **GeoIP.** País y proveedor por dirección, con una base local (DB-IP Lite no pide cuenta; GeoLite2 sí) descargada de forma explícita y verificada, nunca automática.
 - **`reasoning_effort`** hacia Ollama por `/v1`, para que el razonamiento no consuma el presupuesto de salida del JSON.
-- **Cobertura de las fuentes web.** Una fuente de acceso sana aparece con el 100 % «por selección de fuente», con estilo de aviso en el monitor y en «Cobertura y capacidad». Falta un contador propio para las peticiones web y un texto que diga que es lo esperado.
 - **Umbrales de los detectores web** configurables, y un panel por fuente web. Un panel de visitas es otro producto y queda fuera.
 
 ### Sin cambiar a propósito

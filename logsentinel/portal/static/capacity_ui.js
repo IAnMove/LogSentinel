@@ -248,11 +248,25 @@ function tuningSummary(r) {
         "subtle",
       ),
     );
-    if (history.excluded || history.policy)
+    const web = history.web || 0;
+    const selected = history.policy - web;
+    if (web)
       box.append(
         el(
           "p",
-          coverageNumber(history.excluded + history.policy) +
+          coverageNumber(web) +
+            bilingual(
+              " peticiones web: las vigilan los detectores y el modelo no las lee, como está previsto. No cuentan como hueco de cobertura.",
+              " web requests: the detectors watch them and the model does not read them, as intended. They do not count as a coverage gap.",
+            ),
+          "subtle",
+        ),
+      );
+    if (history.excluded || selected)
+      box.append(
+        el(
+          "p",
+          coverageNumber(history.excluded + selected) +
             bilingual(
               " apartados por filtros o selección: no están en la cola del LLM. Desactivar el filtro afecta a nuevas revisiones; para recuperar los retenidos usa Fuentes → Recuperar retenidos sin analizar.",
               " left out by filters or selection: these are outside the LLM queue. Disabling a filter affects new reviews; recover retained logs using Sources → Recover unreviewed retained logs.",

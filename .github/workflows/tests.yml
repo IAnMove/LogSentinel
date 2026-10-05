@@ -52,6 +52,7 @@ jobs:
       - run: python scripts/problem_smoke.py
       - run: python scripts/refresh_race_smoke.py
       - run: python scripts/headers_smoke.py
+      - run: python scripts/web_coverage_smoke.py
       - run: python scripts/metrics_smoke.py
       - run: python scripts/providers_smoke.py
       - run: python scripts/capacity_smoke.py

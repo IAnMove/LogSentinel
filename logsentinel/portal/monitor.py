@@ -3,6 +3,8 @@
 import json
 import time
 
+from .web_access import WEB_SERVICE
+
 
 class Monitor:
     def __init__(self, store, analyzer, background):
@@ -94,6 +96,13 @@ class Monitor:
                     "SELECT status,count(*) FROM events WHERE status!='measured' AND source_id NOT IN (SELECT id FROM objects WHERE kind='source' AND json_extract(data,'$.kind') IN ('metrics','health')) GROUP BY status"
                 )
             )
+            # Web requests are always left to the detectors (status "sampled"). They
+            # are inside the "policy" count, and counted here too so a screen can
+            # tell the expected from a real gap.
+            web = db.execute(
+                "SELECT count(*) FROM events WHERE status='sampled' AND service=?",
+                (WEB_SERVICE,),
+            ).fetchone()[0]
             failed = db.execute(
                 "SELECT count(*) FROM jobs WHERE status IN ('failed','retry','partial')"
             ).fetchone()[0]
@@ -195,6 +204,7 @@ class Monitor:
                 history_recovered=recovered,
                 excluded=counts.get("excluded", 0),
                 policy=counts.get("sampled", 0),
+                web=web,
                 errors=counts.get("error", 0),
                 retrying=retry_events,
                 oversized=counts.get("oversized", 0),

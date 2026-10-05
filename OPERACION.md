@@ -186,7 +186,9 @@ Las rutas y los fragmentos se comparan tras decodificar la URL dos veces y pasar
 
 **Qué hay que saber.**
 
-- **En la cobertura aparecerán como «por selección de fuente».** El monitor y «Cobertura y capacidad» cuentan las peticiones web entre lo que no va al modelo, con aspecto de aviso, aunque la fuente funcione exactamente como debe. «Recuperar retenidos sin analizar» no las vuelve a poner en la cola.
+- **En la cobertura aparecen aparte.** El monitor y «Cobertura y capacidad» cuentan las peticiones web como «peticiones web: las vigilan los detectores y el modelo
+  no las lee, como está previsto», en tono neutro y sin sumarlas a lo que una fuente deja fuera por su selección, que sigue siendo un aviso. «Recuperar retenidos sin
+  analizar» no las vuelve a poner en la cola.
 - **El cliente es la dirección que vio el servidor.** Detrás de un proxy inverso o un CDN será la del proxy y los resúmenes serán inútiles. Haz que el servidor la
   reescriba antes de registrar: en nginx `set_real_ip_from` y `real_ip_header X-Forwarded-For`; en Apache `mod_remoteip` con `RemoteIPHeader`. El portal no usa la
   cabecera `X-Forwarded-For` de la línea porque cualquiera puede enviarla falsificada.
