@@ -72,6 +72,8 @@ Revisión general de fiabilidad, seguridad y mantenimiento (rama `review/hardeni
 
 - **Otra expresión cuadrática, en la compactación.** El reconocimiento de líneas de apscheduler (`Running job "…" (scheduled at …)`) tardaba 1,5 s con una línea hostil de 256 KB; el nombre del trabajo ya no admite comillas y la prueba de texto hostil cubre ahora también las líneas de unidades de systemd, que ayer no alcanzaba.
 
+- **`service install --system` avisa si la cuenta no puede llegar al intérprete** (la instalación documentada es un venv en el home del instalador, normalmente 0700, y la unidad fallaba al arrancar con `--run-as`), y admite `--port`, `--ingest-listen`, `--tls-cert` y `--tls-key`, que antes exigían editar `ExecStart` a mano.
+
 ### Arreglado tras la segunda revisión (octubre)
 
 - **Registros web y modelo.** Las peticiones de un registro de acceso ya no llegan al modelo como vecinas de una línea en la verificación, ni en la muestra del asistente sin problema elegido, ni en la búsqueda de la investigación. El asistente las sigue viendo cuando preguntas por un problema web, porque son su evidencia.

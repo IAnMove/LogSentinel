@@ -587,12 +587,44 @@ def _prepare_service_data(path, account_info=None):
         os.close(fd)
 
 
+def _unreachable_parent(path, account_info):
+    """The first directory above `path` the account cannot search, or None.
+
+    A venv in the installer's home is the documented install, and a home is
+    usually mode 0700, so a system unit that names another account points its
+    ExecStart at a Python that account cannot reach and fails at start.
+    Supplementary groups are not consulted: a false warning costs a sentence, a
+    missed one costs a service that never starts.
+    """
+    import stat as st
+
+    current = Path(path).resolve()
+    for parent in list(current.parents)[::-1]:
+        try:
+            info = os.stat(parent)
+        except OSError:
+            return parent
+        mode = info.st_mode
+        searchable = (
+            mode & st.S_IXOTH
+            or (info.st_uid == account_info.pw_uid and mode & st.S_IXUSR)
+            or (info.st_gid == account_info.pw_gid and mode & st.S_IXGRP)
+        )
+        if not searchable:
+            return parent
+    return None
+
+
 @service_app.command(name="install")
 def service_install(
     system: bool = typer.Option(False, "--system", help="Install system-wide service (/etc/systemd/system)"),
     run_as: Optional[str] = typer.Option(None, "--run-as", help="Account for a system service (default: current user)"),
     allow_root: bool = typer.Option(False, "--allow-root", help="Permit a system service running as root"),
     legacy: bool = typer.Option(False, "--legacy", help="Install the old CLI monitor instead of the portal"),
+    port: int = typer.Option(8765, "--port", help="Panel port the unit starts the portal on"),
+    ingest_listen: Optional[str] = typer.Option(None, "--ingest-listen", help="HOST:PORT for the reception listener, as for `portal`"),
+    tls_cert: Optional[str] = typer.Option(None, "--tls-cert", help="Certificate for the reception listener"),
+    tls_key: Optional[str] = typer.Option(None, "--tls-key", help="Private key for the reception listener"),
 ) -> None:
     """Generate and install a systemd user or system unit for the portal."""
     import getpass
@@ -637,11 +669,30 @@ def service_install(
         start = f"{_unit_path(sys.executable, command=True)} -m logsentinel.cli run"
         description = "LogSentinel legacy log monitor"
     else:
+        if ingest_listen:
+            _split_listen(ingest_listen)
+            if bool(tls_cert) != bool(tls_key):
+                raise typer.BadParameter("Pass both --tls-cert and --tls-key, or neither")
         start = (
             f"{_unit_path(sys.executable, command=True)} -m logsentinel.cli portal "
-            f"--data-dir {_unit_path(data_directory, command=True)} --port 8765"
+            f"--data-dir {_unit_path(data_directory, command=True)} --port {int(port)}"
         )
+        if ingest_listen:
+            start += f" --ingest-listen {_unit_path(ingest_listen, command=True)}"
+            if tls_cert and tls_key:
+                start += (
+                    f" --tls-cert {_unit_path(Path(tls_cert).expanduser().absolute(), command=True)}"
+                    f" --tls-key {_unit_path(Path(tls_key).expanduser().absolute(), command=True)}"
+                )
         description = "LogSentinel local log review portal"
+    if account_info:
+        blocked = _unreachable_parent(sys.executable, account_info)
+        if blocked:
+            console.print(
+                f"[yellow]Warning:[/yellow] {account_info.pw_name} cannot search {blocked}, so it will not be able "
+                f"to run {sys.executable}. Install LogSentinel where that account can reach it (for example a "
+                "virtualenv under its own home or under /opt) and install the unit from there.",
+            )
     unit_content = f"""[Unit]
 Description={description}
 After=network.target
