@@ -84,6 +84,8 @@ Revisión general de fiabilidad, seguridad y mantenimiento (rama `review/hardeni
 
 - **Un fallo al registrar una condición de salud no aborta el chequeo.** Solo se capturaba `OSError`; cualquier otro error (base de datos ocupada) interrumpía el ciclo, la instantánea dejaba de refrescarse y al minuto `/healthz` daba 503 por «stale». Ahora la condición queda visible con el error anotado y se reintenta en el siguiente ciclo.
 
+- **Reintentar a mano una entrega ya entregada responde 409** en vez de enviar el aviso por segunda vez; las fallidas, desconocidas y silenciadas se reintentan como antes.
+
 ### Arreglado tras la segunda revisión (octubre)
 
 - **Registros web y modelo.** Las peticiones de un registro de acceso ya no llegan al modelo como vecinas de una línea en la verificación, ni en la muestra del asistente sin problema elegido, ni en la búsqueda de la investigación. El asistente las sigue viendo cuando preguntas por un problema web, porque son su evidencia.
