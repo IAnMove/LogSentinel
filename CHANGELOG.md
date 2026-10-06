@@ -76,6 +76,8 @@ Revisión general de fiabilidad, seguridad y mantenimiento (rama `review/hardeni
 
 - **`prepare-host --account` se valida.** El nombre llegaba tal cual a `useradd`, `usermod` y `setfacl` (`--help` o `a:b` los hacían comportarse de forma rara); ahora debe tener forma de nombre de cuenta, y una cuenta existente no puede ser root ni una cuenta con shell de login, igual que exige el instalador de clientes.
 
+- **`enroll` no liga una cola a otra fuente.** Canjear un paquete de otra fuente o receptor sobre una cola ya en uso sobrescribía el token y `forward` rechazaba después la cola; ahora se rechaza antes de canjear nada. Volver a dar de alta la misma fuente (para rotar el token) sigue permitido.
+
 ### Arreglado tras la segunda revisión (octubre)
 
 - **Registros web y modelo.** Las peticiones de un registro de acceso ya no llegan al modelo como vecinas de una línea en la verificación, ni en la muestra del asistente sin problema elegido, ni en la búsqueda de la investigación. El asistente las sigue viendo cuando preguntas por un problema web, porque son su evidencia.

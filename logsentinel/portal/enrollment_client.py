@@ -7,6 +7,7 @@ machine answering at that address without the matching key gets nothing.
 """
 
 from __future__ import annotations
+import json
 import os
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -64,6 +65,7 @@ def claim(package, spool, client=None):
     spool.mkdir(parents=True, exist_ok=True, mode=0o700)
     # mkdir keeps the mode of a directory that already existed.
     os.chmod(spool, 0o700)
+    bound_elsewhere(spool, package)
     ca_path = ""
     verify = True
     if package.get("ca_certificate"):
@@ -102,6 +104,31 @@ def claim(package, spool, client=None):
         "ca_path": str(ca_path) if ca_path else "",
         "fingerprint": digest,
     }
+
+
+def bound_elsewhere(spool, package):
+    """Refuse to put another source's credential into a spool a sender already uses.
+
+    A spool remembers which receiver and source it delivers for. Claiming a
+    package for a different source wrote the new token over the old one, and
+    forward then refused the spool as belonging to another source: a queue of
+    undelivered events with a credential that no longer matches either side.
+    """
+    database = spool / "sentinel.db"
+    if not database.is_file():
+        return
+    from .store import Store
+
+    binding = Store(spool).meta("sender_binding")
+    if not binding:
+        return
+    identity = json.loads(binding)
+    receiver, source_id = identity[1], identity[2]
+    if receiver != package["receiver"].rstrip("/") or source_id != package["source_id"]:
+        raise ValueError(
+            f"This spool already delivers for source {source_id} at {receiver}; "
+            "use another --spool for this package, or keep that spool for that source"
+        )
 
 
 def _write_private(path, text):
