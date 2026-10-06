@@ -13,7 +13,7 @@ import time
 import httpx
 from .logs import report
 from .network import CheckedAsyncTransport
-from .rules import matches, redact, sanitize
+from .rules import matches, protected_secrets, redact, sanitize
 from .store import uid, dumps
 
 RANK = {"LOW": 1, "MEDIUM": 2, "HIGH": 3, "CRITICAL": 4}
@@ -164,10 +164,12 @@ class Outbox:
         self.lock = asyncio.Lock()
 
     async def send(self, dest, payload):
-        payload = sanitize(
-            payload,
-            (dest.get("token"), dest.get("secret"), self.store.settings().llm.api_key),
-        )
+        # Everything the portal protects, not only this destination's own
+        # credentials: a log line that quotes another destination's webhook URL
+        # must not reach this one. The stored text was scrubbed when the problem
+        # was saved, but a secret added since is only known now.
+        secrets = (dest.get("token"), dest.get("secret"), *protected_secrets(self.store))
+        payload = sanitize(payload, secrets)
         spanish = self.store.settings().language == "es"
         title = "Prueba de notificación" if spanish else "Test notification"
         summary = (
@@ -190,7 +192,7 @@ class Outbox:
                 if spanish else
                 f"\nSSH rejections: {minutes:g} min between notifications unless severity increases. Originals remain in the portal. This does not confirm a fail2ban block."
             )
-        text = redact(text, (dest.get("token"), dest.get("secret")))
+        text = redact(text, secrets)
         kind = dest["kind"]
         if kind == "file":
             name = dest.get("path") or "alerts.jsonl"

@@ -62,6 +62,8 @@ Revisión general de fiabilidad, seguridad y mantenimiento (rama `review/hardeni
 
 - **Un token de métricas ya no puede abrir problemas sin límite.** Cualquier clave `disk_pct:/ruta` contaba como disco y disparaba al 99 %: 100 claves inventadas abrían 100 problemas y 100 avisos en dos segundos. Ahora una muestra admite como máximo 16 montajes y, si declara `disks`, solo esos; cada máquina puede abrir 20 problemas de recursos por hora (el resto se anota como error de telemetría de la máquina); `/ingest-metrics` cobra la misma cuota horaria que los logs; y la tabla de estados de alerta se poda con las muestras. Una muestra que no encaja en su modelo recibe 422 del receptor, no un 500.
 
+- **Un aviso ya no lleva las credenciales de otro destino.** El texto saliente se ocultaba solo con el token y el secreto del destino que lo recibía; la URL del webhook del destino B, citada en un log, llegaba al archivo de avisos del destino A. Ahora se ocultan todos los secretos protegidos, y `/api/state` sanea también las entregas en cola (ayer solo los problemas).
+
 ### Arreglado tras la segunda revisión (octubre)
 
 - **Registros web y modelo.** Las peticiones de un registro de acceso ya no llegan al modelo como vecinas de una línea en la verificación, ni en la muestra del asistente sin problema elegido, ni en la búsqueda de la investigación. El asistente las sigue viendo cuando preguntas por un problema web, porque son su evidencia.

@@ -60,7 +60,7 @@ def register_objects(app, ctx):
             # problem was saved would otherwise come back in its stored text.
             problems=sanitize(store.rows("problems"), protected_secrets(store)),
             jobs=store.rows("jobs", 30),
-            deliveries=store.rows("deliveries", 50),
+            deliveries=sanitize(store.rows("deliveries", 50), protected_secrets(store)),
         )
 
     def scoped(kind, data):
