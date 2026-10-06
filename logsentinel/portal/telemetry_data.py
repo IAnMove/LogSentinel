@@ -82,6 +82,11 @@ KEYS = {
 }
 
 
+CAPACITY_PREFIXES = frozenset({
+    "disk_pct", "inode_pct", "disk_total_bytes", "disk_available_bytes", "disk_free_bytes", "disk_used_bytes",
+})
+
+
 class DiskInfo(Model):
     mount: str = Field(min_length=1, max_length=1024)
     device: str = Field(default="", max_length=300)
@@ -109,6 +114,31 @@ class MetricSample(Model):
             ):
                 raise ValueError("Invalid metric value")
         return values
+
+    @model_validator(mode="after")
+    def disks_are_the_ones_reported(self):
+        """A capacity key names a mount this sample reports, and there are few.
+
+        Every disk_pct:/path or inode_pct:/path key opens its own alert state
+        and, at the critical threshold, its own problem. With any path accepted,
+        one request of five hundred invented mounts at 99% opened five hundred
+        problems and as many notifications. The sampler lists the mounts it
+        reports in `disks`, so a listed set bounds the keys; a sender that lists
+        none (older builds) is held to the same count as the list allows.
+        """
+        mounts = {
+            key.split(":", 1)[1]
+            for key in self.values
+            if key.split(":", 1)[0] in CAPACITY_PREFIXES
+        }
+        if len(mounts) > 16:
+            raise ValueError("A sample may report at most 16 mounts")
+        if self.disks:
+            listed = {d.mount for d in self.disks}
+            unknown = mounts - listed
+            if unknown:
+                raise ValueError("Capacity metric for a mount not in disks: " + sorted(unknown)[0][:100])
+        return self
 
     @field_validator("errors")
     @classmethod
@@ -446,6 +476,13 @@ class TelemetryStore:
                     "DELETE FROM telemetry_samples WHERE machine_id=? AND observed<?",
                     (machine["id"], cutoff),
                 ).rowcount
+                # Alert state for a key not seen since the samples expired, and
+                # not active, is finished; it was never removed before.
+                db.execute(
+                    "DELETE FROM telemetry_alerts WHERE machine_id=? AND json_extract(data,'$.active') IS NOT 1 "
+                    "AND coalesce(json_extract(data,'$.observed'),0)<?",
+                    (machine["id"], cutoff),
+                )
                 db.execute(
                     "DELETE FROM telemetry_rollups WHERE machine_id=? AND period='hour' AND bucket<?",
                     (

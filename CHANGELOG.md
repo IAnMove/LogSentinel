@@ -60,6 +60,8 @@ Revisión general de fiabilidad, seguridad y mantenimiento (rama `review/hardeni
 
 - **Una entrega atascada se ve en el central.** El latido del emisor solo reflejaba la captura, así que una cola bloqueada aparecía en «ok». Ahora, si la entrega lleva más de diez minutos fallando, el latido marca la fuente en error con el código `delivery_blocked` y comunica cuántos eventos se apartaron como rechazados; la ficha de la fuente lo muestra. Los emisores antiguos siguen aceptados.
 
+- **Un token de métricas ya no puede abrir problemas sin límite.** Cualquier clave `disk_pct:/ruta` contaba como disco y disparaba al 99 %: 100 claves inventadas abrían 100 problemas y 100 avisos en dos segundos. Ahora una muestra admite como máximo 16 montajes y, si declara `disks`, solo esos; cada máquina puede abrir 20 problemas de recursos por hora (el resto se anota como error de telemetría de la máquina); `/ingest-metrics` cobra la misma cuota horaria que los logs; y la tabla de estados de alerta se poda con las muestras. Una muestra que no encaja en su modelo recibe 422 del receptor, no un 500.
+
 ### Arreglado tras la segunda revisión (octubre)
 
 - **Registros web y modelo.** Las peticiones de un registro de acceso ya no llegan al modelo como vecinas de una línea en la verificación, ni en la muestra del asistente sin problema elegido, ni en la búsqueda de la investigación. El asistente las sigue viendo cuando preguntas por un problema web, porque son su evidencia.

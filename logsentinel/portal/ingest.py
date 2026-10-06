@@ -217,6 +217,14 @@ def create_ingest_app(store, telemetry=None):
     )
     app.state.store = store
 
+    @app.exception_handler(ValidationError)
+    async def invalid_body(request, exc):
+        # A body that parses but does not fit its model, as the panel answers it.
+        return JSONResponse(
+            {"detail": "; ".join(".".join(map(str, e["loc"])) + ": " + e["msg"] for e in exc.errors())[:500]},
+            status_code=422,
+        )
+
     @app.exception_handler(json.JSONDecodeError)
     @app.exception_handler(UnicodeDecodeError)
     async def unreadable_body(request, exc):

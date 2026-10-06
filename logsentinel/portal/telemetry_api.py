@@ -9,6 +9,8 @@ from typing import Literal
 
 from fastapi import Request, HTTPException
 from pydantic import Field
+
+from .store import dumps
 from .models import Model
 from .telemetry_data import MetricSample, TelemetryConfig
 
@@ -103,7 +105,19 @@ def register_metrics_ingest(app, telemetry):
             )
         if not cfg.enabled or cfg.mode != "remote":
             raise HTTPException(409, "Remote metrics disabled")
-        body = SampleBatch.model_validate(await request.json())
+        raw = await request.json()
+        body = SampleBatch.model_validate(raw)
+        # The same hourly allowance a log sender has, so a metrics token cannot
+        # spend the central's time without limit either.
+        retry_after = store.charge_sender_quota(
+            "metrics:" + id, len(dumps(raw).encode()), len(body.samples), store.settings()
+        )
+        if retry_after:
+            raise HTTPException(
+                429,
+                "Sender quota spent; retain and retry these samples",
+                headers={"Retry-After": str(retry_after)},
+            )
         accepted = 0
         acknowledged, rejected = [], []
         if any(sample.observed > time.time() + 60 for sample in body.samples):
