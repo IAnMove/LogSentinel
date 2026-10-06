@@ -122,6 +122,21 @@ def test_reusing_enrollment_command_cannot_bypass_safe_upgrade(package,tmp_path,
     assert calls==[('logs',desired,runtime)]
 
 
+def test_a_package_given_on_an_upgrade_is_said_to_be_unused_with_the_rotation_route(package,tmp_path,monkeypatch,capsys):
+    from types import SimpleNamespace
+    desired=setup.selection('logs',package)
+    units=tmp_path/'units';units.mkdir()
+    (units/'logsentinel-client-logs.service').write_text('existing service')
+    monkeypatch.setattr(setup,'UNITS',units)
+    monkeypatch.setattr(setup,'validate_existing',lambda *_:dict(desired))
+    monkeypatch.setattr(setup,'upgrade_client',lambda args,old,runtime:None)
+    setup.configure(SimpleNamespace(name='logs',package='/tmp/alta-nueva.json'),desired,package,tmp_path/'runtime')
+    output=capsys.readouterr().out
+    assert 'NO se canjea' in output
+    assert 'logsentinel enroll /tmp/alta-nueva.json --spool '+desired['spool'] in output
+    assert desired['account'] in output
+
+
 def test_plan_shows_the_certificate_fingerprint_to_compare(package,tmp_path,monkeypatch,capsys):
     path=tmp_path/'alta.json';path.write_text(json.dumps(package))
     monkeypatch.setattr(setup,'CONFIG',tmp_path/'config')

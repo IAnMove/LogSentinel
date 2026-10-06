@@ -288,6 +288,12 @@ def configure(args, desired, package, runtime):
     if old and unit.exists():
         # Re-running the original enrollment command is also an upgrade. It must
         # not bypass the coherent backup or restart a deliberately stopped unit.
+        if getattr(args, 'package', None):
+            # The package is not redeemed on an upgrade; saying nothing let a
+            # person believe a new package had rotated the credential.
+            print('Ya hay un emisor "'+args.name+'" con esta identidad: se actualiza el programa y se conserva su credencial. '
+                  'El paquete indicado NO se canjea. Para rotar el token o el certificado, ejecuta como la cuenta '+old['account']+': '
+                  'logsentinel enroll '+str(args.package)+' --spool '+str(old['spool'])+' --ca-fingerprint HUELLA; y reinicia '+unit.stem+'.', flush=True)
         return upgrade_client(args, old, runtime)
     spool = Path(desired['spool'])
     account = desired['account']

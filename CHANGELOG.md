@@ -80,6 +80,8 @@ Revisión general de fiabilidad, seguridad y mantenimiento (rama `review/hardeni
 
 - **`metrics-forward` confía en la CA fijada del central** si la cola contiene `receiver-ca.pem` (lo deja el alta), como hace ya el emisor de logs; antes solo probaba las autoridades del sistema y un central con CA propia era inalcanzable.
 
+- **El instalador dice cuándo no canjea un paquete.** Repetir `setup-client` con un paquete nuevo sobre una instalación existente actualizaba el programa y conservaba la credencial antigua sin decirlo; ahora avisa de que el paquete no se canjea y da el comando de rotación (`logsentinel enroll` como la cuenta del emisor y reinicio de la unidad).
+
 ### Arreglado tras la segunda revisión (octubre)
 
 - **Registros web y modelo.** Las peticiones de un registro de acceso ya no llegan al modelo como vecinas de una línea en la verificación, ni en la muestra del asistente sin problema elegido, ni en la búsqueda de la investigación. El asistente las sigue viendo cuando preguntas por un problema web, porque son su evidencia.
