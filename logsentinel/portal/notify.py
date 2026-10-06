@@ -115,16 +115,37 @@ def enqueue(store, problem_id, event_type="problem.updated"):
             continue
         with store.connect() as db:
             db.execute("BEGIN IMMEDIATE")
-            recent = db.execute(
-                "SELECT payload FROM deliveries WHERE destination_id=? AND problem_id=? AND created>? AND status NOT IN ('muted','failed','cancelled') ORDER BY created DESC LIMIT 1",
-                (dest["id"], problem_id, time.time() - dest["cooldown_seconds"]),
+            # Comparing against the latest delivery of any kind let a problem
+            # that alternates recovered and updated send on every flip, since
+            # each message was always of the other kind than the latest. The
+            # comparison is now against the latest delivery of the same kind,
+            # with one exception: the first recovery in a window ends the
+            # incident, so an alert after it is news and goes out. A second
+            # recovery in the same window is flapping, and from then on both
+            # kinds are held until the window ends, unless severity rose. Rows
+            # from before event types existed count as updates.
+            since = time.time() - dest["cooldown_seconds"]
+            live = "AND status NOT IN ('muted','failed','cancelled') "
+            same = db.execute(
+                "SELECT payload,created FROM deliveries WHERE destination_id=? AND problem_id=? AND created>? "
+                + live
+                + "AND coalesce(json_extract(payload,'$.event_type'),'problem.updated')=? "
+                "ORDER BY created DESC LIMIT 1",
+                (dest["id"], problem_id, since, event_type),
             ).fetchone()
-            cooldown = (
-                recent
-                and json.loads(recent[0]).get("event_type", "problem.updated")
-                == event_type
-                and RANK[json.loads(recent[0])["severity"]] >= RANK[problem["severity"]]
-            )
+            recoveries = [
+                r[0]
+                for r in db.execute(
+                    "SELECT created FROM deliveries WHERE destination_id=? AND problem_id=? AND created>? "
+                    + live
+                    + "AND json_extract(payload,'$.event_type')='problem.recovered'",
+                    (dest["id"], problem_id, since),
+                )
+            ]
+            cooldown = bool(same) and RANK[json.loads(same["payload"])["severity"]] >= RANK[problem["severity"]]
+            if cooldown and event_type != "problem.recovered":
+                incident_ended = len(recoveries) == 1 and recoveries[0] > same["created"]
+                cooldown = not incident_ended
             grouped = None
             if payload.get("notification_group"):
                 grouped = db.execute(

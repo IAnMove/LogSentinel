@@ -68,6 +68,8 @@ Revisión general de fiabilidad, seguridad y mantenimiento (rama `review/hardeni
 
 - **Detector de instrucciones en los logs, afinado en tres puntos.** «Ignore all instructions…», el propio caso inglés del corpus, no se detectaba (el patrón exigía *previous/prior/above*); «Mensaje del sistema:», prefijo habitual de aplicaciones en español, disparaba un HIGH y ahora necesita «nuevo» o «actualizado», como el patrón inglés; las reglas de exclusión se respetan también en este detector, que las ignoraba; y un hallazgo de inyección resuelto a mano ya no se reabre ni vuelve a avisar con la siguiente línea parecida (los demás hallazgos sí reabren, porque un OOM que se repite es noticia). El caso del corpus lleva ahora su expectativa, que antes no tenía.
 
+- **Un problema que va y viene ya no avisa en cada vuelta.** El enfriamiento comparaba solo con la última entrega, fuera del tipo que fuera, así que alternar «recuperado» y «actualizado» lo saltaba siempre (lo producen los chequeos de salud y de recursos). Ahora compara con la última entrega del mismo tipo, y la primera recuperación de la ventana reinicia el aviso (una recurrencia real sigue saliendo): como mucho aviso, recuperación y recurrencia por ventana, salvo subida de gravedad.
+
 ### Arreglado tras la segunda revisión (octubre)
 
 - **Registros web y modelo.** Las peticiones de un registro de acceso ya no llegan al modelo como vecinas de una línea en la verificación, ni en la muestra del asistente sin problema elegido, ni en la búsqueda de la investigación. El asistente las sigue viendo cuando preguntas por un problema web, porque son su evidencia.
