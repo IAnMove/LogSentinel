@@ -74,6 +74,8 @@ Revisión general de fiabilidad, seguridad y mantenimiento (rama `review/hardeni
 
 - **`service install --system` avisa si la cuenta no puede llegar al intérprete** (la instalación documentada es un venv en el home del instalador, normalmente 0700, y la unidad fallaba al arrancar con `--run-as`), y admite `--port`, `--ingest-listen`, `--tls-cert` y `--tls-key`, que antes exigían editar `ExecStart` a mano.
 
+- **`prepare-host --account` se valida.** El nombre llegaba tal cual a `useradd`, `usermod` y `setfacl` (`--help` o `a:b` los hacían comportarse de forma rara); ahora debe tener forma de nombre de cuenta, y una cuenta existente no puede ser root ni una cuenta con shell de login, igual que exige el instalador de clientes.
+
 ### Arreglado tras la segunda revisión (octubre)
 
 - **Registros web y modelo.** Las peticiones de un registro de acceso ya no llegan al modelo como vecinas de una línea en la verificación, ni en la muestra del asistente sin problema elegido, ni en la búsqueda de la investigación. El asistente las sigue viendo cuando preguntas por un problema web, porque son su evidencia.

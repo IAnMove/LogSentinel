@@ -35,6 +35,33 @@ def home_directories():
     return homes
 
 
+ACCOUNT_NAME = r"^[a-z_][a-z0-9_-]{0,31}$"
+NOLOGIN_SHELLS = {"/usr/sbin/nologin", "/sbin/nologin", "/bin/false", "/usr/bin/nologin"}
+
+
+def validate_account(name):
+    """A name useradd would accept, and an account that is only an agent.
+
+    The name reaches useradd, usermod and setfacl as an argument; one that does
+    not look like a name ("--help", "a:b") made those commands misbehave rather
+    than fail here. An existing account must be a limited one: granting log
+    access to root or to a person's login account is not what this command is
+    for, and joining a person to the journal group hands them every service's
+    messages.
+    """
+    import re
+
+    if not re.fullmatch(ACCOUNT_NAME, name or ""):
+        raise ValueError("The account name must be lowercase letters, digits, '_' or '-', up to 32 characters, starting with a letter or '_'")
+    if account_exists(name):
+        entry = pwd.getpwnam(name)
+        if entry.pw_uid == 0:
+            raise ValueError("The agent account cannot be root")
+        if entry.pw_shell not in NOLOGIN_SHELLS:
+            raise ValueError(f"{name} is a login account (shell {entry.pw_shell}); use a dedicated account without a shell")
+    return name
+
+
 def account_exists(name):
     try:
         pwd.getpwnam(name)

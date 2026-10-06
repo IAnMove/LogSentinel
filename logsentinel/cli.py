@@ -955,6 +955,7 @@ def prepare_host(
     """Create the agent's account and grant it read access. Shows the plan before acting."""
     from logsentinel import hostprep
     try:
+        hostprep.validate_account(account)
         targets = [hostprep.check_source(item) for item in (source or [])]
     except ValueError as refusal:
         raise typer.BadParameter(str(refusal)) from None
