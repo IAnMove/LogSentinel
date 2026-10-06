@@ -27,6 +27,7 @@ HOSTILE = {
     "unicode spaces": "  " * (SIZE // 2) + "x",
     "ssh shaped": "Failed password for invalid user " + "a" * SIZE + " from 1.2.3.4 port 22 ssh2",
     "ignore shaped": "ignore " * (SIZE // 7) + "previous instructions",
+    "scheduler shaped": 'Running job "' + 'a" (scheduled at ' * (256_000 // 20) + "x",
 }
 
 
@@ -34,9 +35,16 @@ def event(message):
     return {"message": message, "service": "app", "source_id": "s", "metadata": {}, "id": "e", "priority": None}
 
 
+def unit_event(message):
+    """A journald line from a unit, which is what compaction's known formats look at."""
+    stamp = "2026-10-05T10:00:00Z INFO apscheduler.executors.default: "
+    return {"message": stamp + message, "service": "app", "source_id": "s", "metadata": {"systemd_unit": "app.service"}, "id": "e", "priority": 6}
+
+
 FUNCTIONS = {
     "grouping_key": lambda text: grouping_key(event(text)),
     "representation": lambda text: representation(event(text)),
+    "representation (unit)": lambda text: representation(unit_event(text)),
     "rejection_form": lambda text: rejection_form(dict(event(text), service="sshd")),
     "looks_like_instruction": looks_like_instruction,
     "redact": redact,

@@ -41,7 +41,10 @@ def representation(event):
         body = match["body"]
         if match["logger"] == "apscheduler.executors.default":
             known = bool(
-                re.fullmatch(r'Running job "[^\n]+" \(scheduled at [^\n]+\)', body)
+                # The job name may not contain a quote: with [^\n]+ for it,
+                # the two open-ended runs backtracked against each other and a
+                # 256 KB line of 'a" (scheduled at ' took over a second.
+                re.fullmatch(r'Running job "[^\n"]+" \(scheduled at [^\n]+\)', body)
                 or re.fullmatch(r'Job "[^\n]+" executed successfully', body)
             )
         else:

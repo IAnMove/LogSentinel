@@ -70,6 +70,8 @@ Revisión general de fiabilidad, seguridad y mantenimiento (rama `review/hardeni
 
 - **Un problema que va y viene ya no avisa en cada vuelta.** El enfriamiento comparaba solo con la última entrega, fuera del tipo que fuera, así que alternar «recuperado» y «actualizado» lo saltaba siempre (lo producen los chequeos de salud y de recursos). Ahora compara con la última entrega del mismo tipo, y la primera recuperación de la ventana reinicia el aviso (una recurrencia real sigue saliendo): como mucho aviso, recuperación y recurrencia por ventana, salvo subida de gravedad.
 
+- **Otra expresión cuadrática, en la compactación.** El reconocimiento de líneas de apscheduler (`Running job "…" (scheduled at …)`) tardaba 1,5 s con una línea hostil de 256 KB; el nombre del trabajo ya no admite comillas y la prueba de texto hostil cubre ahora también las líneas de unidades de systemd, que ayer no alcanzaba.
+
 ### Arreglado tras la segunda revisión (octubre)
 
 - **Registros web y modelo.** Las peticiones de un registro de acceso ya no llegan al modelo como vecinas de una línea en la verificación, ni en la muestra del asistente sin problema elegido, ni en la búsqueda de la investigación. El asistente las sigue viendo cuando preguntas por un problema web, porque son su evidencia.
