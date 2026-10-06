@@ -86,6 +86,8 @@ Revisión general de fiabilidad, seguridad y mantenimiento (rama `review/hardeni
 
 - **Reintentar a mano una entrega ya entregada responde 409** en vez de enviar el aviso por segunda vez; las fallidas, desconocidas y silenciadas se reintentan como antes.
 
+- **Los avisos de escritorio escapan el marcado.** `notify-send` interpreta el cuerpo como marcado Pango en casi todos los demonios: un `<b>` o un `&` de una línea de log cambiaba o rompía el aviso.
+
 ### Arreglado tras la segunda revisión (octubre)
 
 - **Registros web y modelo.** Las peticiones de un registro de acceso ya no llegan al modelo como vecinas de una línea en la verificación, ni en la muestra del asistente sin problema elegido, ni en la búsqueda de la investigación. El asistente las sigue viendo cuando preguntas por un problema web, porque son su evidencia.

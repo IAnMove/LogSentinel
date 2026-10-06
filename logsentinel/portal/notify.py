@@ -5,6 +5,7 @@ import asyncio
 import hashlib
 import gzip
 import hmac
+import html
 import json
 import os
 from pathlib import Path
@@ -256,7 +257,9 @@ class Outbox:
                 "--app-name=LogSentinel",
                 "--",
                 "LogSentinel",
-                text[:3000],
+                # Most notification daemons read the body as Pango markup, so
+                # "<b>" in a log line became bold and "&" broke the message.
+                html.escape(text[:3000], quote=False),
                 stdout=asyncio.subprocess.DEVNULL,
                 stderr=asyncio.subprocess.DEVNULL,
             )
