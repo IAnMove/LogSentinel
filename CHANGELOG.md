@@ -82,6 +82,8 @@ Revisión general de fiabilidad, seguridad y mantenimiento (rama `review/hardeni
 
 - **El instalador dice cuándo no canjea un paquete.** Repetir `setup-client` con un paquete nuevo sobre una instalación existente actualizaba el programa y conservaba la credencial antigua sin decirlo; ahora avisa de que el paquete no se canjea y da el comando de rotación (`logsentinel enroll` como la cuenta del emisor y reinicio de la unidad).
 
+- **Un fallo al registrar una condición de salud no aborta el chequeo.** Solo se capturaba `OSError`; cualquier otro error (base de datos ocupada) interrumpía el ciclo, la instantánea dejaba de refrescarse y al minuto `/healthz` daba 503 por «stale». Ahora la condición queda visible con el error anotado y se reintenta en el siguiente ciclo.
+
 ### Arreglado tras la segunda revisión (octubre)
 
 - **Registros web y modelo.** Las peticiones de un registro de acceso ya no llegan al modelo como vecinas de una línea en la verificación, ni en la muestra del asistente sin problema elegido, ni en la búsqueda de la investigación. El asistente las sigue viendo cuando preguntas por un problema web, porque son su evidencia.
