@@ -88,6 +88,8 @@ Revisión general de fiabilidad, seguridad y mantenimiento (rama `review/hardeni
 
 - **Los avisos de escritorio escapan el marcado.** `notify-send` interpreta el cuerpo como marcado Pango en casi todos los demonios: un `<b>` o un `&` de una línea de log cambiaba o rompía el aviso.
 
+- **Un lote rechazado por el presupuesto antes de enviarse ya no cuenta.** Se contaba como una de las llamadas del ciclo (gastándolas sin petición) y dejaba una fila de consumo en error que la autoajuste del presupuesto leía como fallo del modelo, encogiendo los lotes siguientes hacia el mínimo.
+
 ### Arreglado tras la segunda revisión (octubre)
 
 - **Registros web y modelo.** Las peticiones de un registro de acceso ya no llegan al modelo como vecinas de una línea en la verificación, ni en la muestra del asistente sin problema elegido, ni en la búsqueda de la investigación. El asistente las sigue viendo cuando preguntas por un problema web, porque son su evidencia.

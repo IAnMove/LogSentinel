@@ -161,6 +161,10 @@ class ReviewClient:
                 detail["estimate"] = policy["method"]
                 detail["estimated_input_tokens"] = round(total_input_bytes * policy["tokens_per_byte"] + 256)
                 if total_input_bytes > input_bytes(self.store, cfg):
+                    # Nothing was sent, so there is nothing to account for:
+                    # a usage row in error here fed the budget tuning as if the
+                    # model had failed, shrinking every later batch.
+                    status = "unsent"
                     raise ContextBudgetExceeded("Input exceeds the checked context budget")
                 messages = [
                     {"role": "system", "content": system},
@@ -280,9 +284,10 @@ class ReviewClient:
             active = json.loads(self.store.meta("model_active_call") or "{}")
             if active.get("id") == active_id:
                 self.store.set_meta("model_active_call", "")
-            self.store.record_usage(
-                job, machine, list(sources), kind, start, inp, out, status, detail
-            )
+            if status != "unsent":
+                self.store.record_usage(
+                    job, machine, list(sources), kind, start, inp, out, status, detail
+                )
 
 
 def interleave_services(events, offset=0):

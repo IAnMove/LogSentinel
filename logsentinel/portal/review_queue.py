@@ -983,7 +983,14 @@ class ReviewQueue:
                 from .batch_budget import profile_key
                 self.store.set_meta("context_conservative:" + profile_key(cfg), str(time.time() + 300))
                 self.cancel(job, batch, "Context rejected; originals rescheduled with a conservative bound")
-                return int(called), 0
+                # Refused before anything was sent: not one of the cycle's
+                # model calls, which it used to spend without a request. The
+                # machine gives up its turn for a while instead, since the
+                # same batch would be packed and refused again at once.
+                if called:
+                    self.analyzer.calls_started -= 1
+                self.store.set_meta("review_prepare_retry:" + machine["id"], str(time.time() + 30))
+                return 0, 0
             shared = isinstance(exc, (httpx.RequestError, TimeoutError)) or (
                 isinstance(exc, httpx.HTTPStatusError) and (exc.response.status_code in (401, 403, 429) or exc.response.status_code >= 500)
             )
