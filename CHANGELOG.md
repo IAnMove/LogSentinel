@@ -66,6 +66,8 @@ Revisión general de fiabilidad, seguridad y mantenimiento (rama `review/hardeni
 
 - **`restore` copia también lo que aún está en el WAL y da una clave nueva.** Copiaba solo el archivo principal, así que restaurar desde la base de datos de un portal en marcha perdía las últimas filas confirmadas (las copias de «Copias» no se veían afectadas). Usa la copia en línea de SQLite, rota la clave de acceso en vez de escribir la antigua, y un archivo que no es una base de datos recibe un mensaje claro en lugar de una traza.
 
+- **Detector de instrucciones en los logs, afinado en tres puntos.** «Ignore all instructions…», el propio caso inglés del corpus, no se detectaba (el patrón exigía *previous/prior/above*); «Mensaje del sistema:», prefijo habitual de aplicaciones en español, disparaba un HIGH y ahora necesita «nuevo» o «actualizado», como el patrón inglés; las reglas de exclusión se respetan también en este detector, que las ignoraba; y un hallazgo de inyección resuelto a mano ya no se reabre ni vuelve a avisar con la siguiente línea parecida (los demás hallazgos sí reabren, porque un OOM que se repite es noticia). El caso del corpus lleva ahora su expectativa, que antes no tenía.
+
 ### Arreglado tras la segunda revisión (octubre)
 
 - **Registros web y modelo.** Las peticiones de un registro de acceso ya no llegan al modelo como vecinas de una línea en la verificación, ni en la muestra del asistente sin problema elegido, ni en la búsqueda de la investigación. El asistente las sigue viendo cuando preguntas por un problema web, porque son su evidencia.

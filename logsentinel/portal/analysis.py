@@ -482,6 +482,19 @@ class Analyzer:
                 (machine, fp),
             ).fetchone()
             id = old["id"] if old else uid()
+            if (
+                old
+                and old["status"] == "resolved"
+                and status == "open"
+                and finding.get("reasoning") == "prompt-injection"
+            ):
+                # Resolving this finding means "I read those lines; they are
+                # not an attack". Its fingerprint is one per machine, so the
+                # next line that merely looks like an instruction would reopen
+                # and re-notify it, undoing that judgement. Other findings do
+                # reopen on purpose: a resolved OOM that happens again is news.
+                status = "resolved"
+                notify = False
             before = db.execute(
                 "SELECT count(*) FROM appearances WHERE problem_id=?", (id,)
             ).fetchone()[0]
