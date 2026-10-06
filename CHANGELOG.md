@@ -78,6 +78,8 @@ Revisión general de fiabilidad, seguridad y mantenimiento (rama `review/hardeni
 
 - **`enroll` no liga una cola a otra fuente.** Canjear un paquete de otra fuente o receptor sobre una cola ya en uso sobrescribía el token y `forward` rechazaba después la cola; ahora se rechaza antes de canjear nada. Volver a dar de alta la misma fuente (para rotar el token) sigue permitido.
 
+- **`metrics-forward` confía en la CA fijada del central** si la cola contiene `receiver-ca.pem` (lo deja el alta), como hace ya el emisor de logs; antes solo probaba las autoridades del sistema y un central con CA propia era inalcanzable.
+
 ### Arreglado tras la segunda revisión (octubre)
 
 - **Registros web y modelo.** Las peticiones de un registro de acceso ya no llegan al modelo como vecinas de una línea en la verificación, ni en la muestra del asistente sin problema elegido, ni en la búsqueda de la investigación. El asistente las sigue viendo cuando preguntas por un problema web, porque son su evidencia.
