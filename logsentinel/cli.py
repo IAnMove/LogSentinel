@@ -974,30 +974,40 @@ def spool_status(spool: str = typer.Option(..., "--spool")) -> None:
 def restore_backup(backup: str, data_dir: str = typer.Option(..., "--data-dir")) -> None:
     """Restore a portal backup into a NEW directory (never overwrite live data)."""
     import sqlite3
-    import shutil
     target = Path(data_dir).expanduser().resolve()
     if target.exists():
         raise typer.BadParameter("Restore target must not exist")
     source = Path(backup).expanduser().resolve()
-    with sqlite3.connect(source.as_uri()+"?mode=ro", uri=True) as conn:
-        if conn.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
-            raise typer.BadParameter("Backup integrity check failed")
-        from logsentinel.portal.store import SCHEMA_VERSION, schema_version
+    if not source.is_file():
+        raise typer.BadParameter("Backup file not found")
+    from logsentinel.portal.store import SCHEMA_VERSION, Store, schema_version
 
-        found = schema_version(conn)
-        if found is None or found > SCHEMA_VERSION:
-            raise typer.BadParameter("Unsupported backup schema")
-    target.mkdir(mode=0o700, parents=True)
-    shutil.copyfile(source, target / "sentinel.db")
+    try:
+        with sqlite3.connect(source.as_uri() + "?mode=ro", uri=True) as conn:
+            if conn.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
+                raise typer.BadParameter("Backup integrity check failed")
+            found = schema_version(conn)
+            if found is None or found > SCHEMA_VERSION:
+                raise typer.BadParameter("Unsupported backup schema")
+            target.mkdir(mode=0o700, parents=True)
+            # SQLite's own copy, through the connection, takes what the write-
+            # ahead log still holds. Copying the file took only the main file,
+            # so a copy made from a running portal's database silently lacked
+            # its latest committed rows.
+            with sqlite3.connect(target / "sentinel.db") as copy:
+                conn.backup(copy)
+    except sqlite3.DatabaseError as exc:
+        raise typer.BadParameter(f"Not a LogSentinel database: {source.name} ({exc})") from None
     os.chmod(target / "sentinel.db", 0o600)
-    from logsentinel.portal.store import Store
-
     restored = Store(target)
-    restored.write_access_key()
+    # The backup carries the access key of the portal it came from. A copy that
+    # is about to be used somewhere else gets its own; the old one stays in the
+    # retired list so it is still hidden in text, and opens nothing.
+    restored.rotate_admin_token()
     console.print(
-        f"Restored to {target}. The backup includes secrets and the previous "
-        "access key; rotate the access key, sender tokens and notification "
-        "credentials before using this copy.",
+        f"Restored to {target}. The copy has a new access key in access-key.txt; "
+        "the backup also includes sender tokens and notification credentials, "
+        "rotate those before using this copy.",
         markup=False,
     )
 

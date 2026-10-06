@@ -64,6 +64,8 @@ Revisión general de fiabilidad, seguridad y mantenimiento (rama `review/hardeni
 
 - **Un aviso ya no lleva las credenciales de otro destino.** El texto saliente se ocultaba solo con el token y el secreto del destino que lo recibía; la URL del webhook del destino B, citada en un log, llegaba al archivo de avisos del destino A. Ahora se ocultan todos los secretos protegidos, y `/api/state` sanea también las entregas en cola (ayer solo los problemas).
 
+- **`restore` copia también lo que aún está en el WAL y da una clave nueva.** Copiaba solo el archivo principal, así que restaurar desde la base de datos de un portal en marcha perdía las últimas filas confirmadas (las copias de «Copias» no se veían afectadas). Usa la copia en línea de SQLite, rota la clave de acceso en vez de escribir la antigua, y un archivo que no es una base de datos recibe un mensaje claro en lugar de una traza.
+
 ### Arreglado tras la segunda revisión (octubre)
 
 - **Registros web y modelo.** Las peticiones de un registro de acceso ya no llegan al modelo como vecinas de una línea en la verificación, ni en la muestra del asistente sin problema elegido, ni en la búsqueda de la investigación. El asistente las sigue viendo cuando preguntas por un problema web, porque son su evidencia.
