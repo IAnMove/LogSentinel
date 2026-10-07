@@ -202,7 +202,21 @@ Las rutas y los fragmentos se comparan tras decodificar la URL dos veces y pasar
   más. Las notificaciones incluyen direcciones y rutas.
 - **Lo que no es.** No es un panel de visitas ni mide visitantes únicos, y no bloquea nada: «No bloquees direcciones automáticamente» sigue valiendo.
 
-## 11. Qué lee cada sondeo de archivos y carpetas
+## 11. Carga sobre los equipos
+
+Las unidades que generan `service install` y `setup-client` limitan lo que el programa puede consumir:
+
+- **Emisor:** `Nice=10`, 25 % de una CPU, 192 MiB de memoria con aviso y 256 MiB de tope, y es el primer candidato si el sistema se queda sin memoria
+  (`OOMScoreAdjust=500`). Lee a lo sumo 1000 líneas o 256 KB por archivo cada 2 s, y se detiene si la presión de E/S del kernel (`/proc/pressure/io`)
+  supera el 25 %, si quedan menos de 256 MiB libres o si su cola llega al tope.
+- **Central:** `Nice=5`, E/S de prioridad baja, aviso de memoria a 768 MiB sin tope duro (una importación grande debe terminar, aunque sea despacio).
+  Sin límite de CPU por defecto porque los detectores la necesitan; en un equipo compartido, `service install --cpu-quota 50`.
+- `IOWeight` e `IOSchedulingClass=idle` solo actúan con el planificador de E/S `bfq`; con `none` o `mq-deadline` (lo habitual en NVMe) no hacen nada.
+  Compruébalo con `cat /sys/block/DISPOSITIVO/queue/scheduler`.
+- **El servidor del modelo no lo controla LogSentinel.** Un modelo que no cabe en RAM es lo que más puede colgar un equipo: ponle `MemoryMax` en su
+  unidad, usa `-ngl 0` sin GPU, o sírvelo desde otra máquina.
+
+## 12. Qué lee cada sondeo de archivos y carpetas
 
 Una fuente de archivo o carpeta se sondea cada unos 2 segundos. En cada sondeo se lee, **por archivo**, como máximo **1000 líneas o `max_batch_bytes`**
 (2 MB en el portal, 256 KB en un emisor), lo que ocurra antes. Los archivos de una carpeta no se quitan el turno unos a otros, pero las fuentes se sondean en
@@ -221,7 +235,7 @@ no medida). Al ver «pendientes» durante un rato tras activar una fuente grande
   compresión retrasada (`app.log.2.gz` es un archivo nuevo con lo que antes se leyó como texto). Sin «Importar histórico» no ocurre.
 - **Un archivo borrado** se sigue drenando mientras alguien escriba en él y se suelta a los cinco minutos sin actividad.
 
-## 12. Sobre las ilustraciones
+## 13. Sobre las ilustraciones
 
 Las imágenes de Tentri (`logsentinel/portal/static/tentri-*.png`) son arte
 generado para este proyecto. No son una marca oficial de Omarchy ni de ningún otro

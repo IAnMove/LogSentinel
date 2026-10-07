@@ -248,3 +248,11 @@ def test_sender_unit_is_confined_and_systemd_accepts_it(tmp_path):
     unit.write_text(runnable)
     result = subprocess.run(["systemd-analyze", "verify", str(unit)], capture_output=True, text=True)
     assert "Unknown key" not in result.stderr and "Unknown section" not in result.stderr, result.stderr
+
+
+def test_sender_unit_bounds_cpu_and_memory():
+    from pathlib import Path
+
+    text = setup.unit_text(Path("/etc/logsentinel-clients/logs.json"), Path("/opt/logsentinel/runtime-x"), dict(name="logs", account="ls-logs", spool="/var/lib/logsentinel/logs"))
+    for directive in ("CPUQuota=25%", "MemoryHigh=192M", "MemoryMax=256M", "OOMScoreAdjust=500", "Nice=10"):
+        assert directive in text, directive

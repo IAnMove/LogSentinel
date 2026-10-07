@@ -63,3 +63,16 @@ def test_a_listener_with_only_one_half_of_the_tls_pair_is_refused(tmp_path, monk
     result = CliRunner().invoke(cli.app, ["service", "install", "--ingest-listen", "0.0.0.0:8767", "--tls-cert", "/x.pem"])
     assert result.exit_code != 0 and "both" in result.output.lower()
     assert not (tmp_path / "units").exists()
+
+
+def test_the_portal_unit_bounds_its_resources_without_a_cpu_quota_by_default(tmp_path, monkeypatch):
+    result, unit = install(tmp_path, monkeypatch, venv_mode=0o755)
+    for directive in ("Nice=5", "IOSchedulingClass=best-effort", "MemoryHigh=768M", "OOMScoreAdjust=300"):
+        assert directive in unit, directive
+    assert "MemoryMax=" not in unit, "a hard memory cap would kill a large import"
+    assert "CPUQuota=" not in unit
+
+
+def test_a_cpu_quota_is_an_option(tmp_path, monkeypatch):
+    result, unit = install(tmp_path, monkeypatch, "--cpu-quota", "50", venv_mode=0o755)
+    assert "CPUQuota=50%" in unit

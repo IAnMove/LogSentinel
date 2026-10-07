@@ -533,6 +533,15 @@ INGEST_MAX_CONNECTIONS = 200
 # Applied to every generated unit. A log reader needs no privilege beyond reading
 # the files it was granted, so the unit drops capabilities and write access up front
 # instead of relying on the operator to remember.
+# Resource bounds for the portal. Memory is throttled, not killed: a large
+# import or a batch of five thousand events must finish, slowly if it must.
+# No CPUQuota by default, since the detector scan needs the CPU; the install
+# command offers one for a shared host.
+SERVICE_RESOURCES = """Nice=5
+IOSchedulingClass=best-effort
+IOSchedulingPriority=6
+MemoryHigh=768M
+OOMScoreAdjust=300"""
 SERVICE_HARDENING = """NoNewPrivileges=yes
 CapabilityBoundingSet=
 AmbientCapabilities=
@@ -625,6 +634,7 @@ def service_install(
     ingest_listen: Optional[str] = typer.Option(None, "--ingest-listen", help="HOST:PORT for the reception listener, as for `portal`"),
     tls_cert: Optional[str] = typer.Option(None, "--tls-cert", help="Certificate for the reception listener"),
     tls_key: Optional[str] = typer.Option(None, "--tls-key", help="Private key for the reception listener"),
+    cpu_quota: Optional[int] = typer.Option(None, "--cpu-quota", min=5, max=800, help="Percent of one CPU the portal may use (systemd CPUQuota); unset means no limit"),
 ) -> None:
     """Generate and install a systemd user or system unit for the portal."""
     import getpass
@@ -703,7 +713,8 @@ Type=simple
 Restart=on-failure
 RestartSec=5s
 Environment=PYTHONUNBUFFERED=1
-{writable}{SERVICE_HARDENING}
+{writable}{SERVICE_RESOURCES}
+{f"CPUQuota={int(cpu_quota)}%" + chr(10) if cpu_quota else ""}{SERVICE_HARDENING}
 
 [Install]
 WantedBy=default.target

@@ -52,6 +52,7 @@ Revisión general de fiabilidad, seguridad y mantenimiento (rama `review/hardeni
 
 ### Arreglado tras la tercera revisión (octubre)
 
+- **Las unidades de systemd acotan CPU y memoria.** El emisor: 25 % de una CPU, 192/256 MiB y candidato preferente del OOM; el central: `Nice=5`, E/S de prioridad baja, aviso de memoria a 768 MiB sin tope duro y `--cpu-quota` opcional. `OPERACION.md` explica qué hace cada límite y que `IOWeight`/`idle` requieren `bfq`.
 - **Ningún evento guardado o enviado supera los 256 KB, se mida como se mida.** El corte de ayer solo actuaba sobre líneas largas en disco; una traza multilínea unida o una línea con bytes inválidos (cada uno pasa a tres al decodificar) podían llegar a 300 KB, y el receptor rechazaba con 400 el lote entero. El límite se aplica ahora al texto ya decodificado y unido, en el colector y en el receptor, que recorta en vez de rechazar (hasta cuatro veces el límite; más allá no es una línea de log). El tamaño de captura del emisor baja de 262 144 a 256 000 por la misma razón.
 
 - **Un registro del journal mayor que el lote ya no para la fuente.** Igual que ayer con los archivos: lanzaba error en cada sondeo sin avanzar el cursor. Ahora se relee con margen para un registro (hasta 8 MiB), se recorta a 256 KB con la nota de corte y el cursor sigue.
