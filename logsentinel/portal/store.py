@@ -14,6 +14,7 @@ import os
 import secrets
 import sqlite3
 import time
+from datetime import datetime, timezone
 import threading
 from collections import OrderedDict
 from copy import deepcopy
@@ -489,8 +490,12 @@ class Store:
                 raise ValueError(
                     "Machine monitoring is paused or deleted; retain and retry these events"
                 )
+            now = time.time()
             unique = []
+            ranks = []
             seen = set()
+            shedding = bool(getattr(self, "shed_routine", False)) and source["id"] == "sender"
+            shed = json.loads(self.meta("sender_shed") or "{}") if shedding else {}
             for item in entries:
                 origin = item["origin"]
                 if (
@@ -502,7 +507,24 @@ class Store:
                 ):
                     continue
                 seen.add(origin)
+                priority = item.get("priority")
+                rank, shape = self._rank(db, source["id"], item, priority, now)
+                if shedding and rank == 0:
+                    # The spool is past its resume mark and this line is a
+                    # routine repeat: seen over a hundred times, no severity.
+                    # Keeping it would bring the hard stop closer, and at the
+                    # hard stop the newest lines are what die by rotation.
+                    # Count it instead; flush_shed() stores one summary line
+                    # per shape once the spool is back under the mark.
+                    entry = shed.setdefault(shape, dict(count=0, first=now, service=item.get("service", ""), example=str(item.get("message", ""))[:300]))
+                    entry["count"] += 1
+                    entry["last"] = now
+                    continue
+                seen.add(origin)
                 unique.append(dict(item, id=uid()))
+                ranks.append((rank, shape))
+            if shedding:
+                db.execute("INSERT OR REPLACE INTO meta VALUES('sender_shed',?)", (dumps(shed),))
             if unique:
                 raw = dumps(unique).encode()
                 usage = self.storage_usage()
@@ -514,7 +536,6 @@ class Store:
                         "Storage quota reached; incoming data was not acknowledged"
                     )
                 sid = uid()
-                now = time.time()
                 db.execute(
                     "INSERT INTO segments VALUES(?,?,?,?,?,?)",
                     (
@@ -528,7 +549,7 @@ class Store:
                 )
                 for i, item in enumerate(unique):
                     priority = item.get("priority")
-                    rank, shape = self._rank(db, source["id"], item, priority, now)
+                    rank, shape = ranks[i]
                     db.execute(
                         "INSERT INTO events(id,source_id,machine_id,segment_id,ordinal,received,event_time,service,status,origin,urgent,rank,shape) "
                         "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
@@ -729,15 +750,40 @@ class Store:
         return self.events(ids=ids, limit=limit) if ids else []
 
     def pending_for_delivery(self, limit):
-        """Pending spool rows, urgent first, oldest first within each kind."""
-        picked = self.events(source_id="sender", status="pending", limit=limit, urgent=True)
-        if len(picked) < limit:
-            seen = {e["id"] for e in picked}
-            picked += [
-                e for e in self.events(source_id="sender", status="pending", limit=limit)
-                if e["id"] not in seen
-            ][: limit - len(picked)]
-        return picked
+        """Pending spool rows: urgent first, then the highest rank, then the oldest."""
+        with self.connect() as db:
+            ids = [
+                r[0]
+                for r in db.execute(
+                    "SELECT id FROM events WHERE source_id='sender' AND status='pending' "
+                    "ORDER BY urgent DESC,rank DESC,received,rowid LIMIT ?",
+                    (limit,),
+                )
+            ]
+        picked = {e["id"]: e for e in self.events(ids=ids, limit=limit)} if ids else {}
+        return [picked[i] for i in ids if i in picked]
+
+    def flush_shed(self, source):
+        """Store one summary line per shape for the routine repeats that were not kept."""
+        shed = json.loads(self.meta("sender_shed") or "{}")
+        if not shed:
+            return 0
+        self.set_meta("sender_shed", "")
+        stamp = lambda t: datetime.fromtimestamp(t, timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        entries = [
+            dict(
+                origin=f"shed:{shape}:{int(entry['first'])}",
+                service=entry.get("service", ""),
+                message=(
+                    f"[LogSentinel] {entry['count']} routine lines like this were not stored between "
+                    f"{stamp(entry['first'])} and {stamp(entry['last'])} UTC because the sender queue was congested: "
+                    + entry.get("example", "")
+                ),
+                metadata={"shed": entry["count"]},
+            )
+            for shape, entry in shed.items()
+        ]
+        return self.ingest(source, entries)
 
     def count_rejected(self):
         """Events a receiver refused as invalid and the sender set aside."""

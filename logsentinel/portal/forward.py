@@ -111,7 +111,10 @@ async def forward(
                 async def capture():
                     control.require(capture=True)
                     await blocking(gate.check)
+                    store.shed_routine = gate.shedding
                     await blocking(collector.poll, source, True)
+                    if not gate.shedding:
+                        await blocking(store.flush_shed, source)
 
                 async def deliver():
                     nonlocal journal_supported, cleanup_due
