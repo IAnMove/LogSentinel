@@ -52,6 +52,7 @@ Revisión general de fiabilidad, seguridad y mantenimiento (rama `review/hardeni
 
 ### Arreglado tras la tercera revisión (octubre)
 
+- **Las repeticiones rutinarias no gastan llamadas al modelo** (esquema 5: cada evento guarda la forma de su línea). Si un lote contiene dos o más líneas de una forma ya vista más de cien veces en la fuente, sus demás repeticiones pendientes entran en el mismo lote (hasta 5 000 eventos en total) y el modelo las ve como un único grupo contado con dos ejemplos. 4 500 líneas «Started Session N» costaban nueve llamadas; ahora una. Las formas vistas menos de cien veces se revisan como hasta ahora.
 - **Los lotes del central se eligen por rango.** Dentro de cada vía (urgente y rutina), primero el rango más alto y entre iguales el más antiguo. Una línea nunca vista en una fuente, sin prioridad de syslog, entra en la primera llamada aunque tenga 50 000 líneas rutinarias delante; antes esperaba detrás de todas.
 - **Cada evento recibe un rango al llegar** (esquema 4): gravedad por prioridad de syslog y rareza de la forma de la línea (cuántas veces se ha visto esa plantilla en la fuente, con un máximo de 10 000 plantillas por fuente). Todavía no cambia el orden de nada; los siguientes cambios lo usan.
 - **Los patrones de los detectores se compilan una vez.** Se pasaban como texto en cada línea; medido sobre 100 000 líneas, las señales bajan de 25 a 12 µs por línea, el detector de instrucciones de 87 a 36 y la clave de agrupación de 14 a 3.

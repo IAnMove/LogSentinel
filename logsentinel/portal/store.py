@@ -45,10 +45,16 @@ FINAL_DELIVERIES = ("delivered", "accepted", "failed", "muted", "cancelled", "un
 # Databases created before versioned migrations report version 1 and already
 # have the base schema below; each later step adds to it and is applied to old
 # and new databases alike, inside one transaction with its version bump.
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 # Templates kept per source; beyond this the ones not seen for longest go.
 TEMPLATES_PER_SOURCE = 10_000
 MIGRATIONS = {
+    5: (
+        # The shape of each line (a hash of its template) so that the pending
+        # repeats of a routine line can be found and reviewed as one group.
+        "ALTER TABLE events ADD COLUMN shape TEXT NOT NULL DEFAULT ''",
+        "CREATE INDEX IF NOT EXISTS events_shape ON events(source_id,status,shape)",
+    ),
     4: (
         # How often each shape of line has been seen on a source, and a rank on
         # every event, set when it arrives, that puts severe and rarely seen
@@ -441,6 +447,7 @@ class Store:
         sighting stays the rarest, which is right: first sightings are news.
         """
         key = "\x1f".join(template(item.get("service"), item.get("message")))
+        shape = hashlib.sha256(key.encode()).hexdigest()[:16]
         row = db.execute(
             "INSERT INTO templates VALUES(?,?,1,?,?) ON CONFLICT(source_id,key) "
             "DO UPDATE SET count=count+1,last_seen=excluded.last_seen RETURNING count",
@@ -459,7 +466,7 @@ class Store:
                 )
         severity = 2 if type(priority) is int and 0 <= priority <= 3 else 1 if priority == 4 else 0
         rarity = 4 if count == 1 else 3 if count <= 3 else 2 if count <= 10 else 1 if count <= 100 else 0
-        return severity * 5 + rarity
+        return severity * 5 + rarity, shape
 
     def ingest(self, source, entries, cursor_path=None, cursor=None):
         """Origin IDs are stable source positions or sender event IDs, never message hashes."""
@@ -521,10 +528,10 @@ class Store:
                 )
                 for i, item in enumerate(unique):
                     priority = item.get("priority")
-                    rank = self._rank(db, source["id"], item, priority, now)
+                    rank, shape = self._rank(db, source["id"], item, priority, now)
                     db.execute(
-                        "INSERT INTO events(id,source_id,machine_id,segment_id,ordinal,received,event_time,service,status,origin,urgent,rank) "
-                        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+                        "INSERT INTO events(id,source_id,machine_id,segment_id,ordinal,received,event_time,service,status,origin,urgent,rank,shape) "
+                        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
                         (
                             item["id"],
                             source["id"],
@@ -544,6 +551,7 @@ class Store:
                             item["origin"],
                             int(type(priority) is int and 0 <= priority <= 3),
                             rank,
+                            shape,
                         ),
                     )
                 self._metric(db, source["id"], "events_ingested", len(unique))
@@ -704,6 +712,21 @@ class Store:
                             selected[candidate[0]] = None
         rows = {e["id"]: e for e in self.events(ids=list(selected), limit=limit)}
         return [rows[id] for id in selected if id in rows]
+
+    def pending_repeats(self, source_id, shapes, exclude, limit):
+        """Pending events of these shapes on a source, beyond the given ids."""
+        if not shapes or limit <= 0:
+            return []
+        with self.connect() as db:
+            ids = [
+                r[0]
+                for r in db.execute(
+                    "SELECT id FROM events WHERE source_id=? AND status='pending' AND shape IN (SELECT value FROM json_each(?)) "
+                    "AND id NOT IN (SELECT value FROM json_each(?)) ORDER BY received,rowid LIMIT ?",
+                    (source_id, dumps(sorted(shapes)), dumps(list(exclude)), limit),
+                )
+            ]
+        return self.events(ids=ids, limit=limit) if ids else []
 
     def pending_for_delivery(self, limit):
         """Pending spool rows, urgent first, oldest first within each kind."""
