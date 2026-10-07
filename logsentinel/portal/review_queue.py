@@ -35,13 +35,17 @@ URGENT_SHARE = 0.75
 
 
 def pick_oldest_urgent_first(db, machine_id, source_id, condition, cutoff, limit):
-    """Choose a batch: errors and worse first, oldest first within each kind.
+    """Choose a batch: errors and worse first, then by rank, then oldest first.
 
     The queue used to be strictly first in, first out, so a critical line
     waited behind every routine line received before it."""
+    # Within each kind, the highest rank first (severity, then how rarely the
+    # line's shape has been seen on this source) and the oldest among equals.
+    # Oldest-first alone sent a fresh line that had never been seen before
+    # behind every routine line received before it.
     base = (
         "SELECT id FROM events WHERE machine_id=? AND source_id=? AND urgent=? "
-        "AND status IN ('pending','capacity') AND " + condition + " ORDER BY received,rowid LIMIT ?"
+        "AND status IN ('pending','capacity') AND " + condition + " ORDER BY rank DESC,received,rowid LIMIT ?"
     )
     urgent = db.execute(base, (machine_id, source_id, 1, cutoff, limit)).fetchall()
     routine = db.execute(base, (machine_id, source_id, 0, cutoff, limit)).fetchall()
