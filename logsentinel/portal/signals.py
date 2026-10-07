@@ -65,6 +65,11 @@ SIGNALS = (
         ),
     },
 ) + WEB_SIGNALS
+# Compiled once: passing the pattern text on every line cost a cache lookup and
+# flag handling per call, which was most of the detector's time on a busy central.
+for _spec in SIGNALS:
+    if "pattern" in _spec:
+        _spec["compiled"] = regex.compile(_spec["pattern"])
 
 
 def deterministic_signal(finding):
@@ -157,7 +162,7 @@ def apply_signals(analyzer, limit=500, *, machine_id=None, events=None, notify=T
                         hits.append(e)
                     continue
                 try:
-                    found = regex.search(spec["pattern"], e.get("message") or "", timeout=0.02)
+                    found = spec["compiled"].search(e.get("message") or "", timeout=0.02)
                 except TimeoutError:
                     # A hostile line must not stop detection for its machine or
                     # be retried forever; the model still receives the original.

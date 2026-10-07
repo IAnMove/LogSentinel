@@ -309,6 +309,11 @@ def interleave_services(events, offset=0):
     return result
 
 
+_IP = regex.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
+_BRACKET_PID = regex.compile(r"\[\d+\]")
+_PID_FIELD = regex.compile(r"\bpid[=:]?\s*\d+", regex.I)
+
+
 def grouping_key(event):
     """Group repeats of the same event even when PIDs, IPs or LLM category differ."""
     from .ssh_notifications import rejection_form
@@ -317,9 +322,9 @@ def grouping_key(event):
     if rejection:
         return (event.get("source_id") or "", "sshd", "ssh-rejection:" + rejection)
     text = event.get("message") or ""
-    text = regex.sub(r"\b(?:\d{1,3}\.){3}\d{1,3}\b", "#ip", text)
-    text = regex.sub(r"\[\d+\]", "[#]", text)
-    text = regex.sub(r"\bpid[=:]?\s*\d+", "pid=#", text, flags=regex.I)
+    text = _IP.sub("#ip", text)
+    text = _BRACKET_PID.sub("[#]", text)
+    text = _PID_FIELD.sub("pid=#", text)
     # Trailing counters ("... took 12 34") are not part of what the line says.
     # Done by tokens: the regex that did it, (?:\s+\d+)+\s*$, is quadratic on a
     # long run of numbers, and a sender chooses the line.

@@ -35,6 +35,9 @@ PATTERNS = (
     # notice; like the English pattern, this one needs "nuevo" or "actualizado".
     r"(?i)\b(?:(?:nuevo|nueva) (?:prompt|mensaje) (?:del )?(?:sistema|desarrollador)|(?:prompt|mensaje) (?:del )?(?:sistema|desarrollador) (?:nuevo|actualizado))\s*[:=]",
 )
+COMPILED = tuple(regex.compile(pattern) for pattern in PATTERNS)
+
+
 def plain(text):
     """Fold the text an attacker controls into the shape the patterns expect."""
     text = str(text or "")
@@ -48,9 +51,9 @@ def looks_like_instruction(text):
     sample = plain(text)
     if len(sample) < 8:
         return False
-    for pattern in PATTERNS:
+    for pattern in COMPILED:
         try:
-            if regex.search(pattern, sample, timeout=0.02):
+            if pattern.search(sample, timeout=0.02):
                 return True
         except (TimeoutError, regex.error):
             continue

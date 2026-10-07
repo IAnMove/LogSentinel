@@ -348,14 +348,20 @@ def test_regex_timeout_on_one_line_is_counted_and_detection_continues(queue, mon
     from logsentinel.portal import signals
     from logsentinel.portal.signal_scan import scan_originals
 
-    real = signals.regex.search
+    class Slow:
+        """A compiled pattern that times out on one line, as a hostile line would."""
 
-    def search(pattern, text, **kwargs):
-        if text == "pathological line":
-            raise TimeoutError("synthetic")
-        return real(pattern, text, **kwargs)
+        def __init__(self, compiled):
+            self.compiled = compiled
 
-    monkeypatch.setattr(signals.regex, "search", search)
+        def search(self, text, **kwargs):
+            if text == "pathological line":
+                raise TimeoutError("synthetic")
+            return self.compiled.search(text, **kwargs)
+
+    for spec in signals.SIGNALS:
+        if "compiled" in spec:
+            monkeypatch.setitem(spec, "compiled", Slow(spec["compiled"]))
     scan_originals(Analyzer(store), machine["id"], store.events(limit=10))
     assert [p["title"] for p in store.rows("problems")] == ["Process killed: out of memory"]
     assert int(store.meta("detector_slow_lines")) == sum(1 for s in signals.SIGNALS if not s.get("service"))
