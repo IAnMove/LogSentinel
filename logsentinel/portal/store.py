@@ -409,6 +409,10 @@ class Store:
     def prepare_sender(self):
         """One-time indexed migration and count, including legacy durable queues."""
         with self.connect() as db:
+            # A spool written between 2026-10-04 and this fix holds access-log
+            # lines marked sampled, which delivery never picks: put them back.
+            db.execute("DELETE FROM meta WHERE key='sender_pending_count' AND EXISTS (SELECT 1 FROM events WHERE status='sampled')")
+            db.execute("UPDATE events SET status='pending' WHERE status='sampled'")
             if not db.execute("SELECT 1 FROM meta WHERE key='sender_pending_count'").fetchone():
                 db.execute("INSERT INTO meta SELECT 'sender_pending_count',CAST(count(*) AS TEXT) FROM events WHERE status='pending'")
 
@@ -490,7 +494,10 @@ class Store:
                             # Decided here, not when the review queue gets to it: a
                             # busy site would otherwise fill the queue with lines
                             # the model never reads and keep real ones waiting.
-                            "sampled" if is_web_event(item) else "pending",
+                            # A sender's spool is a delivery queue, not a review
+                            # queue: there everything is pending, or it would
+                            # never be sent and never leave the spool.
+                            "sampled" if is_web_event(item) and source["id"] != "sender" else "pending",
                             item["origin"],
                             int(type(priority) is int and 0 <= priority <= 3),
                         ),

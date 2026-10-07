@@ -90,6 +90,8 @@ Revisión general de fiabilidad, seguridad y mantenimiento (rama `review/hardeni
 
 - **Un lote rechazado por el presupuesto antes de enviarse ya no cuenta.** Se contaba como una de las llamadas del ciclo (gastándolas sin petición) y dejaba una fila de consumo en error que la autoajuste del presupuesto leía como fallo del modelo, encogiendo los lotes siguientes hacia el mínimo.
 
+- **Un emisor vuelve a enviar las líneas de un registro de acceso.** Regresión del 4 de octubre: al marcar las peticiones web como «muestreadas» al ingerir, también se marcaban en la cola del emisor, que solo envía las pendientes; un emisor que reenviaba nginx o Apache no entregaba ninguna de ellas y acababa parado por cola llena. La decisión se toma solo en el central; una cola que quedó así se repara sola al arrancar el emisor.
+
 ### Arreglado tras la segunda revisión (octubre)
 
 - **Registros web y modelo.** Las peticiones de un registro de acceso ya no llegan al modelo como vecinas de una línea en la verificación, ni en la muestra del asistente sin problema elegido, ni en la búsqueda de la investigación. El asistente las sigue viendo cuando preguntas por un problema web, porque son su evidencia.
