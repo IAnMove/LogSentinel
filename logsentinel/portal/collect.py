@@ -19,6 +19,7 @@ from .logs import report
 from contextlib import nullcontext
 from pathlib import Path
 import httpx
+import regex
 from logsentinel.collectors.file_tailer import FileTailerCollector
 from logsentinel.collectors.journald import JournaldCollector
 from logsentinel.config import JournaldSourceConfig
@@ -205,8 +206,48 @@ def bound_event(entry, dropped=0):
     return True
 
 
+# A syslog priority for lines that carry none, so the urgent lane and the
+# priority selection work for file sources as they do for the journal. Only
+# clear statements of failure, with bounded patterns on text a stranger wrote:
+# a kernel killing or panicking (2, critical), a level word that says critical
+# or fatal (2), a level word that says error (3). Everything else stays unset
+# rather than guessed, because a wrong "informational" would hide a line from
+# the priority mode as surely as a wrong "error" would promote it.
+_KERNEL_FAILURE = regex.compile(
+    r"(?i)\bout of memory\b|\boom-kill|\bkernel panic\b|\bsegfault at\b|\bgeneral protection fault\b"
+    r"|\bI/O error\b|\bBUG: \w|\bcall trace:",
+)
+# A level word counts when it is written as a level: in capitals as its own
+# word, after level=/severity=, in brackets, or opening the message. The same
+# word in running text ("the critical path", "an error in the form") does not.
+_LEVEL_CRITICAL = regex.compile(
+    r"\b(?:CRITICAL|CRIT|FATAL|EMERG|EMERGENCY|ALERT|PANIC)\b"
+    r"|(?i:(?:^|[\[(<]|(?:level|severity|lvl|loglevel)=)\s*(?:critical|crit|fatal|emerg|emergency|alert|panic)\b)"
+)
+_LEVEL_ERROR = regex.compile(
+    r"\b(?:ERROR|ERR)\b"
+    r"|(?i:(?:^|[\[(<]|(?:level|severity|lvl|loglevel)=)\s*(?:error|err)\b)"
+)
+
+
+def derive_priority(message, service):
+    text = (message or "")[:2000]
+    try:
+        if (service or "").casefold().startswith("kernel") and _KERNEL_FAILURE.search(text, timeout=0.02):
+            return 2
+        if _LEVEL_CRITICAL.search(text, timeout=0.02):
+            return 2
+        if _LEVEL_ERROR.search(text, timeout=0.02):
+            return 3
+    except TimeoutError:
+        return None
+    return None
+
+
 def normalize(line, path, origin, tz=None):
     entry = FileTailerCollector.parse_log_line(line, source_path=path, tz=tz)
+    if entry.priority is None:
+        entry.priority = derive_priority(entry.message, entry.service)
     # Read the message, not the raw line, so access lines forwarded through
     # syslog (nginx and Apache can log there) are recognised as well.
     request = parse_access_line(entry.message)
