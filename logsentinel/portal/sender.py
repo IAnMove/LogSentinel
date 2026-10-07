@@ -129,6 +129,10 @@ async def run_workers(capture, deliver, interval, store, once, control=None):
                 # spends the sender's own retries against a refusal it can predict.
                 # A stated pause is not a transport failure, so backoff stays reset.
                 pause, delay = max(1, min(3600, result)), 2
+            elif result == "more":
+                # The last batch was full, so the queue is behind: drain it at
+                # the receiver's pace instead of waiting the idle interval.
+                pause, delay = 0.1, 2
             else:
                 delay = 2 if result else min(60, delay * 2)
                 pause = delay

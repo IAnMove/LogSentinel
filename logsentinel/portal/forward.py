@@ -15,6 +15,12 @@ from .sender_safety import SenderLimits, CaptureGate, error_detail
 from .sender_control import SenderControl
 
 
+# The receiver accepts up to 500 events per request. A batch of 100 every two
+# seconds capped delivery at 50 events a second, a tenth of what capture can
+# read, so any sustained rate above that filled the spool.
+DELIVERY_BATCH = 500
+
+
 async def forward(
     path,
     receiver,
@@ -119,9 +125,11 @@ async def forward(
                     # at a time until the one it refuses is found and set aside.
                     # The mode lives in the spool so a restart keeps it.
                     probing = await blocking(store.meta, "sender_probe") == "1"
-                    rows = await asyncio.to_thread(
-                        store.events, source_id="sender", status="pending", limit=1 if probing else 100
-                    )
+                    limit = 1 if probing else DELIVERY_BATCH
+                    # Urgent lines first, oldest first within each kind: the
+                    # spool used to be strictly first in, first out, so a fresh
+                    # kernel failure waited behind every routine line before it.
+                    rows = await asyncio.to_thread(store.pending_for_delivery, limit)
                     if probing and not rows:
                         await blocking(store.set_meta, "sender_probe", "")
                     payload, size = {"events": []}, 0
@@ -171,7 +179,9 @@ async def forward(
                             await blocking(store.mark, ids, "sent")
                             await blocking(store.discard_sent, ids)
                         await blocking(status, store, "delivery", True)
-                        return True
+                        # A full batch means more is waiting: ask the loop to
+                        # come straight back rather than after the idle pause.
+                        return "more" if len(payload["events"]) >= limit and not probing else True
                     except (httpx.HTTPError, ValueError, TypeError) as failure:
                         refused = (
                             isinstance(failure, httpx.HTTPStatusError)

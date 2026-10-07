@@ -556,9 +556,13 @@ class Store:
         offset=0,
         ids=None,
         newest=False,
+        urgent=None,
     ):
         query = "SELECT * FROM events WHERE 1=1"
         params = []
+        if urgent is not None:
+            query += " AND urgent=?"
+            params.append(int(bool(urgent)))
         for key, value in [
             ("machine_id", machine_id),
             ("source_id", source_id),
@@ -656,6 +660,17 @@ class Store:
                             selected[candidate[0]] = None
         rows = {e["id"]: e for e in self.events(ids=list(selected), limit=limit)}
         return [rows[id] for id in selected if id in rows]
+
+    def pending_for_delivery(self, limit):
+        """Pending spool rows, urgent first, oldest first within each kind."""
+        picked = self.events(source_id="sender", status="pending", limit=limit, urgent=True)
+        if len(picked) < limit:
+            seen = {e["id"] for e in picked}
+            picked += [
+                e for e in self.events(source_id="sender", status="pending", limit=limit)
+                if e["id"] not in seen
+            ][: limit - len(picked)]
+        return picked
 
     def count_rejected(self):
         """Events a receiver refused as invalid and the sender set aside."""
