@@ -21,6 +21,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from .models import Settings, destination_identity
+from .templates import template
 from .web_access import is_web_event
 
 
@@ -44,8 +45,19 @@ FINAL_DELIVERIES = ("delivered", "accepted", "failed", "muted", "cancelled", "un
 # Databases created before versioned migrations report version 1 and already
 # have the base schema below; each later step adds to it and is applied to old
 # and new databases alike, inside one transaction with its version bump.
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
+# Templates kept per source; beyond this the ones not seen for longest go.
+TEMPLATES_PER_SOURCE = 10_000
 MIGRATIONS = {
+    4: (
+        # How often each shape of line has been seen on a source, and a rank on
+        # every event, set when it arrives, that puts severe and rarely seen
+        # lines ahead of routine ones wherever a queue is read in order.
+        "CREATE TABLE IF NOT EXISTS templates(source_id TEXT NOT NULL,key TEXT NOT NULL,count INTEGER NOT NULL DEFAULT 0,first_seen REAL,last_seen REAL,PRIMARY KEY(source_id,key))",
+        "CREATE INDEX IF NOT EXISTS templates_age ON templates(source_id,last_seen)",
+        "ALTER TABLE events ADD COLUMN rank INTEGER NOT NULL DEFAULT 0",
+        "CREATE INDEX IF NOT EXISTS events_pick ON events(source_id,status,rank,received)",
+    ),
     3: (
         # Syslog priority 0-3 (emergency to error) marks an original the model
         # should see before routine lines when the backlog is longer than a batch.
@@ -419,6 +431,36 @@ class Store:
     def sender_pending(self):
         return int(self.meta("sender_pending_count") or 0)
 
+    def _rank(self, db, source_id, item, priority, now):
+        """Severity and rarity of a line, as a small number: higher goes first.
+
+        Severity comes from the syslog priority: 0-3 counts 2, 4 counts 1.
+        Rarity comes from how often this line's template has been seen on the
+        source, counted in the same transaction: the first time scores 4, up to
+        three times 3, up to ten 2, up to a hundred 1, beyond that 0. The first
+        sighting stays the rarest, which is right: first sightings are news.
+        """
+        key = "\x1f".join(template(item.get("service"), item.get("message")))
+        row = db.execute(
+            "INSERT INTO templates VALUES(?,?,1,?,?) ON CONFLICT(source_id,key) "
+            "DO UPDATE SET count=count+1,last_seen=excluded.last_seen RETURNING count",
+            (source_id, key, now, now),
+        ).fetchone()
+        count = row[0]
+        if count == 1:
+            over = db.execute(
+                "SELECT count(*) FROM templates WHERE source_id=?", (source_id,)
+            ).fetchone()[0] - TEMPLATES_PER_SOURCE
+            if over > 0:
+                db.execute(
+                    "DELETE FROM templates WHERE source_id=? AND key IN "
+                    "(SELECT key FROM templates WHERE source_id=? ORDER BY last_seen LIMIT ?)",
+                    (source_id, source_id, over),
+                )
+        severity = 2 if type(priority) is int and 0 <= priority <= 3 else 1 if priority == 4 else 0
+        rarity = 4 if count == 1 else 3 if count <= 3 else 2 if count <= 10 else 1 if count <= 100 else 0
+        return severity * 5 + rarity
+
     def ingest(self, source, entries, cursor_path=None, cursor=None):
         """Origin IDs are stable source positions or sender event IDs, never message hashes."""
         with self.connect() as db:
@@ -479,9 +521,10 @@ class Store:
                 )
                 for i, item in enumerate(unique):
                     priority = item.get("priority")
+                    rank = self._rank(db, source["id"], item, priority, now)
                     db.execute(
-                        "INSERT INTO events(id,source_id,machine_id,segment_id,ordinal,received,event_time,service,status,origin,urgent) "
-                        "VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                        "INSERT INTO events(id,source_id,machine_id,segment_id,ordinal,received,event_time,service,status,origin,urgent,rank) "
+                        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
                         (
                             item["id"],
                             source["id"],
@@ -500,6 +543,7 @@ class Store:
                             "sampled" if is_web_event(item) and source["id"] != "sender" else "pending",
                             item["origin"],
                             int(type(priority) is int and 0 <= priority <= 3),
+                            rank,
                         ),
                     )
                 self._metric(db, source["id"], "events_ingested", len(unique))

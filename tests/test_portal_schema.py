@@ -27,14 +27,16 @@ def test_version_one_database_is_upgraded_in_place_without_losing_data(tmp_path)
     store = Store(tmp_path)
     store.set_meta("keep", "me")
     with store.connect() as db:
-        for name in ("signal_hits_event", "events_segment", "usage_created", "usage_job", "events_urgent"):
+        for name in ("signal_hits_event", "events_segment", "usage_created", "usage_job", "events_urgent", "events_pick", "templates_age"):
             db.execute(f"DROP INDEX {name}")
         db.execute("ALTER TABLE events DROP COLUMN urgent")
+        db.execute("ALTER TABLE events DROP COLUMN rank")
+        db.execute("DROP TABLE templates")
         db.execute("UPDATE meta SET value='1' WHERE key='schema_version'")
     reopened = Store(tmp_path)
     with reopened.connect() as db:
         assert schema_version(db) == SCHEMA_VERSION
-    assert {"signal_hits_event", "events_segment", "usage_created", "usage_job", "events_urgent"} <= indexes(reopened.path)
+    assert {"signal_hits_event", "events_segment", "usage_created", "usage_job", "events_urgent", "events_pick", "templates_age"} <= indexes(reopened.path)
     assert reopened.meta("keep") == "me"
 
 
@@ -92,9 +94,11 @@ def test_processes_starting_together_migrate_once_without_failing(tmp_path):
 
     store = Store(tmp_path)
     with store.connect() as db:
-        for name in ("signal_hits_event", "events_segment", "usage_created", "usage_job", "events_urgent"):
+        for name in ("signal_hits_event", "events_segment", "usage_created", "usage_job", "events_urgent", "events_pick", "templates_age"):
             db.execute(f"DROP INDEX {name}")
         db.execute("ALTER TABLE events DROP COLUMN urgent")
+        db.execute("ALTER TABLE events DROP COLUMN rank")
+        db.execute("DROP TABLE templates")
         db.execute("UPDATE meta SET value='1' WHERE key='schema_version'")
 
     def start(_):
