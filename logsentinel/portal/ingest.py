@@ -14,10 +14,11 @@ import json
 import time
 
 from fastapi import FastAPI, Request, HTTPException
+from fastapi.responses import JSONResponse
 
 from .limits import BodyLimit
 from .store import dumps
-from .collect import machine_zone, normalize
+from .collect import MAX_LINE, bound_event, machine_zone, normalize
 from .enroll import register_enrollment
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
@@ -34,6 +35,7 @@ class SenderHeartbeat(BaseModel):
     disk_free_bytes: int = Field(default=0, ge=0, le=10**15)
     io_pressure_percent: float | None = Field(default=None, ge=0, le=100)
     build: str = Field(default="", max_length=80, pattern=r"^[A-Za-z0-9_.-]*$")
+    rejected: int = Field(default=0, ge=0, le=1000000000)
 
 
 def register_ingest(app, store):
@@ -109,6 +111,7 @@ def register_ingest(app, store):
                 else ("ok" if state.ok else "error")
             ),
             sender_pending=body["pending"],
+            sender_rejected=state.rejected,
             error=(
                 ""
                 if state.ok or not control["capture_allowed"]
@@ -145,7 +148,9 @@ def register_ingest(app, store):
                 or not isinstance(item.get("id"), str)
                 or not 1 <= len(item["id"]) <= 200
                 or not isinstance(item.get("raw"), str)
-                or len(item["raw"].encode()) > 256_000
+                # Four times the stored limit: enough for a sender that has not
+                # yet learnt to cut, and still a bound on what one item costs.
+                or len(item["raw"].encode()) > 4 * MAX_LINE
             ):
                 raise HTTPException(400, "Invalid event")
             if log_format == "journal":
@@ -163,6 +168,11 @@ def register_ingest(app, store):
                 entries.append(dict(entry.model_dump(mode="json"), origin=item["id"]))
             else:
                 entries.append(normalize(item["raw"], "remote", item["id"], zone))
+        # An event over the stored limit is cut, as the collector cuts its own,
+        # instead of refused: refusing the whole batch for one long line left a
+        # sender that had not cut it retrying the same batch for ever.
+        for stored in entries:
+            bound_event(stored)
         return await asyncio.to_thread(persist, id, source, items, entries)
 
     def persist(id, source, items, entries):
@@ -180,6 +190,10 @@ def register_ingest(app, store):
             count = store.ingest(source, entries)
         except OSError:
             raise HTTPException(507, "Storage full; retain and retry these events") from None
+        except ValueError as exc:
+            # Paused or deleted machine: not the sender's fault and not a crash.
+            # The sender keeps its queue and tries again, as the text says.
+            raise HTTPException(409, str(exc)) from None
         old_health = json.loads(store.meta("health:" + id) or "{}")
         old_health.update(checked=time.time(), new_events=count)
         if "heartbeat" not in old_health:
@@ -202,6 +216,23 @@ def create_ingest_app(store, telemetry=None):
         openapi_url=None,
     )
     app.state.store = store
+
+    @app.exception_handler(ValidationError)
+    async def invalid_body(request, exc):
+        # A body that parses but does not fit its model, as the panel answers it.
+        return JSONResponse(
+            {"detail": "; ".join(".".join(map(str, e["loc"])) + ": " + e["msg"] for e in exc.errors())[:500]},
+            status_code=422,
+        )
+
+    @app.exception_handler(json.JSONDecodeError)
+    @app.exception_handler(UnicodeDecodeError)
+    async def unreadable_body(request, exc):
+        # A body that is not valid JSON (or not even valid text) is the sender's
+        # mistake, or a stranger's. Without this it was a 500 and a traceback in
+        # the journal, from a port that answers anyone. The reason is not
+        # echoed: nothing here needs to describe the parser to the caller.
+        return JSONResponse({"detail": "Send a valid JSON body"}, status_code=400)
 
     # Senders batch up to 500 events of 256 KB, but a well-behaved batch stays
     # far below the limit, which bounds what any one request can make us hold.

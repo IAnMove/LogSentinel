@@ -699,7 +699,13 @@ async def test_corrupt_source_does_not_block_another_machine(queue):
 def test_delayed_jobs_do_not_hide_ready_work_beyond_query_limit(queue):
     store, machine, source = queue
     cfg = configure(store, max_events=10)
-    ingest(store, source, 210)
+    # Distinct words, not numbers: two hundred lines of one shape would now be
+    # folded into a single batch as routine repeats, which is not this test.
+    import itertools
+    import string
+
+    words = ["".join(t) for t in itertools.product(string.ascii_lowercase, repeat=2)]
+    store.ingest(source, [dict(origin=f"w-{i}", message=f"event {words[i]} happened", service="app") for i in range(210)])
     worker = ReviewQueue(Analyzer(store))
     work = []
     for i in range(21):

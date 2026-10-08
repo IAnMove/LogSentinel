@@ -5,6 +5,7 @@ import hashlib
 import regex
 import unicodedata
 
+from .rules import excluded
 from .signals import signal_batches
 
 # Tight phrases that try to steer the model, not generic words like "system" or
@@ -14,7 +15,8 @@ from .signals import signal_batches
 # "You are now connected" all day, and those must not raise a HIGH finding.
 _STEER_VERB = r"(?:reveal|show|print|repeat|leak|ignore|override|forget|disregard|bypass)"
 PATTERNS = (
-    r"(?i)\b(?:ignore|disregard|forget) (?:all |any )?(?:the )?(?:previous|prior|above|earlier|preceding|your|these|those) (?:instructions|prompts|rules|messages|directions)",
+    # "all/any/every instructions" is an order even without "previous".
+    r"(?i)\b(?:ignore|disregard|forget) (?:(?:all|any|every) (?:(?:the )?(?:previous|prior|above|earlier|preceding|your|these|those) )?|(?:the )?(?:previous|prior|above|earlier|preceding|your|these|those) )(?:instructions?|prompts?|rules?|messages?|directions?)",
     r"(?i)\b(?:you are now (?:an? |the )?(?:\w+ ){0,2}(?:assistant|ai\b|chatbot|language model|admin\w*|root|developer|dan\b|unrestricted|jailbroken|in \w+ mode)|from now on,? you (?:are|will)|act as (?:if )?you are)",
     rf"(?i)\b{_STEER_VERB} (?:the |your |all )?(?:system prompt|developer message|hidden instructions)",
     r"(?i)\b(?:new|updated) (?:system prompt|developer message|instructions)\s*[:=\-\u2013]",
@@ -29,8 +31,13 @@ PATTERNS = (
     r"(?i)\b(?:ignora|olvida|descarta) (?:todas )?(?:tus |las |los |esas |estas )?(?:instrucciones|reglas|indicaciones|mensajes)(?: (?:anteriores|previas|de arriba))?",
     r"(?i)\b(?:a partir de ahora|desde ahora) (?:eres|actuar[aá]s|vas a)\b|\beres ahora (?:un|una)\b",
     r"(?i)\bno (?:reportes|alertes|avises|menciones|incluyas) (?:esto|este|esta|estos|el hallazgo|nada)",
-    r"(?i)\b(?:prompt|mensaje) (?:del )?(?:sistema|desarrollador)\s*(?:nuevo|actualizado)?\s*[:=]",
+    # "Mensaje del sistema:" alone is how Spanish applications label an ordinary
+    # notice; like the English pattern, this one needs "nuevo" or "actualizado".
+    r"(?i)\b(?:(?:nuevo|nueva) (?:prompt|mensaje) (?:del )?(?:sistema|desarrollador)|(?:prompt|mensaje) (?:del )?(?:sistema|desarrollador) (?:nuevo|actualizado))\s*[:=]",
 )
+COMPILED = tuple(regex.compile(pattern) for pattern in PATTERNS)
+
+
 def plain(text):
     """Fold the text an attacker controls into the shape the patterns expect."""
     text = str(text or "")
@@ -44,9 +51,9 @@ def looks_like_instruction(text):
     sample = plain(text)
     if len(sample) < 8:
         return False
-    for pattern in PATTERNS:
+    for pattern in COMPILED:
         try:
-            if regex.search(pattern, sample, timeout=0.02):
+            if pattern.search(sample, timeout=0.02):
                 return True
         except (TimeoutError, regex.error):
             continue
@@ -97,8 +104,14 @@ def apply_injection_signals(analyzer, limit=500, *, machine_id=None, events=None
     store = analyzer.store
     spanish = store.settings().language == "es"
     created = 0
+    rules = store.objects("rule")
     for batch_machine, batch in signal_batches(analyzer, limit, machine_id, events):
-        hits = [e for e in batch if looks_like_instruction(e.get("message"))]
+        # An exclusion rule is the operator's way to silence a source whose
+        # ordinary lines keep tripping this; the other detectors honour it.
+        hits = [
+            e for e in batch
+            if looks_like_instruction(e.get("message")) and not excluded(store, e, rules)
+        ]
         if not hits:
             continue
         fingerprint = hashlib.sha256(

@@ -8,6 +8,7 @@ import threading
 
 from .models import Source
 from .rules import sanitize
+from .logs import report
 from .store import dumps, uid
 
 
@@ -306,6 +307,14 @@ class HealthMonitor:
                 check["persistence_error"] = (
                     "Storage full; condition remains visible but evidence could not be saved"
                 )
+                active = state.get("active", False)
+            except Exception as exc:
+                # A busy database or a bad row must not end the tick: with the
+                # tick abandoned the snapshot stopped refreshing, and a minute
+                # later /healthz reported the whole portal stale. The condition
+                # stays visible; reporting it is tried again next tick.
+                report("health check " + check["key"], exc)
+                check["persistence_error"] = "Could not record this condition: " + type(exc).__name__
                 active = state.get("active", False)
             state.update(
                 active=active,

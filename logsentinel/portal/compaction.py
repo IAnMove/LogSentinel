@@ -35,13 +35,25 @@ def unit_for(event):
 def representation(event):
     message = event.get("message", "")
     unit = unit_for(event)
+    if event.get("_shape_group"):
+        # Routine repeats of one shape, pulled in to be reviewed as a single
+        # counted group with two examples, so that five thousand lines that
+        # differ only in a number cost one call instead of ten.
+        from .templates import template as shape_template
+
+        masked = shape_template(event.get("service"), message)[1]
+        key = (event["source_id"], event.get("service", ""), unit, event.get("priority"), "shape:" + event["shape"])
+        return key, redact(masked), unit, "template-v1"
     match = LOGGING.fullmatch(message)
     known = False
     if match and unit and event.get("priority") in (None, 6):
         body = match["body"]
         if match["logger"] == "apscheduler.executors.default":
             known = bool(
-                re.fullmatch(r'Running job "[^\n]+" \(scheduled at [^\n]+\)', body)
+                # The job name may not contain a quote: with [^\n]+ for it,
+                # the two open-ended runs backtracked against each other and a
+                # 256 KB line of 'a" (scheduled at ' took over a second.
+                re.fullmatch(r'Running job "[^\n"]+" \(scheduled at [^\n]+\)', body)
                 or re.fullmatch(r'Job "[^\n]+" executed successfully', body)
             )
         else:

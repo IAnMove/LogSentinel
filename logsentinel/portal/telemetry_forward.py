@@ -3,7 +3,8 @@
 import json
 from urllib.parse import urlsplit
 import httpx
-from .network import CheckedAsyncTransport
+from pathlib import Path
+from .network import CheckedAsyncTransport, private_authority
 from .models import check_url
 from .store import Store, dumps
 from .telemetry_data import LinuxSampler, TelemetryConfig
@@ -26,8 +27,13 @@ async def forward_metrics(
         store.set_meta("telemetry_receiver", binding)
         source = {"id": "metric-sender", "machine_id": machine}
         sampler = LinuxSampler()
+        # The same pinned authority the log sender uses, when the enrollment
+        # left one in this spool; without it only the system authorities were
+        # tried and a central with its own CA could not be reached at all.
+        ca_path = Path(directory) / "receiver-ca.pem"
+        verify = private_authority(ca_path) if ca_path.is_file() else True
         async with httpx.AsyncClient(
-                transport=CheckedAsyncTransport(),
+                transport=CheckedAsyncTransport(verify=verify),
             timeout=20, trust_env=False, follow_redirects=False
         ) as client:
 

@@ -127,7 +127,8 @@ qué componente falla mientras el portal está en marcha.
   `Retry-After` y el emisor espera y reintenta sin perder nada.
 - Con la cuota de almacenamiento llena responde **507**: el emisor conserva su cola
   y su cursor y reintenta. Conserva los archivos originales hasta resolverlo.
-- `logsentinel spool-status --spool RUTA` muestra el estado de la cola de un emisor.
+- `logsentinel spool-status --spool RUTA` muestra el estado de la cola de un emisor, incluidos los eventos **rechazados**: si el receptor contesta 400 o 422 a un
+  lote, el emisor pasa a enviar de uno en uno, aparta el evento rechazado con estado `rejected` (queda en la cola para inspeccionarlo) y sigue con los demás.
 - Para detectar un emisor que se calló, pon en la fuente un **Plazo sin señal del emisor remoto**
   de 180 s (por defecto es 0: no vigila la ausencia).
 - Tres permisos distintos, que no deben mezclarse: **leer los logs del cliente**
@@ -166,8 +167,8 @@ líneas que llegan por un emisor remoto, o reenviadas por syslog, se reconocen i
 lee necesita permiso sobre esos archivos (por ejemplo, el grupo `adm` en Debian y Ubuntu).
 
 **Qué se guarda y qué ve el modelo.** Cada petición es un evento con la hora que escribió el servidor, el cliente, el método, la ruta con su consulta, el estado, el
-tamaño, el origen y el agente; la línea original sigue intacta. **Ninguna llega al modelo**, sea cual sea el modo de análisis de la fuente: se marcan como
-«muestreadas» y los detectores trabajan sobre todas. En una carpeta que mezcla `access.log` y `error.log`, el error sí sigue el flujo normal, sin las peticiones como contexto.
+tamaño, el origen y el agente; la línea original sigue intacta. **Ninguna entra en la revisión automática del modelo**, sea cual sea el modo de análisis de la fuente: se marcan como
+«muestreadas» y los detectores trabajan sobre todas. En una carpeta que mezcla `access.log` y `error.log`, el error sí sigue el flujo normal, sin las peticiones como contexto, como vecinas en la verificación ni en la búsqueda de la investigación. La única excepción es el asistente: si le preguntas por un problema web, esas peticiones son su evidencia y se le envían (con los secretos ocultos y respetando `remote_allowed`).
 
 **Qué detecta.** Cada detector abre un problema por fuente que se va actualizando, con un resumen de cuántas peticiones fueron, de cuántos clientes, entre qué horas,
 con qué códigos y a qué rutas (sin la consulta, donde acaban los tokens).
@@ -186,7 +187,9 @@ Las rutas y los fragmentos se comparan tras decodificar la URL dos veces y pasar
 
 **Qué hay que saber.**
 
-- **En la cobertura aparecerán como «por selección de fuente».** El monitor y «Cobertura y capacidad» cuentan las peticiones web entre lo que no va al modelo, con aspecto de aviso, aunque la fuente funcione exactamente como debe. «Recuperar retenidos sin analizar» no las vuelve a poner en la cola.
+- **En la cobertura aparecen aparte.** El monitor y «Cobertura y capacidad» cuentan las peticiones web como «peticiones web: las vigilan los detectores y el modelo
+  no las lee, como está previsto», en tono neutro y sin sumarlas a lo que una fuente deja fuera por su selección, que sigue siendo un aviso. «Recuperar retenidos sin
+  analizar» no las vuelve a poner en la cola.
 - **El cliente es la dirección que vio el servidor.** Detrás de un proxy inverso o un CDN será la del proxy y los resúmenes serán inútiles. Haz que el servidor la
   reescriba antes de registrar: en nginx `set_real_ip_from` y `real_ip_header X-Forwarded-For`; en Apache `mod_remoteip` con `RemoteIPHeader`. El portal no usa la
   cabecera `X-Forwarded-For` de la línea porque cualquiera puede enviarla falsificada.
@@ -199,7 +202,45 @@ Las rutas y los fragmentos se comparan tras decodificar la URL dos veces y pasar
   más. Las notificaciones incluyen direcciones y rutas.
 - **Lo que no es.** No es un panel de visitas ni mide visitantes únicos, y no bloquea nada: «No bloquees direcciones automáticamente» sigue valiendo.
 
-## 11. Sobre las ilustraciones
+## 11. Carga sobre los equipos
+
+Las unidades que generan `service install` y `setup-client` limitan lo que el programa puede consumir:
+
+- **Emisor:** `Nice=10`, 25 % de una CPU, 192 MiB de memoria con aviso y 256 MiB de tope, y es el primer candidato si el sistema se queda sin memoria
+  (`OOMScoreAdjust=500`). Lee a lo sumo 1000 líneas o 256 KB por archivo cada 2 s, y se detiene si la presión de E/S del kernel (`/proc/pressure/io`)
+  supera el 25 %, si quedan menos de 256 MiB libres o si su cola llega al tope.
+- **Central:** `Nice=5`, E/S de prioridad baja, aviso de memoria a 768 MiB sin tope duro (una importación grande debe terminar, aunque sea despacio).
+  Sin límite de CPU por defecto porque los detectores la necesitan; en un equipo compartido, `service install --cpu-quota 50`.
+- `IOWeight` e `IOSchedulingClass=idle` solo actúan con el planificador de E/S `bfq`; con `none` o `mq-deadline` (lo habitual en NVMe) no hacen nada.
+  Compruébalo con `cat /sys/block/DISPOSITIVO/queue/scheduler`.
+- **Exceso de líneas en un emisor.** La cola admite 100 000 eventos o 1 GiB. Por encima del 60 % de cualquiera de los dos, el emisor deja de guardar las
+  **repeticiones rutinarias** (una forma de línea vista más de cien veces en esa fuente y sin gravedad) y las cuenta; las líneas raras, nuevas o con
+  prioridad 0-3 se guardan y se envían primero. Al bajar del 60 % guarda una línea de resumen por forma («N routine lines like this were not stored
+  between … and …») que el central revisa como cualquier otra. Al 100 % se para la captura, como antes. Se desactiva con `"shed_routine": false` en los
+  `limits` del emisor; sin ello, el tope se alcanza antes y lo que se pierde por rotación son las líneas más nuevas.
+- **El servidor del modelo no lo controla LogSentinel.** Un modelo que no cabe en RAM es lo que más puede colgar un equipo: ponle `MemoryMax` en su
+  unidad, usa `-ngl 0` sin GPU, o sírvelo desde otra máquina.
+
+## 12. Qué lee cada sondeo de archivos y carpetas
+
+Una fuente de archivo o carpeta se sondea cada unos 2 segundos. En cada sondeo se lee, **por archivo**, como máximo **1000 líneas o `max_batch_bytes`**
+(2 MB en el portal, 256 KB en un emisor), lo que ocurra antes. Los archivos de una carpeta no se quitan el turno unos a otros, pero las fuentes se sondean en
+secuencia. Con líneas de unos 100 bytes eso son unas 500 líneas por segundo y archivo: un histórico de 100 MB tarda en torno a media hora en entrar (estimación,
+no medida). Al ver «pendientes» durante un rato tras activar una fuente grande, es lo normal.
+
+- **Archivos nuevos y «Importar histórico al iniciar».** Sin la opción, una fuente empieza por el final de cada archivo que encuentra y salta los rotados
+  (`.gz`, `.xz`, `.bz2`). Activarla después **sí importa** lo que se saltó, sin duplicar lo ya leído.
+- **Archivos comprimidos.** Se importan cuando su tamaño y fecha no han cambiado durante un sondeo entero, así que llegan uno o dos sondeos después del archivo
+  normal. Se descomprimen desde el principio en cada sondeo hasta su posición, de modo que un archivo muy grande tarda cuadráticamente más (esto sale de leer
+  el código, no está medido).
+- **Líneas de más de 256 KB.** Se corta el final: se guarda el principio, con una nota en el texto («line cut: about N more bytes were not stored») y `cut_bytes`
+  en el evento, y se sigue con la línea siguiente. Una línea que aún se está escribiendo, sin salto de línea, espera a su final.
+- **Rotación.** El cursor sigue al archivo, no al nombre, así que `app.log` → `app.log.1` → `app.log.2` no repite líneas. Dos casos sí releen cuando el histórico
+  está activado, porque el archivo resultante es nuevo y no se puede saber que su contenido ya se leyó: `copytruncate` (la copia es un archivo nuevo) y la
+  compresión retrasada (`app.log.2.gz` es un archivo nuevo con lo que antes se leyó como texto). Sin «Importar histórico» no ocurre.
+- **Un archivo borrado** se sigue drenando mientras alguien escriba en él y se suelta a los cinco minutos sin actividad.
+
+## 13. Sobre las ilustraciones
 
 Las imágenes de Tentri (`logsentinel/portal/static/tentri-*.png`) son arte
 generado para este proyecto. No son una marca oficial de Omarchy ni de ningún otro

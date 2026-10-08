@@ -38,7 +38,7 @@ the top bar).
 - OOM, full or read-only disks, `sudo` rejections and SSH bursts are detected
   on the originals without waiting for the model.
 - Apache and nginx access logs (common and combined formats) are recognised on their own, stored with the server's own
-  timestamp and **never sent to the model**: their address, path and agent are chosen by whoever visits, and a busy
+  timestamp and **kept out of the model's automatic review** (not as triggers, context, verification neighbours or investigation matches; the assistant sees them only when you ask about a web problem, since they are its evidence): their address, path and agent are chosen by whoever visits, and a busy
   site writes more than a model can read. Six detectors work on every request: 5xx bursts, login floods, secrets
   served, probing, path scanning and attack fragments. See `OPERACION.md` (Spanish). Behind a proxy the client is the
   proxy unless the server rewrites it; this is not a visitor dashboard and it blocks nothing.

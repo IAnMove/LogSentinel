@@ -4,6 +4,7 @@ from .models import Model
 from pydantic import Field
 from .rules import excluded, sanitize
 from .store import dumps
+from .web_access import is_web_event
 
 
 class ChatAnswer(Model):
@@ -142,7 +143,11 @@ def context_for(
     originals = (
         problem["evidence"]
         if problem
-        else store.events(machine_id, source_id, limit=100, newest=True)
+        else [
+            e
+            for e in store.events(machine_id, source_id, limit=500, newest=True)
+            if not is_web_event(e)
+        ][:100]
     )
     original_ids = {e["id"] for e in originals}
     # In a deep review, reserve space for newly retrieved evidence too.

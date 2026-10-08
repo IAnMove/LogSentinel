@@ -49,13 +49,16 @@ def test_an_unsupported_archive_does_not_stop_the_files_after_it(folder):
     assert "a-first.zst" in state["error"] and "1 of 3" in state["error"]
 
 
-def test_an_oversized_line_is_reported_without_hiding_other_files(folder):
+def test_an_oversized_line_is_cut_and_does_not_hide_other_files(folder):
     store, source, logs = folder
     (logs / "big.log").write_text("x" * 260_000 + "\n")
     (logs / "ok.log").write_text("healthy line\n")
     Collector(store).poll(source)
-    assert messages(store) == ["healthy line"]
-    assert "big.log" in health(store)["error"]
+    stored = messages(store)
+    assert "healthy line" in stored
+    (cut,) = [m for m in stored if m.startswith("xxx")]
+    assert "line cut: about" in cut and len(cut.encode()) <= 256_000
+    assert health(store)["status"] == "ok"
 
 
 def test_strict_polling_still_raises_for_the_read_check(folder):

@@ -19,6 +19,7 @@ from .logs import report
 from contextlib import nullcontext
 from pathlib import Path
 import httpx
+import regex
 from logsentinel.collectors.file_tailer import FileTailerCollector
 from logsentinel.collectors.journald import JournaldCollector
 from logsentinel.config import JournaldSourceConfig
@@ -27,6 +28,9 @@ from .web_access import WEB_SERVICE, parse_access_line
 from .source_paths import open_source, validate_source_handle, validate_source_path, UnsafeSourcePath
 
 MAX_LINE = 256_000
+# A journal record can carry fields of any size with --all; this is the most
+# read for one record before it is cut to MAX_LINE.
+JOURNAL_RECORD_CEILING = 8 * 1024 * 1024
 MAX_FOLDER_FILES = 100
 # An xz header can ask the decoder for a gigabyte of dictionary; an archive that
 # needs more than this to be read is refused rather than allowed to exhaust memory.
@@ -168,8 +172,82 @@ def machine_zone(store, source):
         return timezone.utc
 
 
+def fit_line(text, dropped):
+    """A line cut at the limit, ending in a note that says so and how much went.
+
+    The note is part of the stored text so that anyone reading the event, or the
+    evidence of a problem, sees it was cut. The result still fits MAX_LINE once
+    encoded.
+    """
+    note = f" ... [line cut: about {dropped} more bytes were not stored]"
+    room = MAX_LINE - len(note.encode()) - 8
+    while len(text.encode()) > room:
+        text = text[: max(1, int(len(text) * 0.9))]
+    return text + note
+
+
+def bound_event(entry, dropped=0):
+    """Keep a stored event within MAX_LINE, whatever made it bigger.
+
+    The reader cuts a line that is too long on disk, but an event can also grow
+    after reading: bytes that are not valid UTF-8 become three bytes each when
+    they are replaced, and multiline mode joins a trace of many lines into one
+    event. The receiver refuses an event over the limit, and a sender that keeps
+    one in its queue is stuck on it, so the bound is applied to the decoded,
+    joined text, here, before anything is stored or sent.
+    """
+    over = len(entry["raw"].encode()) - MAX_LINE
+    cut = dropped + max(0, over)
+    if not cut:
+        return False
+    entry["raw"] = fit_line(entry["raw"], cut)
+    entry["message"] = fit_line(entry["message"], cut)
+    entry.setdefault("metadata", {})["cut_bytes"] = cut
+    return True
+
+
+# A syslog priority for lines that carry none, so the urgent lane and the
+# priority selection work for file sources as they do for the journal. Only
+# clear statements of failure, with bounded patterns on text a stranger wrote:
+# a kernel killing or panicking (2, critical), a level word that says critical
+# or fatal (2), a level word that says error (3). Everything else stays unset
+# rather than guessed, because a wrong "informational" would hide a line from
+# the priority mode as surely as a wrong "error" would promote it.
+_KERNEL_FAILURE = regex.compile(
+    r"(?i)\bout of memory\b|\boom-kill|\bkernel panic\b|\bsegfault at\b|\bgeneral protection fault\b"
+    r"|\bI/O error\b|\bBUG: \w|\bcall trace:",
+)
+# A level word counts when it is written as a level: in capitals as its own
+# word, after level=/severity=, in brackets, or opening the message. The same
+# word in running text ("the critical path", "an error in the form") does not.
+_LEVEL_CRITICAL = regex.compile(
+    r"\b(?:CRITICAL|CRIT|FATAL|EMERG|EMERGENCY|ALERT|PANIC)\b"
+    r"|(?i:(?:^|[\[(<]|(?:level|severity|lvl|loglevel)=)\s*(?:critical|crit|fatal|emerg|emergency|alert|panic)\b)"
+)
+_LEVEL_ERROR = regex.compile(
+    r"\b(?:ERROR|ERR)\b"
+    r"|(?i:(?:^|[\[(<]|(?:level|severity|lvl|loglevel)=)\s*(?:error|err)\b)"
+)
+
+
+def derive_priority(message, service):
+    text = (message or "")[:2000]
+    try:
+        if (service or "").casefold().startswith("kernel") and _KERNEL_FAILURE.search(text, timeout=0.02):
+            return 2
+        if _LEVEL_CRITICAL.search(text, timeout=0.02):
+            return 2
+        if _LEVEL_ERROR.search(text, timeout=0.02):
+            return 3
+    except TimeoutError:
+        return None
+    return None
+
+
 def normalize(line, path, origin, tz=None):
     entry = FileTailerCollector.parse_log_line(line, source_path=path, tz=tz)
+    if entry.priority is None:
+        entry.priority = derive_priority(entry.message, entry.service)
     # Read the message, not the raw line, so access lines forwarded through
     # syslog (nginx and Apache can log there) are recognised as well.
     request = parse_access_line(entry.message)
@@ -377,6 +455,14 @@ class Collector:
             current = path.stat()
         except FileNotFoundError:
             current = None
+        if handle and current is None:
+            # The file was deleted. Keep draining what its writer may still add
+            # through the rotation watch, which lets go once it stays quiet. A
+            # folder does this in release_vanished(); a single file never did,
+            # so its descriptor stayed open for as long as the portal ran.
+            self.retire(source, path, handle)
+            del self.handles[key]
+            return 0
         if handle and current:
             previous = os.fstat(handle.fileno())
             if (previous.st_dev, previous.st_ino) != (current.st_dev, current.st_ino):
@@ -404,7 +490,13 @@ class Collector:
         old = self.store.cursor(source["id"], key) or {}
         sig = [stat.st_dev, stat.st_ino]
         offset = 0
-        if not old:
+        # A cursor belongs to a file, not to the name it had when it was
+        # written. After a rotation the same file turns up under a new name, and
+        # the name it now has may already carry the cursor of the file that
+        # used to be there: with numbered rotation, app.log.1 holds the cursor
+        # of last cycle's app.log.1, and trusting it re-read the whole file
+        # under a new generation, so every line counted again each cycle.
+        if not old or old.get("identity") != sig:
             with self.store.connect() as db:
                 for row in db.execute(
                     "SELECT data FROM cursors WHERE source_id=?", (source["id"],)
@@ -459,21 +551,34 @@ class Collector:
                 "generation", f"{stat.st_dev}:{stat.st_ino}:{stat.st_ctime_ns}"
             )
             opener = (lambda *args: nullcontext(handle)) if handle else open
+            seeded = False
             if old.get("identity") == sig and stat.st_size >= old.get("offset", 0):
                 offset = old.get("offset", 0)
-                with opener(path, "rb") as f:
-                    f.seek(max(0, offset - 64))
-                    check = f.read(min(64, offset))
-                if hashlib.sha256(check).hexdigest() != old.get(
-                    "tail", hashlib.sha256(b"").hexdigest()
-                ):
+                if old.get("seeded") and source.get("history"):
+                    # The source started without history, so what was already
+                    # in the file was never read. History is on now: read it
+                    # all again from the start under the same generation.
+                    # Origins are positions, so the lines read since are
+                    # recognised and stored once.
                     offset = 0
-                    generation = f"{stat.st_dev}:{stat.st_ino}:{stat.st_ctime_ns}"
+                else:
+                    seeded = bool(old.get("seeded"))
+                    with opener(path, "rb") as f:
+                        f.seek(max(0, offset - 64))
+                        check = f.read(min(64, offset))
+                    if hashlib.sha256(check).hexdigest() != old.get(
+                        "tail", hashlib.sha256(b"").hexdigest()
+                    ):
+                        offset = 0
+                        seeded = False
+                        generation = f"{stat.st_dev}:{stat.st_ino}:{stat.st_ctime_ns}"
             elif old:
                 generation = f"{stat.st_dev}:{stat.st_ino}:{stat.st_ctime_ns}"
             elif not source.get("history"):
                 offset = stat.st_size
+                seeded = True
         entries = []
+        pending_cut = {}
         used = 0
         done = False
         zone = machine_zone(self.store, source)
@@ -489,10 +594,29 @@ class Collector:
                     if not line:
                         done = True
                         break
-                    if len(line) > MAX_LINE:
-                        raise ValueError(
-                            "Event exceeds 256 KB; change source format or explicit source limit policy"
-                        )
+                    dropped = 0
+                    if len(line) > MAX_LINE and not line.endswith(b"\n"):
+                        # An event this long cannot be stored whole. Keep its
+                        # beginning, where the cause of a failure usually is,
+                        # and step over the rest so the cursor moves on. It used
+                        # to raise here, which left the cursor in place: the
+                        # source read the same line, failed, and stopped there
+                        # for good.
+                        ended = False
+                        while True:
+                            chunk = f.readline(MAX_LINE)
+                            dropped += len(chunk)
+                            if not chunk:
+                                break
+                            if chunk.endswith(b"\n"):
+                                ended = True
+                                break
+                        if not ended and not compressed:
+                            # Still being written: wait for its end like any line.
+                            f.seek(begin)
+                            break
+                        dropped += len(line) - MAX_LINE
+                        line = line[:MAX_LINE] + b"\n"
                     if compressed and begin + len(line) > MAX_EXPANDED_BYTES:
                         done = True
                         f.seek(begin)
@@ -504,9 +628,11 @@ class Collector:
                     if source.get("multiline") and text.startswith((" ", "\t")) and entries:
                         entries[-1]["message"] += "\n" + text
                         entries[-1]["raw"] += "\n" + text
+                        pending_cut[id(entries[-1])] = pending_cut.get(id(entries[-1]), 0) + dropped
                     elif text:
                         entries.append(normalize(text, key, f"{generation}:{begin}", zone))
-                    used += len(line)
+                        pending_cut[id(entries[-1])] = dropped
+                    used += len(line) + dropped
                 end = f.tell()
                 tail = ""
                 if not compressed:
@@ -522,12 +648,17 @@ class Collector:
             raise ValueError(
                 "Compressed source is truncated or corrupt: " + type(exc).__name__
             ) from None
+        cut_lines = sum(bound_event(e, pending_cut.get(id(e), 0)) for e in entries)
+        if cut_lines:
+            self.store.metric(source["id"], "lines_cut", cut_lines)
         cursor = {
             "identity": sig,
             "generation": generation,
             "offset": end,
             "tail": tail,
         }
+        if not compressed and seeded:
+            cursor["seeded"] = True
         if compressed:
             cursor.update(stamp=stamp, stable=True, done=done, digest=digest)
         count = self.store.ingest(source, entries, key, cursor)
@@ -549,6 +680,12 @@ class Collector:
         # the next record on every poll.
         budget = source['max_batch_bytes']
         raw, limited = read_journal(cmd, budget * (2 if cursor.get('cursor') else 1))
+        if limited and b"\n" not in raw[: budget * (2 if cursor.get("cursor") else 1)]:
+            # The first record alone is bigger than the batch. Reading again
+            # with room for one record of any size the store can cut keeps the
+            # source moving; raising here left the cursor in place and the
+            # source reading the same record, failing, for ever.
+            raw, limited = read_journal(cmd, budget + JOURNAL_RECORD_CEILING)
         collector = JournaldCollector(JournaldSourceConfig())
         entries = []
         last = None
@@ -576,16 +713,19 @@ class Collector:
                     raise ValueError("Journal cursor unavailable: possible retention gap; cursor preserved")
                 cursor_verified = True
                 continue
-            if used + len(line) > budget:
+            if used + len(line) > budget and last is not None:
+                # A batch holds at least one record, however big: one that is
+                # over the limit is cut below rather than left behind.
                 limited = True
                 break
             used += len(line)
             last = mark
             e = collector._parse_json_line(text)
             if e:
-                entries.append(
-                    dict(e.model_dump(mode="json"), origin="journal:" + last)
-                )
+                stored = dict(e.model_dump(mode="json"), origin="journal:" + last)
+                if bound_event(stored):
+                    self.store.metric(source["id"], "lines_cut", 1)
+                entries.append(stored)
             elif data.get("MESSAGE") is None:
                 skipped += 1
         if skipped:

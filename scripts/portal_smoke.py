@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-import tempfile, threading, time
+import json, tempfile, threading, time
 import uvicorn
 from playwright.sync_api import sync_playwright
 from logsentinel.portal.app import create_app
@@ -303,6 +303,18 @@ with tempfile.TemporaryDirectory(prefix="sentinel-browser-") as d:
                 app.state.store.objects("destination")[0]["token"]
                 == "xoxb-synthetic-bot-token"
             )
+            # The Save button has been seen "detached from the DOM" for the whole
+            # 30-second timeout of the click below on a slow CI runner, and reading
+            # the code explains no rebuild. Record who calls render() and refresh()
+            # from here on, so that if it happens again the failure says who did it.
+            page.evaluate(
+                """() => { window.__rebuilds = [];
+                  for (const name of ['render', 'refresh']) { const original = window[name];
+                    window[name] = function (...args) { window.__rebuilds.push({call: name,
+                      at: Math.round(performance.now()),
+                      stack: new Error().stack.split('\\n').slice(2, 7).map((l) => l.trim().replace(/^at /, '')).join(' <- ')});
+                      return original.apply(this, args); }; } }"""
+            )
             page.get_by_role("button", name="Edit", exact=True).click()
             page.get_by_label("Language / Idioma").select_option("es")
             page.get_by_text(
@@ -313,7 +325,15 @@ with tempfile.TemporaryDirectory(prefix="sentinel-browser-") as d:
             page.locator(
                 "[data-notification-channel='file'] [data-notification-field='path']"
             ).fill("notifications.jsonl")
-            page.get_by_role("button", name="Guardar", exact=True).click()
+            try:
+                page.get_by_role("button", name="Guardar", exact=True).click()
+            except Exception:
+                print(
+                    "Page rebuilds recorded before the failed click:",
+                    json.dumps(page.evaluate("window.__rebuilds"), indent=1, ensure_ascii=False),
+                    file=sys.stderr,
+                )
+                raise
             page.get_by_text("Configuración guardada.", exact=True).wait_for()
             with page.expect_response(
                 lambda response: "/api/destinations/" in response.url

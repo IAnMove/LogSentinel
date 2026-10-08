@@ -136,7 +136,9 @@ async def test_outgoing_contracts(tmp_path, monkeypatch, kind):
 @pytest.mark.asyncio
 async def test_file_destination_contained(tmp_path):
     s = Store(tmp_path)
-    d = Destination(name="bad", kind="file", path="../../outside").model_dump()
+    # Saving such a path is refused now, but a destination stored before that rule
+    # existed can still hold one, so the send keeps its own check.
+    d = dict(Destination(name="bad", kind="file").model_dump(), path="../../outside")
     with pytest.raises(ValueError):
         await Outbox(s).send(d, {"delivery_id": "x"})
 
@@ -265,3 +267,25 @@ def test_notification_decisions_explain_skips_and_muted_updates_do_not_extend_co
     enqueue(store, pid)
     assert store.rows("deliveries")[0]["status"] == "pending"
     assert len(store.problem(pid)["notification_decisions"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_desktop_notification_escapes_markup_in_log_text(tmp_path, monkeypatch):
+    import os
+    import shutil
+    import stat
+
+    fake = tmp_path / "notify-send"
+    received = tmp_path / "received.txt"
+    fake.write_text("#!/bin/sh\nprintf '%s\\n' \"$@\" > " + str(received) + "\n")
+    fake.chmod(fake.stat().st_mode | stat.S_IXUSR)
+    monkeypatch.setattr(shutil, "which", lambda name: str(fake) if name == "notify-send" else None)
+    monkeypatch.setenv("DISPLAY", ":0")
+    dest = Destination(name="desk", kind="system", enabled=True).model_dump()
+    status = await Outbox(Store(tmp_path / "data")).send(
+        dest, {"delivery_id": "x", "title": "<b>disk</b> full & failing", "summary": "s", "severity": "HIGH"}
+    )
+    assert status == "accepted"
+    body = received.read_text()
+    assert "&lt;b&gt;disk&lt;/b&gt; full &amp; failing" in body
+    assert "<b>" not in body

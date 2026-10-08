@@ -6,13 +6,19 @@ import time
 from pathlib import Path
 from urllib.parse import urlsplit
 import httpx
-from .network import CheckedAsyncTransport
+from .network import CheckedAsyncTransport, private_authority
 from .collect import Collector
 from .models import Source, check_url
 from .store import Store
 from .sender import blocking, run_workers, spool_lock, status
 from .sender_safety import SenderLimits, CaptureGate, error_detail
 from .sender_control import SenderControl
+
+
+# The receiver accepts up to 500 events per request. A batch of 100 every two
+# seconds capped delivery at 50 events a second, a tenth of what capture can
+# read, so any sustained rate above that filled the spool.
+DELIVERY_BATCH = 500
 
 
 async def forward(
@@ -92,7 +98,7 @@ async def forward(
                 "The pinned receiver certificate (receiver-ca.pem) is missing; refusing to fall "
                 "back to the system authorities. Restore it from the enrollment package."
             )
-        verify = str(ca_path) if ca_path.exists() else True
+        verify = private_authority(ca_path) if ca_path.exists() else True
         try:
             async with httpx.AsyncClient(
                 transport=CheckedAsyncTransport(verify=verify),
@@ -105,7 +111,10 @@ async def forward(
                 async def capture():
                     control.require(capture=True)
                     await blocking(gate.check)
+                    store.shed_routine = gate.shedding
                     await blocking(collector.poll, source, True)
+                    if not gate.shedding:
+                        await blocking(store.flush_shed, source)
 
                 async def deliver():
                     nonlocal journal_supported, cleanup_due
@@ -115,9 +124,17 @@ async def forward(
                         # Recover acknowledgements committed just before a crash.
                         await blocking(store.discard_sent)
                         cleanup_due = time.monotonic() + 3600
-                    rows = await asyncio.to_thread(
-                        store.events, source_id="sender", status="pending", limit=100
-                    )
+                    # After the receiver refused a batch as invalid, send one event
+                    # at a time until the one it refuses is found and set aside.
+                    # The mode lives in the spool so a restart keeps it.
+                    probing = await blocking(store.meta, "sender_probe") == "1"
+                    limit = 1 if probing else DELIVERY_BATCH
+                    # Urgent lines first, oldest first within each kind: the
+                    # spool used to be strictly first in, first out, so a fresh
+                    # kernel failure waited behind every routine line before it.
+                    rows = await asyncio.to_thread(store.pending_for_delivery, limit)
+                    if probing and not rows:
+                        await blocking(store.set_meta, "sender_probe", "")
                     payload, size = {"events": []}, 0
                     if journal:
                         payload["format"] = "journal"
@@ -165,8 +182,40 @@ async def forward(
                             await blocking(store.mark, ids, "sent")
                             await blocking(store.discard_sent, ids)
                         await blocking(status, store, "delivery", True)
-                        return True
+                        # A full batch means more is waiting: ask the loop to
+                        # come straight back rather than after the idle pause.
+                        return "more" if len(payload["events"]) >= limit and not probing else True
                     except (httpx.HTTPError, ValueError, TypeError) as failure:
+                        refused = (
+                            isinstance(failure, httpx.HTTPStatusError)
+                            and failure.response.status_code in (400, 422)
+                        )
+                        if refused and payload["events"]:
+                            # The receiver says the batch is invalid. That is a
+                            # fact about one event, not about the connection, and
+                            # sending the same batch again can only get the same
+                            # answer: it used to, for ever, with everything behind
+                            # it waiting. Narrow the batch to one event; when a
+                            # single event is refused, set it aside with a status
+                            # of its own, keep it in the spool for inspection, and
+                            # carry on with the next.
+                            if len(payload["events"]) > 1:
+                                await blocking(store.set_meta, "sender_probe", "1")
+                                await asyncio.to_thread(
+                                    status, store, "delivery", False,
+                                    "Receiver refused the batch; isolating the event it refuses",
+                                    **error_detail(failure),
+                                )
+                                return True
+                            await blocking(store.mark, [payload["events"][0]["id"]], "rejected")
+                            await blocking(store.set_meta, "sender_probe", "")
+                            await blocking(store.metric, source["id"], "events_rejected", 1)
+                            await asyncio.to_thread(
+                                status, store, "delivery", True,
+                                "One event was refused by the receiver and set aside (see spool-status)",
+                                **error_detail(failure),
+                            )
+                            return True
                         # A quota refusal states how long to wait, so honour it
                         # instead of spending retries on a predictable rejection.
                         wait = 0

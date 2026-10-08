@@ -31,6 +31,9 @@ class TrendAnswer(Model):
         return value
 
 
+ALERT_BUDGET_PER_HOUR = 20
+
+
 class Telemetry:
     def __init__(self, store, analyzer):
         self.store, self.analyzer = store, analyzer
@@ -159,7 +162,11 @@ class Telemetry:
                         "UPDATE telemetry_samples SET evaluated=1 WHERE machine_id=? AND id=?",
                         (machine, pending.id),
                     )
-            self.store.set_meta("telemetry_error:" + machine, "")
+            # A sample that arrived is not an error; a budget hold still is.
+            self.store.set_meta(
+                "telemetry_error:" + machine,
+                self.store.meta("telemetry_alert_hold:" + machine) or "",
+            )
             return accepted
 
     def evaluate(self, machine, sample, cfg):
@@ -279,6 +286,29 @@ class Telemetry:
                         (machine, state_key, dumps(state)),
                     )
 
+    def within_alert_budget(self, machine, now):
+        """At most ALERT_BUDGET_PER_HOUR new resource problems per machine.
+
+        Every metric key is a separate alert with its own cooldown, so a sender
+        that keeps inventing keys could open problems without end. A budget per
+        machine bounds what one token can do in an hour; what it refuses is
+        recorded where the machine's telemetry errors are shown.
+        """
+        key = "telemetry_alert_budget:" + machine
+        state = json.loads(self.store.meta(key) or "{}")
+        if now - state.get("window_start", 0) >= 3600:
+            state = dict(window_start=now, count=0)
+            self.store.set_meta("telemetry_alert_hold:" + machine, "")
+        if state["count"] >= ALERT_BUDGET_PER_HOUR:
+            self.store.set_meta(
+                "telemetry_alert_hold:" + machine,
+                f"Resource alert budget of {ALERT_BUDGET_PER_HOUR} problems per hour reached; further alerts from this machine are held until the hour ends",
+            )
+            return False
+        state["count"] += 1
+        self.store.set_meta(key, dumps(state))
+        return True
+
     def alert(
         self,
         machine,
@@ -292,6 +322,8 @@ class Telemetry:
         notify=True,
     ):
         source = self.store.get("source", "metrics:" + machine)
+        if not recovered and not self.within_alert_budget(machine, sample.observed):
+            return None
         origin = sample.id + ":" + key + ":" + kind
         message = "Resource " + kind + ": " + key
         metadata = dict(

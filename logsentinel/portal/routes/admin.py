@@ -30,6 +30,11 @@ def register_admin(app, ctx):
             dest = store.get("destination", row["destination_id"])
             if not dest or not dest["enabled"]:
                 raise HTTPException(400, "Destination disabled")
+            if row["status"] == "delivered":
+                # Retrying resets the row to pending whatever it was, and this
+                # one already reached its destination: a second copy of the
+                # alert, not a retry.
+                raise HTTPException(409, "This notification was already delivered")
             db.execute(
                 "UPDATE deliveries SET status='pending',next_try=? WHERE id=?",
                 (time.time(), id),

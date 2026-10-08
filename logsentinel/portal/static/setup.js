@@ -165,11 +165,20 @@ function drawMonitor(m) {
       bilingual("Recuperación del histórico: ", "History recovery: ") +
       coverage.history_recovered + bilingual(" analizados · ", " reviewed · ") +
       coverage.history_remaining + bilingual(" pendientes", " remaining")));
-    const outside = coverage.excluded + coverage.policy + coverage.oversized + Math.max(0, coverage.errors - coverage.retrying);
+    // Web requests are left to the detectors on purpose. They are not a gap, so
+    // they are told apart from what a source's selection really leaves out.
+    const web = coverage.web || 0;
+    const selected = coverage.policy - web;
+    const outside = coverage.excluded + selected + coverage.oversized + Math.max(0, coverage.errors - coverage.retrying);
+    if (web) details.append(el("div",
+      web + bilingual(
+        " peticiones web: las vigilan los detectores y el modelo no las lee, como está previsto.",
+        " web requests: the detectors watch them and the model does not read them, as intended.",
+      ), "subtle"));
     if (outside) details.append(el("div",
       bilingual("Sin analizar fuera de la cola: ", "Unreviewed outside the queue: ") +
       coverage.excluded + bilingual(" excluidos por reglas · ", " excluded by rules · ") +
-      coverage.policy + bilingual(" por selección de fuente · ", " by source selection · ") +
+      selected + bilingual(" por selección de fuente · ", " by source selection · ") +
       coverage.oversized + bilingual(" demasiado grandes · ", " too large · ") +
       Math.max(0, coverage.errors - coverage.retrying) + bilingual(" con reintentos agotados", " with exhausted retries"), "monitor-warning"));
     if (coverage.queued) details.append(el("div", bilingual(
@@ -843,7 +852,7 @@ async function setupView(root) {
     next("Terminar y activar análisis automático", async (d) => {
       await api("/api/settings", d);
       await api("/api/setup/complete", {});
-      sessionStorage.setItem("setup-dismissed", "1");
+      setSessionFlag("setup-dismissed", "1");
       view = "summary";
       await refresh();
       notice(

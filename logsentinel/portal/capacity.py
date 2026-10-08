@@ -6,6 +6,7 @@ from statistics import median
 import time
 
 from .batch_budget import batch_budget, input_ceiling as model_input_ceiling
+from .web_access import WEB_SERVICE
 
 
 def latency_breakdown(rows):
@@ -125,8 +126,15 @@ def _window(db, start, end, machine_id):
         excluded=statuses.get("excluded", 0),
         error=statuses.get("error", 0),
     )
+    # Requests of a web access log are always "sampled": the detectors read them
+    # and the model does not. They are part of `policy`, and counted here as well
+    # so a screen can say they are expected and not a gap.
+    counts["web"] = db.execute(
+        "SELECT count(*) FROM events WHERE " + where + " AND status='sampled' AND service=?",
+        [*args, WEB_SERVICE],
+    ).fetchone()[0]
     counts["other"] = counts["events"] - sum(
-        v for k, v in counts.items() if k != "events"
+        v for k, v in counts.items() if k not in ("events", "web")
     )
     seconds = max(1, end - start)
     return dict(

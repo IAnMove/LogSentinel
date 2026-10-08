@@ -17,7 +17,13 @@ class SenderLimits(Model):
     high_water_percent: int = Field(default=85, ge=20, le=95)
     resume_percent: int = Field(default=60, ge=10, le=90)
     io_pressure_percent: int = Field(default=25, ge=1, le=100)
-    capture_batch_bytes: int = Field(default=262144, ge=4096, le=2000000)
+    # The stored event limit: a journal record the sender captures must also
+    # be one the receiver stores whole.
+    capture_batch_bytes: int = Field(default=256_000, ge=4096, le=2000000)
+    # Between the resume and the high-water marks, routine repeats (a shape seen
+    # over a hundred times, no severity) are counted and summarised instead of
+    # stored, so the hard stop, which loses the newest lines, comes later.
+    shed_routine: bool = True
 
     @model_validator(mode="after")
     def watermarks(self):
@@ -111,6 +117,7 @@ class CaptureGate:
         self.congested = False
         self.io_congested = False
         self.last_snapshot = {}
+        self.shedding = False
 
     def check(self, *, delivery=False):
         pressure = io_pressure()
@@ -140,6 +147,11 @@ class CaptureGate:
         )
         self.congested = (
             usage["used_bytes"] >= usage["quota_bytes"] * ratio or pending >= maximum
+        )
+        resume = self.limits.resume_percent / 100
+        self.shedding = bool(self.limits.shed_routine) and not self.congested and (
+            usage["used_bytes"] >= usage["quota_bytes"] * resume
+            or pending >= self.limits.max_pending_events * resume
         )
         if self.congested:
             raise SenderWait("queue_high_water")

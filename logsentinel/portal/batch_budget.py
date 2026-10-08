@@ -8,7 +8,7 @@ from .store import dumps
 
 
 def input_ceiling(cfg, machine=None, store=None):
-    from .analysis import TRIAGE_SYSTEM
+    from .analysis import TRIAGE_SYSTEM, call_overhead_bytes
     from .context_budget import input_bytes
 
     machine = machine or {}
@@ -25,7 +25,10 @@ def input_ceiling(cfg, machine=None, store=None):
         0,
         input_bytes(store, cfg)
         - len((TRIAGE_SYSTEM + envelope).encode())
-        - 128,
+        # What the call itself adds, worked out from the same constants it uses,
+        # plus a little for separators. A fixed 128 here was 19 bytes short.
+        - call_overhead_bytes()
+        - 32,
     )
 
 

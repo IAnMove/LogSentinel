@@ -14,6 +14,7 @@ import os
 import secrets
 import sqlite3
 import time
+from datetime import datetime, timezone
 import threading
 from collections import OrderedDict
 from copy import deepcopy
@@ -21,6 +22,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from .models import Settings, destination_identity
+from .templates import template
 from .web_access import is_web_event
 
 
@@ -44,8 +46,25 @@ FINAL_DELIVERIES = ("delivered", "accepted", "failed", "muted", "cancelled", "un
 # Databases created before versioned migrations report version 1 and already
 # have the base schema below; each later step adds to it and is applied to old
 # and new databases alike, inside one transaction with its version bump.
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 5
+# Templates kept per source; beyond this the ones not seen for longest go.
+TEMPLATES_PER_SOURCE = 10_000
 MIGRATIONS = {
+    5: (
+        # The shape of each line (a hash of its template) so that the pending
+        # repeats of a routine line can be found and reviewed as one group.
+        "ALTER TABLE events ADD COLUMN shape TEXT NOT NULL DEFAULT ''",
+        "CREATE INDEX IF NOT EXISTS events_shape ON events(source_id,status,shape)",
+    ),
+    4: (
+        # How often each shape of line has been seen on a source, and a rank on
+        # every event, set when it arrives, that puts severe and rarely seen
+        # lines ahead of routine ones wherever a queue is read in order.
+        "CREATE TABLE IF NOT EXISTS templates(source_id TEXT NOT NULL,key TEXT NOT NULL,count INTEGER NOT NULL DEFAULT 0,first_seen REAL,last_seen REAL,PRIMARY KEY(source_id,key))",
+        "CREATE INDEX IF NOT EXISTS templates_age ON templates(source_id,last_seen)",
+        "ALTER TABLE events ADD COLUMN rank INTEGER NOT NULL DEFAULT 0",
+        "CREATE INDEX IF NOT EXISTS events_pick ON events(source_id,status,rank,received)",
+    ),
     3: (
         # Syslog priority 0-3 (emergency to error) marks an original the model
         # should see before routine lines when the backlog is longer than a batch.
@@ -354,7 +373,11 @@ class Store:
             if (
                 used_bytes + size > limit_bytes
                 or used_events + count > settings.sender_events_per_hour
-            ):
+            ) and (used_bytes or used_events):
+                # An empty window admits one request however large, because the
+                # alternative is refusing it for good: no wait can make a request
+                # fit an allowance it is bigger than on its own. The size of one
+                # request is bounded by the body limit, and the next one waits.
                 return max(1, int(start + QUOTA_WINDOW - now))
             db.execute(
                 "INSERT OR REPLACE INTO sender_quota VALUES(?,?,?,?)",
@@ -405,11 +428,46 @@ class Store:
     def prepare_sender(self):
         """One-time indexed migration and count, including legacy durable queues."""
         with self.connect() as db:
+            # A spool written between 2026-10-04 and this fix holds access-log
+            # lines marked sampled, which delivery never picks: put them back.
+            db.execute("DELETE FROM meta WHERE key='sender_pending_count' AND EXISTS (SELECT 1 FROM events WHERE status='sampled')")
+            db.execute("UPDATE events SET status='pending' WHERE status='sampled'")
             if not db.execute("SELECT 1 FROM meta WHERE key='sender_pending_count'").fetchone():
                 db.execute("INSERT INTO meta SELECT 'sender_pending_count',CAST(count(*) AS TEXT) FROM events WHERE status='pending'")
 
     def sender_pending(self):
         return int(self.meta("sender_pending_count") or 0)
+
+    def _rank(self, db, source_id, item, priority, now):
+        """Severity and rarity of a line, as a small number: higher goes first.
+
+        Severity comes from the syslog priority: 0-3 counts 2, 4 counts 1.
+        Rarity comes from how often this line's template has been seen on the
+        source, counted in the same transaction: the first time scores 4, up to
+        three times 3, up to ten 2, up to a hundred 1, beyond that 0. The first
+        sighting stays the rarest, which is right: first sightings are news.
+        """
+        key = "\x1f".join(template(item.get("service"), item.get("message")))
+        shape = hashlib.sha256(key.encode()).hexdigest()[:16]
+        row = db.execute(
+            "INSERT INTO templates VALUES(?,?,1,?,?) ON CONFLICT(source_id,key) "
+            "DO UPDATE SET count=count+1,last_seen=excluded.last_seen RETURNING count",
+            (source_id, key, now, now),
+        ).fetchone()
+        count = row[0]
+        if count == 1:
+            over = db.execute(
+                "SELECT count(*) FROM templates WHERE source_id=?", (source_id,)
+            ).fetchone()[0] - TEMPLATES_PER_SOURCE
+            if over > 0:
+                db.execute(
+                    "DELETE FROM templates WHERE source_id=? AND key IN "
+                    "(SELECT key FROM templates WHERE source_id=? ORDER BY last_seen LIMIT ?)",
+                    (source_id, source_id, over),
+                )
+        severity = 2 if type(priority) is int and 0 <= priority <= 3 else 1 if priority == 4 else 0
+        rarity = 4 if count == 1 else 3 if count <= 3 else 2 if count <= 10 else 1 if count <= 100 else 0
+        return severity * 5 + rarity, shape
 
     def ingest(self, source, entries, cursor_path=None, cursor=None):
         """Origin IDs are stable source positions or sender event IDs, never message hashes."""
@@ -432,8 +490,12 @@ class Store:
                 raise ValueError(
                     "Machine monitoring is paused or deleted; retain and retry these events"
                 )
+            now = time.time()
             unique = []
+            ranks = []
             seen = set()
+            shedding = bool(getattr(self, "shed_routine", False)) and source["id"] == "sender"
+            shed = json.loads(self.meta("sender_shed") or "{}") if shedding else {}
             for item in entries:
                 origin = item["origin"]
                 if (
@@ -445,7 +507,24 @@ class Store:
                 ):
                     continue
                 seen.add(origin)
+                priority = item.get("priority")
+                rank, shape = self._rank(db, source["id"], item, priority, now)
+                if shedding and rank == 0:
+                    # The spool is past its resume mark and this line is a
+                    # routine repeat: seen over a hundred times, no severity.
+                    # Keeping it would bring the hard stop closer, and at the
+                    # hard stop the newest lines are what die by rotation.
+                    # Count it instead; flush_shed() stores one summary line
+                    # per shape once the spool is back under the mark.
+                    entry = shed.setdefault(shape, dict(count=0, first=now, service=item.get("service", ""), example=str(item.get("message", ""))[:300]))
+                    entry["count"] += 1
+                    entry["last"] = now
+                    continue
+                seen.add(origin)
                 unique.append(dict(item, id=uid()))
+                ranks.append((rank, shape))
+            if shedding:
+                db.execute("INSERT OR REPLACE INTO meta VALUES('sender_shed',?)", (dumps(shed),))
             if unique:
                 raw = dumps(unique).encode()
                 usage = self.storage_usage()
@@ -457,7 +536,6 @@ class Store:
                         "Storage quota reached; incoming data was not acknowledged"
                     )
                 sid = uid()
-                now = time.time()
                 db.execute(
                     "INSERT INTO segments VALUES(?,?,?,?,?,?)",
                     (
@@ -471,9 +549,10 @@ class Store:
                 )
                 for i, item in enumerate(unique):
                     priority = item.get("priority")
+                    rank, shape = ranks[i]
                     db.execute(
-                        "INSERT INTO events(id,source_id,machine_id,segment_id,ordinal,received,event_time,service,status,origin,urgent) "
-                        "VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                        "INSERT INTO events(id,source_id,machine_id,segment_id,ordinal,received,event_time,service,status,origin,urgent,rank,shape) "
+                        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
                         (
                             item["id"],
                             source["id"],
@@ -486,9 +565,14 @@ class Store:
                             # Decided here, not when the review queue gets to it: a
                             # busy site would otherwise fill the queue with lines
                             # the model never reads and keep real ones waiting.
-                            "sampled" if is_web_event(item) else "pending",
+                            # A sender's spool is a delivery queue, not a review
+                            # queue: there everything is pending, or it would
+                            # never be sent and never leave the spool.
+                            "sampled" if is_web_event(item) and source["id"] != "sender" else "pending",
                             item["origin"],
                             int(type(priority) is int and 0 <= priority <= 3),
+                            rank,
+                            shape,
                         ),
                     )
                 self._metric(db, source["id"], "events_ingested", len(unique))
@@ -545,9 +629,13 @@ class Store:
         offset=0,
         ids=None,
         newest=False,
+        urgent=None,
     ):
         query = "SELECT * FROM events WHERE 1=1"
         params = []
+        if urgent is not None:
+            query += " AND urgent=?"
+            params.append(int(bool(urgent)))
         for key, value in [
             ("machine_id", machine_id),
             ("source_id", source_id),
@@ -645,6 +733,62 @@ class Store:
                             selected[candidate[0]] = None
         rows = {e["id"]: e for e in self.events(ids=list(selected), limit=limit)}
         return [rows[id] for id in selected if id in rows]
+
+    def pending_repeats(self, source_id, shapes, exclude, limit):
+        """Pending events of these shapes on a source, beyond the given ids."""
+        if not shapes or limit <= 0:
+            return []
+        with self.connect() as db:
+            ids = [
+                r[0]
+                for r in db.execute(
+                    "SELECT id FROM events WHERE source_id=? AND status='pending' AND shape IN (SELECT value FROM json_each(?)) "
+                    "AND id NOT IN (SELECT value FROM json_each(?)) ORDER BY received,rowid LIMIT ?",
+                    (source_id, dumps(sorted(shapes)), dumps(list(exclude)), limit),
+                )
+            ]
+        return self.events(ids=ids, limit=limit) if ids else []
+
+    def pending_for_delivery(self, limit):
+        """Pending spool rows: urgent first, then the highest rank, then the oldest."""
+        with self.connect() as db:
+            ids = [
+                r[0]
+                for r in db.execute(
+                    "SELECT id FROM events WHERE source_id='sender' AND status='pending' "
+                    "ORDER BY urgent DESC,rank DESC,received,rowid LIMIT ?",
+                    (limit,),
+                )
+            ]
+        picked = {e["id"]: e for e in self.events(ids=ids, limit=limit)} if ids else {}
+        return [picked[i] for i in ids if i in picked]
+
+    def flush_shed(self, source):
+        """Store one summary line per shape for the routine repeats that were not kept."""
+        shed = json.loads(self.meta("sender_shed") or "{}")
+        if not shed:
+            return 0
+        self.set_meta("sender_shed", "")
+        stamp = lambda t: datetime.fromtimestamp(t, timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        entries = [
+            dict(
+                origin=f"shed:{shape}:{int(entry['first'])}",
+                service=entry.get("service", ""),
+                message=(
+                    f"[LogSentinel] {entry['count']} routine lines like this were not stored between "
+                    f"{stamp(entry['first'])} and {stamp(entry['last'])} UTC because the sender queue was congested: "
+                    + entry.get("example", "")
+                ),
+                metadata={"shed": entry["count"]},
+            )
+            for shape, entry in shed.items()
+        ]
+        return self.ingest(source, entries)
+
+    def count_rejected(self):
+        """Events a receiver refused as invalid and the sender set aside."""
+        with self.connect() as db:
+            return db.execute("SELECT count(*) FROM events WHERE status='rejected'").fetchone()[0]
 
     def mark(self, ids, status):
         if not ids:

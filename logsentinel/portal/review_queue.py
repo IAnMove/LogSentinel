@@ -29,19 +29,25 @@ PROVIDER_RETRY_LIMIT = 100
 
 
 EXTRA_SAMPLES = 3
+# How many events beyond max_events a batch may absorb as routine repeats.
+REPEAT_FOLD_FACTOR = 10
 # Share of a batch that urgent originals may take while routine ones wait, so a
 # noisy error source cannot starve the rest of the machine's logs.
 URGENT_SHARE = 0.75
 
 
 def pick_oldest_urgent_first(db, machine_id, source_id, condition, cutoff, limit):
-    """Choose a batch: errors and worse first, oldest first within each kind.
+    """Choose a batch: errors and worse first, then by rank, then oldest first.
 
     The queue used to be strictly first in, first out, so a critical line
     waited behind every routine line received before it."""
+    # Within each kind, the highest rank first (severity, then how rarely the
+    # line's shape has been seen on this source) and the oldest among equals.
+    # Oldest-first alone sent a fresh line that had never been seen before
+    # behind every routine line received before it.
     base = (
         "SELECT id FROM events WHERE machine_id=? AND source_id=? AND urgent=? "
-        "AND status IN ('pending','capacity') AND " + condition + " ORDER BY received,rowid LIMIT ?"
+        "AND status IN ('pending','capacity') AND " + condition + " ORDER BY rank DESC,received,rowid LIMIT ?"
     )
     urgent = db.execute(base, (machine_id, source_id, 1, cutoff, limit)).fetchall()
     routine = db.execute(base, (machine_id, source_id, 0, cutoff, limit)).fetchall()
@@ -107,6 +113,13 @@ class ReviewQueue:
                 "UPDATE jobs SET status='cancelled',error=?,updated=? WHERE id=?",
                 (reason, time.time(), job),
             )
+        # Triage saves a severe candidate without alerting, because the alert
+        # waits for the verification this job was going to run. Cancelling the
+        # job ends that wait. The evidence goes back to the queue, but if it has
+        # expired or an exclusion now covers it, nothing will ever review it
+        # again, and the problem would stay open and silent.
+        if batch.get("problems"):
+            self.alert_unverified(batch, batch["problems"])
 
     def create(
         self,
@@ -198,6 +211,50 @@ class ReviewQueue:
             )
         return job, batch, cfg
 
+    def fold_repeats(self, candidates, cfg, rules):
+        """Bring the pending repeats of a shape picked more than once into the batch.
+
+        A pick is capped at max_events, so five thousand identical lines took
+        ten batches and ten calls although compaction folds them into one group
+        each time. When a shape appears at least twice among the candidates it
+        is routine; its other pending events on that source join the batch,
+        bounded, and the whole shape is represented as one counted group with
+        examples. Everything cited by the model is still a real event id.
+        """
+        by_source = {}
+        for event in candidates:
+            # Routine means seen more than a hundred times on the source, which
+            # the rank records as a rarity of zero; a shape that is merely
+            # present twice in a batch is not folded, so forty distinct test
+            # lines or twenty real ones are still reviewed one by one.
+            if event.get("shape") and event.get("rank", 0) % 5 == 0:
+                by_source.setdefault(event["source_id"], Counter())[event["shape"]] += 1
+        repeated = {
+            source_id: {shape for shape, n in counts.items() if n >= 2}
+            for source_id, counts in by_source.items()
+        }
+        if not any(repeated.values()):
+            return candidates
+        known = {e["id"] for e in candidates}
+        # store.events() reads at most 5000 rows at once and the frozen batch
+        # is checked against it whole, so a batch never exceeds that.
+        room = min(cfg.max_events * REPEAT_FOLD_FACTOR, 5000 - len(candidates))
+        extra = []
+        for source_id, shapes in repeated.items():
+            if not shapes or room <= 0:
+                continue
+            pulled = self.store.pending_repeats(source_id, shapes, known, room)
+            pulled = [e for e in pulled if not excluded(self.store, e, rules) and not is_web_event(e)]
+            extra.extend(pulled)
+            known.update(e["id"] for e in pulled)
+            room -= len(pulled)
+        folded = []
+        for event in candidates + extra:
+            if event.get("shape") in repeated.get(event["source_id"], ()):
+                event = dict(event, _shape_group=True)
+            folded.append(event)
+        return folded
+
     def prepare(self, machine, cfg, rotation):
         from .analysis import interleave_services
 
@@ -283,6 +340,7 @@ class ReviewQueue:
             progressed = True
         if not candidates:
             return None, progressed
+        candidates = self.fold_repeats(candidates, cfg, rules)
         ceiling = input_ceiling(cfg, machine, self.store)
         tuning = batch_budget(self.store, cfg, ceiling)
         self.store.set_meta("batch_tuning", dumps(tuning))
@@ -467,6 +525,9 @@ class ReviewQueue:
         by_id = {e["id"]: e for e in self.store.events(ids=wanted, limit=100)}
         originals = [by_id[i] for i in wanted if i in by_id]
         originals += [e for e in self.store.neighbors(wanted) if e["id"] not in by_id]
+        # The neighbours of an error are whatever was written next to it, which
+        # in a folder that holds an access log is visitors' requests.
+        originals = [e for e in originals if not is_web_event(e)]
         with self.store.connect() as db:
             oldest = db.execute(
                 "SELECT min(s.created) FROM events e JOIN segments s ON s.id=e.segment_id WHERE e.id IN (SELECT value FROM json_each(?))",
@@ -973,7 +1034,14 @@ class ReviewQueue:
                 from .batch_budget import profile_key
                 self.store.set_meta("context_conservative:" + profile_key(cfg), str(time.time() + 300))
                 self.cancel(job, batch, "Context rejected; originals rescheduled with a conservative bound")
-                return int(called), 0
+                # Refused before anything was sent: not one of the cycle's
+                # model calls, which it used to spend without a request. The
+                # machine gives up its turn for a while instead, since the
+                # same batch would be packed and refused again at once.
+                if called:
+                    self.analyzer.calls_started -= 1
+                self.store.set_meta("review_prepare_retry:" + machine["id"], str(time.time() + 30))
+                return 0, 0
             shared = isinstance(exc, (httpx.RequestError, TimeoutError)) or (
                 isinstance(exc, httpx.HTTPStatusError) and (exc.response.status_code in (401, 403, 429) or exc.response.status_code >= 500)
             )

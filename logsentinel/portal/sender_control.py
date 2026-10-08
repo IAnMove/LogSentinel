@@ -53,8 +53,15 @@ class SenderControl:
                 capture.get("ok", False)
                 and time.time() - capture.get("checked", 0) > 90
             )
+            delivery = cache.get("delivery", {})
+            # A delivery that has been failing for ten minutes is stuck, whatever
+            # the capture is doing; the central used to see "ok" because only
+            # the capture was asked. A fresh failure may still be an outage.
+            delivery_blocked = not delivery.get("ok", True) and time.time() - (
+                delivery.get("last_success") or delivery.get("checked") or time.time()
+            ) > 600
             payload = dict(
-                ok=capture.get("ok", False) and not capture_stalled,
+                ok=capture.get("ok", False) and not capture_stalled and not delivery_blocked,
                 pending=await blocking(self.store.sender_pending),
             )
             if not legacy:
@@ -76,7 +83,8 @@ class SenderControl:
                         if capture_stalled
                         else capture.get("code", "")
                     ),
-                    delivery_code=cache.get("delivery", {}).get("code", ""),
+                    delivery_code="delivery_blocked" if delivery_blocked else delivery.get("code", ""),
+                    rejected=await blocking(self.store.count_rejected),
                     build=__version__,
                     io_pressure_percent=io_pressure(),
                 )

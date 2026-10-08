@@ -223,11 +223,22 @@ function formData(form) {
   return result;
 }
 async function refresh() {
+  // What the person was looking at when this started. The answer can take
+  // seconds on a loaded machine, and the 15-second poll decides to run before it
+  // asks. If they have moved to another view, or opened a form to edit, by the
+  // time it arrives, rebuilding the page now would throw away what they typed.
+  const viewAtStart = view,
+    editAtStart = edit;
   S = await api("/api/state");
+  if (view !== viewAtStart || edit !== editAtStart) {
+    // Keep the data and the status bar current; the next refresh redraws.
+    drawMonitor(S.monitor);
+    return;
+  }
   if (
     !S.machine.length &&
     !S.setup?.completed &&
-    !sessionStorage.getItem("setup-dismissed")
+    !sessionFlag("setup-dismissed")
   )
     view = "setup";
   $("#login").hidden = true;
@@ -246,6 +257,27 @@ async function refresh() {
   drawMonitor(S.monitor);
   await render();
 }
+// Opening or closing a form rebuilds the page, and the button that was pressed
+// goes with it, so focus fell back to <body> and a keyboard or screen-reader user
+// started again from the top. Open: the first field. Close: the page heading,
+// where moving to another view already puts it.
+function openForm(value) {
+  edit = value;
+  render()
+    .then(() => {
+      const first = $(
+        "#content form input:not([type=hidden]):not([disabled]), #content form select, #content form textarea",
+      );
+      (first || $("#page-title")).focus();
+    })
+    .catch((e) => notice(e.message, true));
+}
+function closeForm() {
+  edit = null;
+  render()
+    .then(() => $("#page-title").focus({ preventScroll: true }))
+    .catch((e) => notice(e.message, true));
+}
 function navigate(v) {
   // Only a navigation animates the content in. A background refresh rebuilds
   // the same view and must not flash.
@@ -255,7 +287,7 @@ function navigate(v) {
     chatDraft = "";
   }
   if (view === "setup" && v !== "setup")
-    sessionStorage.setItem("setup-dismissed", "1");
+    setSessionFlag("setup-dismissed", "1");
   view = v;
   edit = null;
   offset = 0;
@@ -564,10 +596,7 @@ function objectView(root) {
     ),
     button(
       t("Añadir"),
-      () => {
-        edit = {};
-        render();
-      },
+      () => openForm({}),
       "",
     ),
   );
@@ -580,10 +609,7 @@ function objectView(root) {
         : [t("Nombre"), t("Máquina"), t("Tipo"), t("Estado"), t("Acciones")],
       items.map((obj) => {
         const b = [
-          button(t("Editar"), () => {
-            edit = obj;
-            render();
-          }),
+          button(t("Editar"), () => openForm(obj)),
         ];
         if (kind === "machine") {
           if (obj.deletion_pending) b.length = 0;
@@ -706,10 +732,12 @@ function senderHealthSummary(health) {
     disk_free_reserve: ["Pausa por espacio libre insuficiente", "Paused: low free disk space"],
     journal_retention_gap: ["Hueco de cobertura: cursor del journal no disponible", "Coverage gap: journal cursor unavailable"],
     control_unavailable: ["Sin autorización reciente del receptor", "Receiver control lease unavailable"],
+    delivery_blocked: ["Entrega atascada: el receptor rechaza o no responde desde hace más de 10 min", "Delivery stuck: the receiver has refused or not answered for over 10 min"],
   };
   const code = sender.capture_code || sender.delivery_code;
   const label = labels[code];
   let text = " · " + bilingual("Cola del cliente: ", "Client queue: ") + health.sender_pending;
+  if (health.sender_rejected) text += " · " + health.sender_rejected + bilingual(" rechazados por el receptor (ver spool-status)", " refused by the receiver (see spool-status)");
   if (sender.quota_bytes)
     text += " · " + Math.round(sender.used_bytes / 1048576) + "/" + Math.round(sender.quota_bytes / 1048576) + " MiB";
   if (code) text += " · " + (label ? bilingual(...label) : code);
@@ -904,10 +932,7 @@ function objectForm(kind, o) {
   submit.type = "submit";
   tools.append(
     submit,
-    button(t("Cancelar"), () => {
-      edit = null;
-      render();
-    }),
+    button(t("Cancelar"), closeForm),
   );
   f.append(tools);
   f.onsubmit = async (ev) => {
@@ -1887,6 +1912,10 @@ pollWhileVisible(
     );
   },
 );
+// #notice is a live region: writing the same text into it again makes a screen
+// reader read it again. A poll that keeps failing says so once, then stays quiet
+// until it has worked.
+let lastPollError = "";
 pollWhileVisible(() => true, 15000, async () => {
   if ($("#shell").hidden || view !== "summary" || $("#modal").open) return;
   // This rebuilds the whole content section every 15 seconds. Keeping the data
@@ -1899,5 +1928,10 @@ pollWhileVisible(() => true, 15000, async () => {
   if (selection && !selection.isCollapsed) return;
   const top = window.scrollY;
   await refresh();
+  lastPollError = "";
   if (window.scrollY !== top) window.scrollTo(0, top);
-}, (e) => notice(e.message, true));
+}, (e) => {
+  if (e.message === lastPollError) return;
+  lastPollError = e.message;
+  notice(e.message, true);
+});

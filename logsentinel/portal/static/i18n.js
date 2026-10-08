@@ -647,6 +647,22 @@ Object.assign(translations, {
 const reverseTranslations = Object.fromEntries(
   Object.entries(translations).map(([es, en]) => [en, es]),
 );
+// Browser storage can be disabled or throw. A flag kept for the session is a
+// convenience, so reading or writing it must never stop the portal from loading.
+function sessionFlag(name) {
+  try {
+    return sessionStorage.getItem(name);
+  } catch {
+    return null;
+  }
+}
+function setSessionFlag(name, value) {
+  try {
+    sessionStorage.setItem(name, value);
+  } catch {
+    /* The choice lasts until the page is reloaded. */
+  }
+}
 let locale = "en";
 try {
   locale = localStorage.getItem("logsentinel-language") || "en";

@@ -533,6 +533,15 @@ INGEST_MAX_CONNECTIONS = 200
 # Applied to every generated unit. A log reader needs no privilege beyond reading
 # the files it was granted, so the unit drops capabilities and write access up front
 # instead of relying on the operator to remember.
+# Resource bounds for the portal. Memory is throttled, not killed: a large
+# import or a batch of five thousand events must finish, slowly if it must.
+# No CPUQuota by default, since the detector scan needs the CPU; the install
+# command offers one for a shared host.
+SERVICE_RESOURCES = """Nice=5
+IOSchedulingClass=best-effort
+IOSchedulingPriority=6
+MemoryHigh=768M
+OOMScoreAdjust=300"""
 SERVICE_HARDENING = """NoNewPrivileges=yes
 CapabilityBoundingSet=
 AmbientCapabilities=
@@ -587,12 +596,45 @@ def _prepare_service_data(path, account_info=None):
         os.close(fd)
 
 
+def _unreachable_parent(path, account_info):
+    """The first directory above `path` the account cannot search, or None.
+
+    A venv in the installer's home is the documented install, and a home is
+    usually mode 0700, so a system unit that names another account points its
+    ExecStart at a Python that account cannot reach and fails at start.
+    Supplementary groups are not consulted: a false warning costs a sentence, a
+    missed one costs a service that never starts.
+    """
+    import stat as st
+
+    current = Path(path).resolve()
+    for parent in list(current.parents)[::-1]:
+        try:
+            info = os.stat(parent)
+        except OSError:
+            return parent
+        mode = info.st_mode
+        searchable = (
+            mode & st.S_IXOTH
+            or (info.st_uid == account_info.pw_uid and mode & st.S_IXUSR)
+            or (info.st_gid == account_info.pw_gid and mode & st.S_IXGRP)
+        )
+        if not searchable:
+            return parent
+    return None
+
+
 @service_app.command(name="install")
 def service_install(
     system: bool = typer.Option(False, "--system", help="Install system-wide service (/etc/systemd/system)"),
     run_as: Optional[str] = typer.Option(None, "--run-as", help="Account for a system service (default: current user)"),
     allow_root: bool = typer.Option(False, "--allow-root", help="Permit a system service running as root"),
     legacy: bool = typer.Option(False, "--legacy", help="Install the old CLI monitor instead of the portal"),
+    port: int = typer.Option(8765, "--port", help="Panel port the unit starts the portal on"),
+    ingest_listen: Optional[str] = typer.Option(None, "--ingest-listen", help="HOST:PORT for the reception listener, as for `portal`"),
+    tls_cert: Optional[str] = typer.Option(None, "--tls-cert", help="Certificate for the reception listener"),
+    tls_key: Optional[str] = typer.Option(None, "--tls-key", help="Private key for the reception listener"),
+    cpu_quota: Optional[int] = typer.Option(None, "--cpu-quota", min=5, max=800, help="Percent of one CPU the portal may use (systemd CPUQuota); unset means no limit"),
 ) -> None:
     """Generate and install a systemd user or system unit for the portal."""
     import getpass
@@ -637,11 +679,30 @@ def service_install(
         start = f"{_unit_path(sys.executable, command=True)} -m logsentinel.cli run"
         description = "LogSentinel legacy log monitor"
     else:
+        if ingest_listen:
+            _split_listen(ingest_listen)
+            if bool(tls_cert) != bool(tls_key):
+                raise typer.BadParameter("Pass both --tls-cert and --tls-key, or neither")
         start = (
             f"{_unit_path(sys.executable, command=True)} -m logsentinel.cli portal "
-            f"--data-dir {_unit_path(data_directory, command=True)} --port 8765"
+            f"--data-dir {_unit_path(data_directory, command=True)} --port {int(port)}"
         )
+        if ingest_listen:
+            start += f" --ingest-listen {_unit_path(ingest_listen, command=True)}"
+            if tls_cert and tls_key:
+                start += (
+                    f" --tls-cert {_unit_path(Path(tls_cert).expanduser().absolute(), command=True)}"
+                    f" --tls-key {_unit_path(Path(tls_key).expanduser().absolute(), command=True)}"
+                )
         description = "LogSentinel local log review portal"
+    if account_info:
+        blocked = _unreachable_parent(sys.executable, account_info)
+        if blocked:
+            console.print(
+                f"[yellow]Warning:[/yellow] {account_info.pw_name} cannot search {blocked}, so it will not be able "
+                f"to run {sys.executable}. Install LogSentinel where that account can reach it (for example a "
+                "virtualenv under its own home or under /opt) and install the unit from there.",
+            )
     unit_content = f"""[Unit]
 Description={description}
 After=network.target
@@ -652,7 +713,8 @@ Type=simple
 Restart=on-failure
 RestartSec=5s
 Environment=PYTHONUNBUFFERED=1
-{writable}{SERVICE_HARDENING}
+{writable}{SERVICE_RESOURCES}
+{f"CPUQuota={int(cpu_quota)}%" + chr(10) if cpu_quota else ""}{SERVICE_HARDENING}
 
 [Install]
 WantedBy=default.target
@@ -904,6 +966,7 @@ def prepare_host(
     """Create the agent's account and grant it read access. Shows the plan before acting."""
     from logsentinel import hostprep
     try:
+        hostprep.validate_account(account)
         targets = [hostprep.check_source(item) for item in (source or [])]
     except ValueError as refusal:
         raise typer.BadParameter(str(refusal)) from None
@@ -958,6 +1021,7 @@ def spool_status(spool: str = typer.Option(..., "--spool")) -> None:
     with sqlite3.connect(path.as_uri() + "?mode=ro", uri=True) as db:
         count = db.execute("SELECT value FROM meta WHERE key='sender_pending_count'").fetchone()
         counts = dict(pending=int(count[0]) if count else None)
+        counts["rejected"] = db.execute("SELECT count(*) FROM events WHERE status='rejected'").fetchone()[0]
         oldest = db.execute("SELECT min(received) FROM events WHERE status='pending'").fetchone()[0]
         workers = {key: json.loads(value) for key, value in db.execute("SELECT key,value FROM meta WHERE key IN ('sender_capture','sender_delivery','sender_quarantine','sender_control')")}
         cfg=json.loads(db.execute("SELECT value FROM meta WHERE key='settings'").fetchone()[0])
@@ -973,30 +1037,40 @@ def spool_status(spool: str = typer.Option(..., "--spool")) -> None:
 def restore_backup(backup: str, data_dir: str = typer.Option(..., "--data-dir")) -> None:
     """Restore a portal backup into a NEW directory (never overwrite live data)."""
     import sqlite3
-    import shutil
     target = Path(data_dir).expanduser().resolve()
     if target.exists():
         raise typer.BadParameter("Restore target must not exist")
     source = Path(backup).expanduser().resolve()
-    with sqlite3.connect(source.as_uri()+"?mode=ro", uri=True) as conn:
-        if conn.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
-            raise typer.BadParameter("Backup integrity check failed")
-        from logsentinel.portal.store import SCHEMA_VERSION, schema_version
+    if not source.is_file():
+        raise typer.BadParameter("Backup file not found")
+    from logsentinel.portal.store import SCHEMA_VERSION, Store, schema_version
 
-        found = schema_version(conn)
-        if found is None or found > SCHEMA_VERSION:
-            raise typer.BadParameter("Unsupported backup schema")
-    target.mkdir(mode=0o700, parents=True)
-    shutil.copyfile(source, target / "sentinel.db")
+    try:
+        with sqlite3.connect(source.as_uri() + "?mode=ro", uri=True) as conn:
+            if conn.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
+                raise typer.BadParameter("Backup integrity check failed")
+            found = schema_version(conn)
+            if found is None or found > SCHEMA_VERSION:
+                raise typer.BadParameter("Unsupported backup schema")
+            target.mkdir(mode=0o700, parents=True)
+            # SQLite's own copy, through the connection, takes what the write-
+            # ahead log still holds. Copying the file took only the main file,
+            # so a copy made from a running portal's database silently lacked
+            # its latest committed rows.
+            with sqlite3.connect(target / "sentinel.db") as copy:
+                conn.backup(copy)
+    except sqlite3.DatabaseError as exc:
+        raise typer.BadParameter(f"Not a LogSentinel database: {source.name} ({exc})") from None
     os.chmod(target / "sentinel.db", 0o600)
-    from logsentinel.portal.store import Store
-
     restored = Store(target)
-    restored.write_access_key()
+    # The backup carries the access key of the portal it came from. A copy that
+    # is about to be used somewhere else gets its own; the old one stays in the
+    # retired list so it is still hidden in text, and opens nothing.
+    restored.rotate_admin_token()
     console.print(
-        f"Restored to {target}. The backup includes secrets and the previous "
-        "access key; rotate the access key, sender tokens and notification "
-        "credentials before using this copy.",
+        f"Restored to {target}. The copy has a new access key in access-key.txt; "
+        "the backup also includes sender tokens and notification credentials, "
+        "rotate those before using this copy.",
         markup=False,
     )
 

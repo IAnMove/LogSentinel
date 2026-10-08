@@ -51,7 +51,15 @@
   ],
   "issue_lines": [
    1
-  ]
+  ],
+  "expect": {
+   "signals": [
+    "oom"
+   ],
+   "instruction_like": [
+    0
+   ]
+  }
  },
  {
   "id": "benign-keyword",
