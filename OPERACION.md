@@ -216,7 +216,7 @@ Las unidades que generan `service install` y `setup-client` limitan lo que el pr
 - **Exceso de líneas en un emisor.** La cola admite 100 000 eventos o 1 GiB. Por encima del 60 % de cualquiera de los dos, el emisor deja de guardar las
   **repeticiones rutinarias** (una forma de línea vista más de cien veces en esa fuente y sin gravedad) y las cuenta; las líneas raras, nuevas o con
   prioridad 0-3 se guardan y se envían primero. Al bajar del 60 % guarda una línea de resumen por forma («N routine lines like this were not stored
-  between … and …») que el central revisa como cualquier otra. Al 100 % se para la captura, como antes. Se desactiva con `"shed_routine": false` en los
+  between … and …») que el central revisa como cualquier otra. Al tope (85 % del espacio o el 100 % de los 100 000 eventos) se para la captura, como antes. Se desactiva con `"shed_routine": false` en los
   `limits` del emisor; sin ello, el tope se alcanza antes y lo que se pierde por rotación son las líneas más nuevas.
 - **El servidor del modelo no lo controla LogSentinel.** Un modelo que no cabe en RAM es lo que más puede colgar un equipo: ponle `MemoryMax` en su
   unidad, usa `-ngl 0` sin GPU, o sírvelo desde otra máquina.
