@@ -424,6 +424,7 @@ class Store:
         return dict(allocated_bytes=allocated, reusable_bytes=reusable,
                     used_bytes=max(0, allocated - reusable),
                     quota_bytes=settings.disk_limit_mb * 1024**2,
+                    warning_bytes=settings.disk_limit_mb * 1024**2 * settings.storage_warning_percent // 100,
                     reserve_bytes=settings.min_free_mb * 1024**2,
                     disk_free_bytes=shutil.disk_usage(self.directory).free)
 
@@ -471,8 +472,29 @@ class Store:
         rarity = 4 if count == 1 else 3 if count <= 3 else 2 if count <= 10 else 1 if count <= 100 else 0
         return severity * 5 + rarity, shape
 
+    def shedding(self, source, usage):
+        """Whether routine repeats of this source are counted instead of stored.
+
+        A sender's spool sheds while its capture gate says so. The central
+        sheds between its storage warning mark and the point where it refuses
+        everything, so a disk that is filling up keeps the rare and the
+        severe lines and loses only repeats it has seen over a hundred times.
+        """
+        if source["id"] == "sender":
+            return bool(getattr(self, "shed_routine", False))
+        return (
+            usage["used_bytes"] >= usage["warning_bytes"]
+            or usage["disk_free_bytes"] < 2 * usage["reserve_bytes"]
+        )
+
     def ingest(self, source, entries, cursor_path=None, cursor=None):
         """Origin IDs are stable source positions or sender event IDs, never message hashes."""
+        usage = self.storage_usage()
+        shedding = self.shedding(source, usage)
+        shed_key = "shed:" + source["id"]
+        if not shedding and self.meta(shed_key):
+            # Back under the mark: the summary of what was counted goes first.
+            self.flush_shed(source)
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
             machine = db.execute(
@@ -496,8 +518,7 @@ class Store:
             unique = []
             ranks = []
             seen = set()
-            shedding = bool(getattr(self, "shed_routine", False)) and source["id"] == "sender"
-            shed = json.loads(self.meta("sender_shed") or "{}") if shedding else {}
+            shed = json.loads(self.meta(shed_key) or "{}") if shedding else {}
             for item in entries:
                 origin = item["origin"]
                 if (
@@ -512,12 +533,13 @@ class Store:
                 priority = item.get("priority")
                 rank, shape = self._rank(db, source["id"], item, priority, now)
                 if shedding and rank == 0:
-                    # The spool is past its resume mark and this line is a
-                    # routine repeat: seen over a hundred times, no severity.
-                    # Keeping it would bring the hard stop closer, and at the
-                    # hard stop the newest lines are what die by rotation.
-                    # Count it instead; flush_shed() stores one summary line
-                    # per shape once the spool is back under the mark.
+                    # Past the mark (a spool's resume mark, the central's
+                    # storage warning) and a routine repeat: seen over a
+                    # hundred times, no severity. Keeping it would bring the
+                    # hard stop closer, and at a sender's hard stop the newest
+                    # lines are what die by rotation. Count it instead;
+                    # flush_shed() stores one summary line per shape once the
+                    # store is back under the mark.
                     entry = shed.setdefault(shape, dict(count=0, first=now, service=item.get("service", ""), example=str(item.get("message", ""))[:300]))
                     entry["count"] += 1
                     entry["last"] = now
@@ -526,10 +548,9 @@ class Store:
                 unique.append(dict(item, id=uid()))
                 ranks.append((rank, shape))
             if shedding:
-                db.execute("INSERT OR REPLACE INTO meta VALUES('sender_shed',?)", (dumps(shed),))
+                db.execute("INSERT OR REPLACE INTO meta VALUES(?,?)", (shed_key, dumps(shed)))
             if unique:
                 raw = dumps(unique).encode()
-                usage = self.storage_usage()
                 if usage['disk_free_bytes'] < usage['reserve_bytes'] + len(raw)*2:
                     import errno
                     raise OSError(errno.ENOSPC, 'Storage free-space reserve reached; incoming data was not acknowledged')
@@ -767,10 +788,15 @@ class Store:
 
     def flush_shed(self, source):
         """Store one summary line per shape for the routine repeats that were not kept."""
-        shed = json.loads(self.meta("sender_shed") or "{}")
+        shed = json.loads(self.meta("shed:" + source["id"]) or "{}")
         if not shed:
             return 0
-        self.set_meta("sender_shed", "")
+        self.set_meta("shed:" + source["id"], "")
+        reason = (
+            "the sender queue was congested"
+            if source["id"] == "sender"
+            else "the observer's storage was near its limit"
+        )
         stamp = lambda t: datetime.fromtimestamp(t, timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
         entries = [
             dict(
@@ -778,7 +804,7 @@ class Store:
                 service=entry.get("service", ""),
                 message=(
                     f"[LogSentinel] {entry['count']} routine lines like this were not stored between "
-                    f"{stamp(entry['first'])} and {stamp(entry['last'])} UTC because the sender queue was congested: "
+                    f"{stamp(entry['first'])} and {stamp(entry['last'])} UTC because {reason}: "
                     + entry.get("example", "")
                 ),
                 metadata={"shed": entry["count"]},
@@ -786,6 +812,21 @@ class Store:
             for shape, entry in shed.items()
         ]
         return self.ingest(source, entries)
+
+    def flush_shed_pending(self):
+        """Store the summaries of every source back under its mark; for quiet sources."""
+        with self.connect() as db:
+            keys = [
+                row[0]
+                for row in db.execute("SELECT key FROM meta WHERE key LIKE 'shed:%' AND value!=''")
+            ]
+        usage = self.storage_usage()
+        stored = 0
+        for key in keys:
+            source = self.get("source", key[len("shed:"):])
+            if source and not self.shedding(source, usage):
+                stored += self.flush_shed(source)
+        return stored
 
     def count_rejected(self):
         """Events a receiver refused as invalid and the sender set aside."""
