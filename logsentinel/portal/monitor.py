@@ -14,6 +14,7 @@ class Monitor:
         self.capture_heartbeat = None
         self.signature = None
         self.idle = True
+        self.held = None
 
     def reschedule(self):
         cfg = self.store.settings()
@@ -46,6 +47,18 @@ class Monitor:
             and not self.analyzer.running
         ):
             self.next_due = time.time() + cfg.interval_seconds
+            # At the quota or the free-disk reserve nothing new is accepted;
+            # a review would still write findings, revisions and deliveries.
+            # Wait instead; the storage check already reports the condition.
+            usage = self.store.storage_usage()
+            self.held = (
+                "storage"
+                if usage["used_bytes"] >= usage["quota_bytes"]
+                or usage["disk_free_bytes"] < usage["reserve_bytes"]
+                else None
+            )
+            if self.held:
+                return
             started = time.time()
             result = await self.analyzer.cycle()
             if self.analyzer.provider_failed:
@@ -221,6 +234,7 @@ class Monitor:
             "last_model_error": dict(last_error) if last_error else None,
             "model_timeout_seconds": cfg.llm.timeout_seconds,
             "retry_after": retry_after if retry_after > time.time() else None,
+            "held": self.held,
             "consecutive_failed_cycles": int(
                 self.store.meta("model_cycle_failures") or 0
             ),

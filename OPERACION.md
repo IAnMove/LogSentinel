@@ -216,7 +216,8 @@ Las unidades que generan `service install` y `setup-client` limitan lo que el pr
   `storage_warning_percent` (80 %) de la cuota o cuando queda menos del doble de la reserva libre; CRITICAL al agotar la cuota o la reserva. Los tres
   valores están en Salud y supervisión. Entre el aviso y el límite hace lo mismo que un emisor congestionado: cuenta las repeticiones rutinarias de
   cada fuente en vez de guardarlas y, al volver bajo el aviso (o en el barrido de cada hora), guarda una línea de resumen por forma; lo raro y lo
-  grave se guarda siempre.
+  grave se guarda siempre. Al agotar la cuota o la reserva, además, la revisión del modelo espera (el estado lo dice) en vez de seguir escribiendo
+  hallazgos; los detectores y la captura siguen, y la retención diaria libera sitio sola.
 - `IOWeight` e `IOSchedulingClass=idle` solo actúan con el planificador de E/S `bfq`; con `none` o `mq-deadline` (lo habitual en NVMe) no hacen nada.
   Compruébalo con `cat /sys/block/DISPOSITIVO/queue/scheduler`.
 - **Exceso de líneas en un emisor.** La cola admite 100 000 eventos o 1 GiB. Por encima del 60 % de cualquiera de los dos, el emisor deja de guardar las
