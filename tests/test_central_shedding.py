@@ -50,6 +50,54 @@ def test_routine_repeats_are_counted_above_the_warning_and_summarised_once_below
     assert not store.meta("shed:" + sid)
 
 
+def test_one_refused_summary_does_not_drop_another_sources_counts(client, monkeypatch):
+    c, store = client
+    _, sid_a = machine_source(c)
+    _, sid_b = machine_source(c)
+    source_a, source_b = store.get("source", sid_a), store.get("source", sid_b)
+    usage(monkeypatch, 100 * MiB)
+    store.ingest(source_a, [routine(n) for n in range(120)])
+    store.ingest(source_b, [routine(n) for n in range(120)])
+    usage(monkeypatch, 900 * MiB)
+    store.ingest(source_a, [routine(n) for n in range(120, 130)])
+    store.ingest(source_b, [routine(n) for n in range(120, 130)])
+    usage(monkeypatch, 100 * MiB)
+    real = Store.ingest
+
+    def fail_a(self, source, entries, cursor_path=None, cursor=None):
+        if source["id"] == sid_a and entries and str(entries[0].get("origin", "")).startswith("shed:"):
+            raise OSError("Storage quota reached; incoming data was not acknowledged")
+        return real(self, source, entries, cursor_path, cursor)
+
+    monkeypatch.setattr(Store, "ingest", fail_a)
+    assert store.flush_shed_pending() == 1
+    assert store.meta("shed:" + sid_a) and not store.meta("shed:" + sid_b)
+    assert "10 routine lines like this" in summaries(store, sid_b)[0]["message"]
+
+
+def test_a_paused_machine_keeps_shed_counts_until_monitoring_resumes(client, monkeypatch):
+    c, store = client
+    mid, sid = machine_source(c)
+    source = store.get("source", sid)
+    usage(monkeypatch, 100 * MiB)
+    store.ingest(source, [routine(n) for n in range(120)])
+    usage(monkeypatch, 900 * MiB)
+    store.ingest(source, [routine(n) for n in range(120, 130)])
+    data = store.get("machine", mid)
+    data.pop("id")
+    data["monitoring_paused"] = True
+    store.put("machine", data, mid)
+    usage(monkeypatch, 100 * MiB)
+    assert store.flush_shed_pending() == 0
+    assert store.flush_shed(source) == 0
+    assert store.meta("shed:" + sid) and not summaries(store, sid)
+    data["monitoring_paused"] = False
+    store.put("machine", data, mid)
+    assert store.flush_shed_pending() == 1
+    assert not store.meta("shed:" + sid)
+    assert "10 routine lines like this" in summaries(store, sid)[0]["message"]
+
+
 def test_a_quiet_source_gets_its_summary_from_the_hourly_sweep(client, monkeypatch):
     c, store = client
     _, sid = machine_source(c)

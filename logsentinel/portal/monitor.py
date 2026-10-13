@@ -46,7 +46,6 @@ class Monitor:
             and not self.analyzer.lock.locked()
             and not self.analyzer.running
         ):
-            self.next_due = time.time() + cfg.interval_seconds
             # At the quota or the free-disk reserve nothing new is accepted;
             # a review would still write findings, revisions and deliveries.
             # Wait instead; the storage check already reports the condition.
@@ -58,7 +57,12 @@ class Monitor:
                 else None
             )
             if self.held:
+                # Recheck on the next tick. Spending the whole interval here
+                # would leave a backlog (idle stays false, so the early wake
+                # above does not run) waiting after space has already returned.
+                self.next_due = time.time()
                 return
+            self.next_due = time.time() + cfg.interval_seconds
             started = time.time()
             result = await self.analyzer.cycle()
             if self.analyzer.provider_failed:

@@ -1,4 +1,5 @@
 import shutil
+from contextlib import contextmanager
 
 import pytest
 
@@ -19,6 +20,44 @@ def free_disk(monkeypatch, free):
 def set_reserve(store, mb):
     settings = store.settings().model_copy(update=dict(min_free_mb=mb))
     store.set_meta("settings", dumps(settings.model_dump()))
+
+
+def test_the_reserve_is_applied_to_the_snapshot_taken_under_the_write_lock(client, monkeypatch):
+    c, store = client
+    _, source_id = machine_source(c)
+    source = store.get("source", source_id)
+    locked = {"now": False}
+    original = Store.connect
+
+    @contextmanager
+    def connect(self):
+        with original(self) as db:
+            class Proxy:
+                def execute(self, sql, *args, **kwargs):
+                    if sql == "BEGIN IMMEDIATE":
+                        locked["now"] = True
+                    return db.execute(sql, *args, **kwargs)
+
+                def executemany(self, *args, **kwargs):
+                    return db.executemany(*args, **kwargs)
+
+                def __getattr__(self, name):
+                    return getattr(db, name)
+
+            yield Proxy()
+
+    def usage(self):
+        return dict(
+            allocated_bytes=0, reusable_bytes=0, used_bytes=0, quota_bytes=1000 * MiB,
+            warning_bytes=800 * MiB, reserve_bytes=512 * MiB,
+            disk_free_bytes=0 if locked["now"] else 10**12,
+        )
+
+    monkeypatch.setattr(Store, "connect", connect)
+    monkeypatch.setattr(Store, "storage_usage", usage)
+    with pytest.raises(OSError, match="free-space reserve"):
+        store.ingest(source, [dict(origin="a", message="one fresh line")])
+    assert store.events(limit=10) == []
 
 
 def test_ingest_refuses_below_the_reserve_and_the_reserve_is_configurable(client, monkeypatch):

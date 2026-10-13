@@ -1,5 +1,7 @@
 """While the central's storage is at its limit, the model review waits instead of writing more."""
 
+import time
+
 import pytest
 
 from logsentinel.portal.store import Store, dumps
@@ -38,5 +40,32 @@ async def test_the_review_waits_at_the_quota_or_the_reserve_and_resumes_after(cl
     assert cycles == [] and monitor.state()["held"] == "storage"
     usage(monkeypatch, 100 * MiB)
     monitor.next_due = 0
+    await monitor.tick()
+    assert cycles == [1] and monitor.state()["held"] is None
+
+
+@pytest.mark.asyncio
+async def test_a_backlog_does_not_keep_the_review_held_for_a_full_interval(client, monkeypatch):
+    c, store = client
+    monitor = c.app.state.monitor
+    store.set_meta(
+        "settings",
+        dumps(store.settings().model_copy(update=dict(enabled=True, interval_seconds=60)).model_dump()),
+    )
+    monitor.reschedule()
+    cycles = []
+
+    async def cycle():
+        cycles.append(1)
+        return {"calls": 1}
+
+    monkeypatch.setattr(monitor.analyzer, "cycle", cycle)
+    usage(monkeypatch, 1000 * MiB)
+    monitor.idle = False
+    monitor.next_due = 0
+    await monitor.tick()
+    assert cycles == [] and monitor.state()["held"] == "storage"
+    assert monitor.next_due <= time.time()
+    usage(monkeypatch, 100 * MiB)
     await monitor.tick()
     assert cycles == [1] and monitor.state()["held"] is None
