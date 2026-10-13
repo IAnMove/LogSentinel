@@ -2,6 +2,7 @@
 
 import pytest
 
+from logsentinel.portal.models import Settings
 from logsentinel.portal.sender_safety import CaptureGate, SenderLimits
 from logsentinel.portal.store import Store
 
@@ -66,6 +67,12 @@ class FakeStore:
 
     def sender_pending(self):
         return self.pending
+
+    def settings(self):
+        return Settings()
+
+    def set_meta(self, key, value):
+        pass
 
 
 @pytest.mark.parametrize("pending, shedding, stops", [(100, False, False), (70_000, True, False), (100_000, False, True)])

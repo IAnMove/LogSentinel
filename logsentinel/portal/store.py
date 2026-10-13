@@ -420,9 +420,11 @@ class Store:
         import shutil
         allocated = self.size()
         reusable = free_pages * page_size
+        settings = self.settings()
         return dict(allocated_bytes=allocated, reusable_bytes=reusable,
                     used_bytes=max(0, allocated - reusable),
-                    quota_bytes=self.settings().disk_limit_mb * 1024**2,
+                    quota_bytes=settings.disk_limit_mb * 1024**2,
+                    reserve_bytes=settings.min_free_mb * 1024**2,
                     disk_free_bytes=shutil.disk_usage(self.directory).free)
 
     def prepare_sender(self):
@@ -528,7 +530,7 @@ class Store:
             if unique:
                 raw = dumps(unique).encode()
                 usage = self.storage_usage()
-                if usage['disk_free_bytes'] < 32*1024**2 + len(raw)*2:
+                if usage['disk_free_bytes'] < usage['reserve_bytes'] + len(raw)*2:
                     import errno
                     raise OSError(errno.ENOSPC, 'Storage free-space reserve reached; incoming data was not acknowledged')
                 if usage['used_bytes'] + len(raw) * 2 > usage['quota_bytes']:
