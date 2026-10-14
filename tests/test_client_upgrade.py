@@ -2,6 +2,8 @@
 
 import json
 import os
+import sqlite3
+from contextlib import closing
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -219,6 +221,61 @@ def test_sender_backup_needs_a_new_file(tmp_path, monkeypatch):
     with pytest.raises(FileExistsError):
         setup.backup_sender(ctx.cfg, existing)
     assert existing.read_bytes() == b"planted"
+
+
+@pytest.mark.parametrize("journal_mode", ["DELETE", "WAL"])
+def test_sender_backup_preserves_live_sqlite_evidence(tmp_path, journal_mode):
+    spool = tmp_path / "spool"
+    spool.mkdir()
+    config = tmp_path / "config.json"
+    config.write_text(json.dumps({"spool": str(spool)}))
+    target = spool / "upgrade-backup.db"
+    with closing(sqlite3.connect(spool / "sentinel.db")) as source:
+        assert source.execute("PRAGMA journal_mode=" + journal_mode).fetchone() == (
+            journal_mode.lower(),
+        )
+        source.execute("CREATE TABLE evidence(value TEXT)")
+        source.execute("INSERT INTO evidence VALUES('pending log')")
+        source.commit()
+        setup.backup_sender(config, target)
+        with closing(sqlite3.connect(target.as_uri() + "?immutable=1", uri=True)) as saved:
+            assert saved.execute("PRAGMA integrity_check").fetchone() == ("ok",)
+            assert saved.execute("SELECT * FROM evidence").fetchall() == [("pending log",)]
+        assert source.execute("SELECT * FROM evidence").fetchall() == [("pending log",)]
+
+
+@pytest.mark.parametrize("failure_phase", ["backup", "adoption"])
+def test_failed_upgrade_does_not_promise_a_complete_backup(
+    tmp_path, monkeypatch, capsys, failure_phase
+):
+    ctx = arranged(tmp_path, monkeypatch, True)
+
+    def fail(*args):
+        if failure_phase == "adoption":
+            Path(args[1]).write_bytes(b"incomplete snapshot")
+        raise OSError("synthetic backup failure")
+
+    monkeypatch.setattr(
+        setup, "backup_sender" if failure_phase == "backup" else "adopt_backup", fail
+    )
+    with pytest.raises(OSError, match="synthetic backup failure"):
+        setup.upgrade_client(ctx.args, ctx.desired, ctx.runtime)
+    error = capsys.readouterr().err
+    (backup,) = ctx.install.glob("backup-*")
+    assert "Directorio de respaldo (la copia puede estar incompleta):" in error
+    assert str(backup) in error
+    assert "Copia coherente:" not in error
+    assert ctx.unit.read_text() == "old service"
+    assert ctx.cfg.read_bytes() == ctx.original_config
+    assert [(e["id"], e["origin"]) for e in ctx.store.events()] == ctx.expected
+    assert ctx.store.cursor("sender", "journal") == {"cursor": "last"}
+    assert not list(ctx.spool.glob("upgrade-backup-*"))
+    assert (ctx.install / "resume-logs").exists()
+    assert not any(c[:2] == ["systemctl", "start"] for c in ctx.calls)
+    if failure_phase == "backup":
+        assert not (backup / "sentinel.db").exists()
+    else:
+        assert (backup / "sentinel.db").read_bytes() == b"incomplete snapshot"
 
 
 def test_sender_unit_is_confined_and_systemd_accepts_it(tmp_path):

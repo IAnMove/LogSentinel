@@ -504,7 +504,7 @@ def upgrade_client(args, desired, runtime):
         subprocess.run(['systemctl','stop',unit.name],capture_output=True)
         unit.write_bytes(previous)
         subprocess.run(['systemctl','daemon-reload'],capture_output=True)
-        print('Actualización incompleta: cliente detenido; cola intacta. Copia:',backup,file=sys.stderr)
+        print('Actualización incompleta: cliente detenido; cola intacta. Directorio de respaldo (la copia puede estar incompleta):',backup,file=sys.stderr)
         if was_active:
             print('Estaba activo: se reanudará al repetir la actualización. Para que siga detenido, borra',resume,file=sys.stderr)
         raise
