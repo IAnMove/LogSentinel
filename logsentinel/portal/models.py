@@ -98,6 +98,9 @@ class Settings(Model):
     verification: Literal["important", "all", "manual"] = "important"
     retention_days: int = Field(default=30, ge=1, le=3650)
     disk_limit_mb: int = Field(default=1024, ge=32, le=1_000_000)
+    # Free disk LogSentinel leaves to the rest of the machine: below it nothing
+    # new is stored, so the observer never fills a disk itself.
+    min_free_mb: int = Field(default=512, ge=32, le=1_000_000)
     # Per sender, so one noisy or compromised machine cannot spend the shared
     # disk quota and the review budget on its own.
     sender_mb_per_hour: int = Field(default=256, ge=1, le=1_000_000)

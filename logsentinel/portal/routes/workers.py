@@ -58,6 +58,7 @@ def build_workers(ctx):
                 await telemetry.analyze_tick()
                 if time.time() - last_prune > 3600:
                     await asyncio.to_thread(store.prune)
+                    await asyncio.to_thread(store.flush_shed_pending)
                     last_prune = time.time()
                 store.set_meta("worker_error", "")
             except asyncio.CancelledError:

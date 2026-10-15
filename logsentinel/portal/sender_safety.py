@@ -11,6 +11,9 @@ from .models import Model
 from .journal_stream import JournalReadError
 
 
+from .store import dumps
+
+
 class SenderLimits(Model):
     max_pending_events: int = Field(default=100000, ge=100, le=10000000)
     min_free_mb: int = Field(default=256, ge=32, le=1000000)
@@ -118,6 +121,14 @@ class CaptureGate:
         self.io_congested = False
         self.last_snapshot = {}
         self.shedding = False
+        # The spool keeps the store's own free-disk reserve too. Make it the
+        # sender's, so the gate stops capture cleanly before the store refuses.
+        settings = store.settings()
+        if settings.min_free_mb != limits.min_free_mb:
+            store.set_meta(
+                "settings",
+                dumps(settings.model_copy(update=dict(min_free_mb=limits.min_free_mb)).model_dump()),
+            )
 
     def check(self, *, delivery=False):
         pressure = io_pressure()
