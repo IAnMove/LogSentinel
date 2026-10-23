@@ -3,6 +3,7 @@
 from datetime import datetime, timezone
 import gzip
 import json
+import shutil
 import math
 import os
 from pathlib import Path
@@ -370,11 +371,14 @@ class TelemetryStore:
                         "Sample ID was already used for different measurements"
                     )
                 return False
+            settings = self.store.settings()
             if (
                 self.store.size() + len(raw) * 4 + 32768
-                > self.store.settings().disk_limit_mb * 1024**2
+                > settings.disk_limit_mb * 1024**2
             ):
                 raise OSError("Storage quota reached")
+            if shutil.disk_usage(self.store.directory).free < settings.min_free_mb * 1024**2 + len(raw) * 4:
+                raise OSError("Storage free-space reserve reached")
             db.execute(
                 "INSERT INTO telemetry_samples VALUES(?,?,?,?,?,0)",
                 (machine, sample.id, sample.observed, now, gzip.compress(raw, mtime=0)),

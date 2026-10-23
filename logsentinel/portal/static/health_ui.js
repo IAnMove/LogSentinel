@@ -112,6 +112,15 @@ async function healthView(root) {
       S.settings.health_grace_seconds,
     ),
     field(
+      "min_free_mb",
+      bilingual(
+        "Espacio libre que se deja al equipo (MiB)",
+        "Free disk left to the machine (MiB)",
+      ),
+      "number",
+      S.settings.min_free_mb,
+    ),
+    field(
       "storage_warning_percent",
       bilingual(
         "Avisar al alcanzar esta parte de la cuota (%)",

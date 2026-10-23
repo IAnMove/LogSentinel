@@ -210,6 +210,17 @@ function drawMonitor(m) {
         "monitor-warning",
       ),
     );
+  if (m.held === "storage")
+    details.append(
+      el(
+        "div",
+        bilingual(
+          "Revisión en espera: el almacenamiento del central está en su límite",
+          "Review waiting: the observer's storage is at its limit",
+        ),
+        "monitor-warning",
+      ),
+    );
   if (m.failed_jobs)
     details.append(
       el(

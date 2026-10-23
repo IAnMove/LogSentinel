@@ -420,9 +420,12 @@ class Store:
         import shutil
         allocated = self.size()
         reusable = free_pages * page_size
+        settings = self.settings()
         return dict(allocated_bytes=allocated, reusable_bytes=reusable,
                     used_bytes=max(0, allocated - reusable),
-                    quota_bytes=self.settings().disk_limit_mb * 1024**2,
+                    quota_bytes=settings.disk_limit_mb * 1024**2,
+                    warning_bytes=settings.disk_limit_mb * 1024**2 * settings.storage_warning_percent // 100,
+                    reserve_bytes=settings.min_free_mb * 1024**2,
                     disk_free_bytes=shutil.disk_usage(self.directory).free)
 
     def prepare_sender(self):
@@ -469,10 +472,34 @@ class Store:
         rarity = 4 if count == 1 else 3 if count <= 3 else 2 if count <= 10 else 1 if count <= 100 else 0
         return severity * 5 + rarity, shape
 
+    def shedding(self, source, usage):
+        """Whether routine repeats of this source are counted instead of stored.
+
+        A sender's spool sheds while its capture gate says so. The central
+        sheds between its storage warning mark and the point where it refuses
+        everything, so a disk that is filling up keeps the rare and the
+        severe lines and loses only repeats it has seen over a hundred times.
+        """
+        if source["id"] == "sender":
+            return bool(getattr(self, "shed_routine", False))
+        return (
+            usage["used_bytes"] >= usage["warning_bytes"]
+            or usage["disk_free_bytes"] < 2 * usage["reserve_bytes"]
+        )
+
     def ingest(self, source, entries, cursor_path=None, cursor=None):
         """Origin IDs are stable source positions or sender event IDs, never message hashes."""
+        shed_key = "shed:" + source["id"]
+        if not self.shedding(source, self.storage_usage()) and self.meta(shed_key):
+            # Back under the mark: the summary of what was counted goes first.
+            self.flush_shed(source)
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
+            # Shedding and the reserve are decided under the write lock. The
+            # snapshot that chose the flush above does not include that summary
+            # or any ingest that committed while this one waited.
+            usage = self.storage_usage()
+            shedding = self.shedding(source, usage)
             machine = db.execute(
                 "SELECT data FROM objects WHERE kind='machine' AND id=?",
                 (source["machine_id"],),
@@ -494,8 +521,7 @@ class Store:
             unique = []
             ranks = []
             seen = set()
-            shedding = bool(getattr(self, "shed_routine", False)) and source["id"] == "sender"
-            shed = json.loads(self.meta("sender_shed") or "{}") if shedding else {}
+            shed = json.loads(self.meta(shed_key) or "{}") if shedding else {}
             for item in entries:
                 origin = item["origin"]
                 if (
@@ -510,12 +536,13 @@ class Store:
                 priority = item.get("priority")
                 rank, shape = self._rank(db, source["id"], item, priority, now)
                 if shedding and rank == 0:
-                    # The spool is past its resume mark and this line is a
-                    # routine repeat: seen over a hundred times, no severity.
-                    # Keeping it would bring the hard stop closer, and at the
-                    # hard stop the newest lines are what die by rotation.
-                    # Count it instead; flush_shed() stores one summary line
-                    # per shape once the spool is back under the mark.
+                    # Past the mark (a spool's resume mark, the central's
+                    # storage warning) and a routine repeat: seen over a
+                    # hundred times, no severity. Keeping it would bring the
+                    # hard stop closer, and at a sender's hard stop the newest
+                    # lines are what die by rotation. Count it instead;
+                    # flush_shed() stores one summary line per shape once the
+                    # store is back under the mark.
                     entry = shed.setdefault(shape, dict(count=0, first=now, service=item.get("service", ""), example=str(item.get("message", ""))[:300]))
                     entry["count"] += 1
                     entry["last"] = now
@@ -524,11 +551,10 @@ class Store:
                 unique.append(dict(item, id=uid()))
                 ranks.append((rank, shape))
             if shedding:
-                db.execute("INSERT OR REPLACE INTO meta VALUES('sender_shed',?)", (dumps(shed),))
+                db.execute("INSERT OR REPLACE INTO meta VALUES(?,?)", (shed_key, dumps(shed)))
             if unique:
                 raw = dumps(unique).encode()
-                usage = self.storage_usage()
-                if usage['disk_free_bytes'] < 32*1024**2 + len(raw)*2:
+                if usage['disk_free_bytes'] < usage['reserve_bytes'] + len(raw)*2:
                     import errno
                     raise OSError(errno.ENOSPC, 'Storage free-space reserve reached; incoming data was not acknowledged')
                 if usage['used_bytes'] + len(raw) * 2 > usage['quota_bytes']:
@@ -763,27 +789,92 @@ class Store:
         picked = {e["id"]: e for e in self.events(ids=ids, limit=limit)} if ids else {}
         return [picked[i] for i in ids if i in picked]
 
+    def _restore_shed(self, key, shed):
+        """Put counted repeats back when their summary could not be stored.
+
+        The empty value is already committed, so a pause, a deletion or a
+        reserve failure must not be the last write. Counts added after the
+        clear stay; the ones this attempt was holding are merged back in.
+        """
+        with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("SELECT value FROM meta WHERE key=?", (key,)).fetchone()
+            current = json.loads(row[0]) if row and row[0] else {}
+            for shape, entry in shed.items():
+                kept = current.get(shape)
+                if not kept:
+                    current[shape] = entry
+                    continue
+                kept["count"] = int(kept.get("count", 0)) + int(entry["count"])
+                kept["first"] = min(kept.get("first", entry["first"]), entry["first"])
+                kept["last"] = max(kept.get("last", entry.get("last", 0)), entry.get("last", 0))
+            db.execute("INSERT OR REPLACE INTO meta VALUES(?,?)", (key, dumps(current)))
+
     def flush_shed(self, source):
         """Store one summary line per shape for the routine repeats that were not kept."""
-        shed = json.loads(self.meta("sender_shed") or "{}")
+        key = "shed:" + source["id"]
+        shed = json.loads(self.meta(key) or "{}")
         if not shed:
             return 0
-        self.set_meta("sender_shed", "")
-        stamp = lambda t: datetime.fromtimestamp(t, timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
-        entries = [
-            dict(
-                origin=f"shed:{shape}:{int(entry['first'])}",
-                service=entry.get("service", ""),
-                message=(
-                    f"[LogSentinel] {entry['count']} routine lines like this were not stored between "
-                    f"{stamp(entry['first'])} and {stamp(entry['last'])} UTC because the sender queue was congested: "
-                    + entry.get("example", "")
-                ),
-                metadata={"shed": entry["count"]},
+        # ingest refuses a paused or deleted machine. The counts are the only
+        # record of what was discarded, so they stay until a write will be accepted.
+        if source["id"] != "sender" and (
+            not self.monitoring_active(source["machine_id"])
+            or self.meta("deleted_machine:" + source["machine_id"])
+        ):
+            return 0
+        self.set_meta(key, "")
+        try:
+            reason = (
+                "the sender queue was congested"
+                if source["id"] == "sender"
+                else "the observer's storage was near its limit"
             )
-            for shape, entry in shed.items()
-        ]
-        return self.ingest(source, entries)
+            stamp = lambda t: datetime.fromtimestamp(t, timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+            entries = [
+                dict(
+                    origin=f"shed:{shape}:{int(entry['first'])}",
+                    service=entry.get("service", ""),
+                    message=(
+                        f"[LogSentinel] {entry['count']} routine lines like this were not stored between "
+                        f"{stamp(entry['first'])} and {stamp(entry['last'])} UTC because {reason}: "
+                        + entry.get("example", "")
+                    ),
+                    metadata={"shed": entry["count"]},
+                )
+                for shape, entry in shed.items()
+            ]
+            return self.ingest(source, entries)
+        except BaseException:
+            self._restore_shed(key, shed)
+            raise
+
+    def flush_shed_pending(self):
+        """Store the summaries of every source back under its mark; for quiet sources."""
+        with self.connect() as db:
+            keys = [
+                row[0]
+                for row in db.execute("SELECT key FROM meta WHERE key LIKE 'shed:%' AND value!=''")
+            ]
+        usage = self.storage_usage()
+        stored = 0
+        for key in keys:
+            source = self.get("source", key[len("shed:"):])
+            # A paused or deleted machine cannot take the summary; leave its
+            # counts for a later sweep instead of clearing them into an error.
+            if (
+                source
+                and self.monitoring_active(source["machine_id"])
+                and not self.meta("deleted_machine:" + source["machine_id"])
+                and not self.shedding(source, usage)
+            ):
+                try:
+                    stored += self.flush_shed(source)
+                except (OSError, ValueError):
+                    # This source keeps its counts. Keep going so one refusal
+                    # does not drop the other summaries or retry the sweep at once.
+                    continue
+        return stored
 
     def count_rejected(self):
         """Events a receiver refused as invalid and the sender set aside."""
@@ -1079,7 +1170,9 @@ class Store:
         allocated, reusable = usage["allocated_bytes"], usage["reusable_bytes"]
         if reusable < VACUUM_MIN_RECLAIM or reusable < allocated * VACUUM_MIN_FRACTION:
             return False
-        if usage["disk_free_bytes"] < allocated + VACUUM_DISK_MARGIN:
+        # The rewrite holds a second copy. Whatever is left has to cover the
+        # free-disk reserve; the fixed margin alone now sits below that reserve.
+        if usage["disk_free_bytes"] < allocated + max(usage["reserve_bytes"], VACUUM_DISK_MARGIN):
             return False
         with self.connect() as db:
             db.execute("VACUUM")

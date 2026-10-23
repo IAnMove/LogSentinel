@@ -118,22 +118,26 @@ class HealthMonitor:
                 ),
             )
         quota = cfg.disk_limit_mb * 1024**2
+        reserve = cfg.min_free_mb * 1024**2
         size = self.store.size()
         disk = shutil.disk_usage(self.store.directory)
+        # Warn with twice the reserve still free: at the reserve itself nothing
+        # new is stored any more, and the warning should come before that.
         add(
             "storage",
             local,
             size / quota * 100 >= cfg.storage_warning_percent
-            or disk.free < 128 * 1024**2,
+            or disk.free < 2 * reserve,
             "Observer storage is approaching capacity",
             dict(
                 database_bytes=size,
                 quota_bytes=quota,
                 quota_percent=round(size / quota * 100, 2),
                 disk_free_bytes=disk.free,
+                reserve_bytes=reserve,
                 warning_percent=cfg.storage_warning_percent,
             ),
-            "CRITICAL" if size >= quota or disk.free < 32 * 1024**2 else "HIGH",
+            "CRITICAL" if size >= quota or disk.free < reserve else "HIGH",
         )
         for worker, meta in (
             ("capture", "collector_error"),

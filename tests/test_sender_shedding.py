@@ -1,7 +1,10 @@
 """Past its resume mark, a sender counts routine repeats instead of storing them, and says so later."""
 
+import json
+
 import pytest
 
+from logsentinel.portal.models import Settings
 from logsentinel.portal.sender_safety import CaptureGate, SenderLimits
 from logsentinel.portal.store import Store
 
@@ -26,6 +29,31 @@ def test_routine_repeats_are_counted_not_stored_while_shedding(tmp_path):
     assert "r169" not in messages and "r119" in messages
     assert store.sender_pending() == 122
     assert len(store.events(limit=1000)) == 122
+
+
+def test_a_failed_summary_keeps_the_counted_repeats(tmp_path, monkeypatch):
+    store = Store(tmp_path)
+    store.prepare_sender()
+    store.ingest(SENDER, [routine(n) for n in range(120)])
+    store.shed_routine = True
+    store.ingest(SENDER, [routine(n) for n in range(120, 130)])
+    store.shed_routine = False
+    real = Store.ingest
+    failed = {"n": 0}
+
+    def fail_summary(self, source, entries, cursor_path=None, cursor=None):
+        if entries and str(entries[0].get("origin", "")).startswith("shed:") and not failed["n"]:
+            failed["n"] += 1
+            raise OSError("Storage quota reached; incoming data was not acknowledged")
+        return real(self, source, entries, cursor_path, cursor)
+
+    monkeypatch.setattr(Store, "ingest", fail_summary)
+    with pytest.raises(OSError, match="quota"):
+        store.flush_shed(SENDER)
+    kept = json.loads(store.meta("shed:sender"))
+    assert sum(entry["count"] for entry in kept.values()) == 10
+    assert store.flush_shed(SENDER) == 1
+    assert not store.meta("shed:sender")
 
 
 def test_a_summary_line_per_shape_is_stored_once_the_spool_recovers(tmp_path):
@@ -66,6 +94,12 @@ class FakeStore:
 
     def sender_pending(self):
         return self.pending
+
+    def settings(self):
+        return Settings()
+
+    def set_meta(self, key, value):
+        pass
 
 
 @pytest.mark.parametrize("pending, shedding, stops", [(100, False, False), (70_000, True, False), (100_000, False, True)])

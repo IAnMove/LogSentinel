@@ -86,6 +86,20 @@ def test_vacuum_shrinks_the_file_when_it_pays_and_the_disk_can_hold_a_copy(tmp_p
     assert store.size() < before
 
 
+def test_vacuum_leaves_the_free_disk_reserve(tmp_path, monkeypatch):
+    store = Store(tmp_path)
+    fill_and_free(store)
+    monkeypatch.setattr(store_module, "VACUUM_MIN_RECLAIM", 1)
+    usage = store.storage_usage()
+    # The old margin would start a copy and leave only 256 MiB, under the reserve.
+    free = usage["allocated_bytes"] + store_module.VACUUM_DISK_MARGIN
+    monkeypatch.setattr(
+        shutil, "disk_usage", lambda path: shutil._ntuple_diskusage(10**12, 10**12 - free, free)
+    )
+    assert usage["reserve_bytes"] > store_module.VACUUM_DISK_MARGIN
+    assert store.compact_if_worthwhile() is False
+
+
 def test_vacuum_never_runs_when_the_disk_cannot_hold_a_second_copy(tmp_path, monkeypatch):
     store = Store(tmp_path)
     fill_and_free(store)
