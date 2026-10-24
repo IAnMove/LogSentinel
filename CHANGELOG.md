@@ -3,9 +3,9 @@
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/).
 Cada entrada corresponde a un commit; su mensaje explica el porqué.
 
-## Sin publicar
+## 1.1.0 - 2026-10-24
 
-Revisión general de fiabilidad, seguridad y mantenimiento (rama `review/hardening-2026-09`).
+Primera versión numerada tras la revisión general de fiabilidad, seguridad y mantenimiento de septiembre y octubre de 2026. El número importa desde ahora: cada emisor comunica el suyo, Fuentes lo muestra y Salud avisa del que va por detrás del central.
 
 ### Cambia el comportamiento
 
