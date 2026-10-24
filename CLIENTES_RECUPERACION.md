@@ -15,9 +15,16 @@ Desde el repositorio del cliente:
 
 ```bash
 sudo systemctl stop logsentinel-client-logs
-git pull --ff-only
+git fetch origin
+git checkout -B main origin/main
 sudo ./setup-client.sh --upgrade --name logs
 ```
+
+El historial del repositorio público se rehizo en octubre de 2026 con el mismo
+nombre. En una copia clonada antes, `git pull` falla porque las dos historias no
+tienen un antepasado común; `checkout -B main origin/main` coloca la rama local
+sobre la nueva historia sin tocar nada fuera del repositorio. Si tienes cambios
+propios en esa copia, guárdalos antes (`git stash` o una rama aparte).
 
 No necesitas otra alta. El actualizador conserva configuración, identidad,
 credencial, CA, eventos y cursores. Guarda una copia SQLite coherente y la unidad

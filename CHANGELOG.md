@@ -45,6 +45,7 @@ Revisión general de fiabilidad, seguridad y mantenimiento (rama `review/hardeni
 
 ### Arreglado
 
+- La guía de clientes indicaba `git pull --ff-only` para actualizar; en una copia clonada antes de rehacer el historial del repositorio (octubre de 2026) ese comando falla. Ahora explica cómo colocar la rama local sobre la historia nueva.
 - La lectura de una carpeta abortaba en el primer archivo con error; un archivo `.gz`, `.xz` o `.bz2` truncado hacía caer el emisor en bucle.
 - Una línea de 256 KB con `authentication failure;` detenía la detección de su máquina.
 - El borrado de eventos recorría toda la tabla `signal_hits` por cada evento (35 s para 5 000 eventos con 100 000 aciertos; 0,08 s con el índice).
