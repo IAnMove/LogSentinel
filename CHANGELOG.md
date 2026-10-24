@@ -36,6 +36,7 @@ Revisión general de fiabilidad, seguridad y mantenimiento (rama `review/hardeni
 ### Añadido
 
 - **Actualización remota de emisores (oferta).** Un interruptor global en Salud y supervisión y otro por máquina hacen que la respuesta de control a los emisores de esa máquina nombre la versión y el commit que ejecuta el central (`upgrade`); apagados, o con un checkout sin commit o con cambios locales, la clave va vacía. El central solo anuncia: el equipo del emisor decide si la atiende.
+- **El emisor anota la oferta y cuenta qué hizo su equipo.** Si la respuesta de control trae una oferta válida (commit de 40 hexadecimales y versión) y root ha permitido la actualización remota en ese equipo, el emisor deja `upgrade-request.json` en su cola para el trabajo de root; una oferta retirada lo borra, una malformada se ignora sin perder el lease. En el heartbeat informa de la política del equipo, la oferta vista y el último resultado de root (`upgrade`), solo a un central que ya envía esa clave: uno antiguo rechazaría el campo. Fuentes lo muestra junto a la versión.
 - `scripts/check_publishable.py`: busca rutas personales, secretos y nombres internos en el árbol y en todo el historial (`--history`), y dice qué ramas alcanzan cada hallazgo. Una prueba lo ejecuta.
 - `scripts/check_wheel.py`, `scripts/check_i18n.js`, ruff y mypy en la CI, los once recorridos de navegador y Python 3.14.
 - Registro del servidor con traza, redactado y sin repeticiones (`logsentinel.portal.logs`).

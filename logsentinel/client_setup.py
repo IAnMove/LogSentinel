@@ -412,8 +412,11 @@ def run_sender(config_path, once=False):
     from .portal.forward import forward
     cfg=json.loads(Path(config_path).read_text())
     token=(Path(cfg['spool'])/'push-token').read_text().strip()
+    # The policy flag is root's (the config is root-owned); the result file is
+    # written by the root upgrade job. This process only reads both.
+    upgrade=dict(enabled=bool(cfg.get('remote_upgrade')),state_path=INSTALL/('upgrade-'+cfg['name']+'.json'))
     asyncio.run(forward(cfg['path'],cfg['receiver'],cfg['source_id'],token,cfg['spool'],once,
-                        journal=cfg['journal'],new_only=cfg['new_only'],limits=cfg.get('limits')))
+                        journal=cfg['journal'],new_only=cfg['new_only'],limits=cfg.get('limits'),upgrade=upgrade))
 
 
 def backup_sender(config_path, target):

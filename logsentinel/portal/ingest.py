@@ -12,6 +12,7 @@ import hashlib
 import hmac
 import json
 import time
+from typing import Literal
 
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import JSONResponse
@@ -22,6 +23,19 @@ from .store import dumps
 from .collect import MAX_LINE, bound_event, machine_zone, normalize
 from .enroll import register_enrollment
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
+
+
+class SenderUpgradeReport(BaseModel):
+    """What a sender's host did with the offered build; written there by root."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+    policy: Literal["enabled", "disabled"]
+    offered: str = Field(default="", max_length=40, pattern=r"^[0-9a-f]*$")
+    status: str = Field(default="", max_length=40, pattern=r"^[a-z_]*$")
+    commit: str = Field(default="", max_length=40, pattern=r"^[0-9a-f]*$")
+    version: str = Field(default="", max_length=80, pattern=r"^[A-Za-z0-9_.-]*$")
+    observed: float = Field(default=0, ge=0, le=10**12)
+    message: str = Field(default="", max_length=300)
 
 
 class SenderHeartbeat(BaseModel):
@@ -37,6 +51,7 @@ class SenderHeartbeat(BaseModel):
     io_pressure_percent: float | None = Field(default=None, ge=0, le=100)
     build: str = Field(default="", max_length=80, pattern=r"^[A-Za-z0-9_.-]*$")
     rejected: int = Field(default=0, ge=0, le=1000000000)
+    upgrade: SenderUpgradeReport | None = None
 
 
 def upgrade_offer(store, source, build):

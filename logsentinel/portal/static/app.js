@@ -742,7 +742,26 @@ function senderHealthSummary(health) {
     text += " · " + Math.round(sender.used_bytes / 1048576) + "/" + Math.round(sender.quota_bytes / 1048576) + " MiB";
   if (code) text += " · " + (label ? bilingual(...label) : code);
   if (sender.build) text += " · v" + sender.build;
+  text += upgradeSummary(sender.upgrade);
   if (health.heartbeat) text += " · " + bilingual("Último estado: ", "Last status: ") + stamp(health.heartbeat);
+  return text;
+}
+function upgradeSummary(upgrade) {
+  if (!upgrade) return "";
+  const status = {
+    installed: ["actualizado", "upgraded"],
+    installing: ["instalando", "installing"],
+    deferred: ["aplazado", "deferred"],
+    failed: ["falló; el servicio puede estar detenido", "failed; the service may be stopped"],
+    refused: ["rechazado por el equipo", "refused by the host"],
+  };
+  let text = " · " + bilingual("Actualización remota: ", "Remote upgrade: ");
+  if (upgrade.policy !== "enabled") return text + bilingual("desactivada en el equipo", "disabled on the host");
+  if (!upgrade.offered && !upgrade.status) return text + bilingual("permitida; sin oferta", "allowed; nothing offered");
+  const label = status[upgrade.status];
+  text += label ? bilingual(...label) : upgrade.status || bilingual("oferta recibida", "offer received");
+  if (upgrade.commit) text += " " + upgrade.commit.slice(0, 10);
+  if (upgrade.message) text += " (" + upgrade.message + ")";
   return text;
 }
 function objectForm(kind, o) {
