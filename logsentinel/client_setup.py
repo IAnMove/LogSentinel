@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import fcntl
 import hashlib
 import json
 import os
@@ -447,8 +448,35 @@ def adopt_backup(staged,target):
     os.unlink(staged)
 
 
+def upgrade_lock():
+    """One upgrade at a time per host, whether an operator or the timer starts it.
+
+    The timer job holds the lock while it runs this installer, and says so in
+    the environment; a manual run meeting a held lock stops instead of
+    interleaving with it."""
+    if os.environ.get('LOGSENTINEL_UPGRADE_LOCK_HELD'):
+        return None
+    # INSTALL exists and is root's by now: bootstrap made it before any upgrade.
+    fd=os.open(INSTALL/'upgrade.lock',os.O_RDWR|os.O_CREAT|os.O_NOFOLLOW,0o600)
+    try:
+        fcntl.flock(fd,fcntl.LOCK_EX|fcntl.LOCK_NB)
+    except OSError:
+        os.close(fd)
+        raise ValueError('Otra actualización de LogSentinel está en curso en este equipo. Espera a que termine.') from None
+    return fd
+
+
 def upgrade_client(args, desired, runtime):
     """Install a new runtime without enrolling again or resuming a stopped service."""
+    lock=upgrade_lock()
+    try:
+        return upgrade_client_locked(args,desired,runtime)
+    finally:
+        if lock is not None:
+            os.close(lock)
+
+
+def upgrade_client_locked(args, desired, runtime):
     config_path=CONFIG/(args.name+'.json')
     validate_existing(config_path,desired)
     unit=UNITS/('logsentinel-client-'+args.name+'.service')
@@ -521,8 +549,340 @@ def upgrade_client(args, desired, runtime):
     print('Servicio:', 'activo; obedecerá la pausa del central' if was_active else 'sigue detenido; no se ha reanudado')
 
 
+# ---- Remote upgrades: root on this host decides, the central only offers ----
+#
+# Everything below runs as root with the system Python and nothing but the
+# standard library, because it is started by a timer from the checkout it may
+# replace. The sender process can only leave a request file in its spool; this
+# job reads one validated commit hash from it and nothing else, verifies that
+# commit against the repository root cloned when the feature was enabled, and
+# then runs the ordinary installer, with its backups and its refusals.
+
+SOURCE = INSTALL/'source'
+REQUEST_FILE = 'upgrade-request.json'
+COMMIT_RE = re.compile(r'^[0-9a-f]{40}$')
+VERSION_RE = re.compile(r'^[A-Za-z0-9_.-]{1,80}$')
+DEFER_BASE_SECONDS = 15*60
+DEFER_MAX_SECONDS = 24*3600
+
+
+def version_key(text):
+    """Numeric leading parts of a version, for "is this older" comparisons."""
+    parts=[]
+    for part in str(text).split('.'):
+        digits=re.match(r'\d+',part)
+        if not digits:
+            break
+        parts.append(int(digits.group()))
+    return tuple(parts)
+
+
+def state_path(name):
+    return INSTALL/('upgrade-'+name+'.json')
+
+
+def read_state(name):
+    try:
+        value=json.loads(state_path(name).read_text())
+        return value if isinstance(value,dict) else {}
+    except (OSError,ValueError):
+        return {}
+
+
+def write_state(name, **fields):
+    """Root's answer, readable by the sender, which reports it to the central."""
+    managed_directory(INSTALL)
+    value=dict(fields,observed=time.time())
+    fd,temp=tempfile.mkstemp(prefix='.upgrade-',dir=INSTALL)
+    with os.fdopen(fd,'w') as handle:
+        json.dump(value,handle)
+    os.chmod(temp,0o644)
+    os.replace(temp,state_path(name))
+    return value
+
+
+def git(*args, cwd=None, timeout=120):
+    # Never inherit GIT_DIR or GIT_WORK_TREE: a caller's repository (a hook, a
+    # rebase) must not become the one these commands act on.
+    env={k:v for k,v in os.environ.items() if not k.startswith('GIT_')}
+    env.update(GIT_TERMINAL_PROMPT='0',LC_ALL='C')
+    return subprocess.run(['git',*[str(a) for a in args]],cwd=str(cwd or SOURCE),capture_output=True,text=True,timeout=timeout,env=env,stdin=subprocess.DEVNULL)
+
+
+def read_config(name):
+    if not re.fullmatch(r'[a-z][a-z0-9-]{0,19}',name):
+        raise ValueError('Nombre de instalación inválido.')
+    config_path=CONFIG/(name+'.json')
+    if config_path.is_symlink() or config_path.stat().st_uid!=0 or config_path.stat().st_mode & 0o022:
+        raise ValueError('La configuración existente debe estar protegida por root.')
+    return config_path,json.loads(config_path.read_text())
+
+
+def rewrite_config(config_path, value):
+    """Replace root's configuration in place, keeping its owner, group and mode."""
+    info=config_path.stat()
+    fd,temp=tempfile.mkstemp(prefix='.config-',dir=config_path.parent)
+    with os.fdopen(fd,'w') as handle:
+        os.fchown(handle.fileno(),info.st_uid,info.st_gid)
+        os.fchmod(handle.fileno(),stat.S_IMODE(info.st_mode))
+        json.dump(value,handle,indent=2)
+    os.replace(temp,config_path)
+
+
+def upgrade_unit_names(name):
+    return 'logsentinel-client-upgrade-'+name+'.service','logsentinel-client-upgrade-'+name+'.timer'
+
+
+def upgrade_unit_text(name, python):
+    return f'''[Unit]
+Description=LogSentinel remote upgrade check ({name})
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart={python} -I {SOURCE}/logsentinel/client_setup.py remote-upgrade --name {name}
+Nice=10
+IOSchedulingClass=idle
+'''
+
+
+def upgrade_timer_text(name):
+    return f'''[Unit]
+Description=LogSentinel remote upgrade timer ({name})
+
+[Timer]
+OnBootSec=10min
+OnUnitActiveSec=15min
+RandomizedDelaySec=5min
+
+[Install]
+WantedBy=timers.target
+'''
+
+
+def enable_remote_upgrade(name, checkout):
+    """Let this host act on the central's offers, from the repository of this checkout.
+
+    The remote and branch recorded here are the only ones the job will ever
+    fetch from: the central names a commit, never a place to get it from."""
+    config_path,cfg=read_config(name)
+    if not shutil.which('git'):
+        raise ValueError('La actualización remota necesita git en este equipo.')
+    checkout=Path(checkout).resolve()
+    # The operator's checkout belongs to the operator, and git run by root
+    # refuses a repository owned by someone else unless told to trust that one
+    # path. Trust it, and only it, for the three reads made here.
+    trust=('-c','safe.directory='+str(checkout))
+    remote=git(*trust,'remote','get-url','origin',cwd=checkout)
+    if remote.returncode or not remote.stdout.strip():
+        raise ValueError('Esta copia del repositorio no tiene un remoto "origin"; clona desde el repositorio para poder actualizar desde él.')
+    url=remote.stdout.strip()
+    if any(ord(c)<33 for c in url):
+        raise ValueError('La dirección del remoto contiene caracteres no permitidos.')
+    head=git(*trust,'rev-parse','HEAD',cwd=checkout)
+    if head.returncode or not COMMIT_RE.match(head.stdout.strip()):
+        raise ValueError('No se pudo determinar el commit de esta copia.')
+    managed_directory(INSTALL)
+    if SOURCE.exists():
+        existing=git('remote','get-url','origin')
+        if existing.returncode or existing.stdout.strip()!=url:
+            raise ValueError('Ya hay una copia para actualizaciones en '+str(SOURCE)+' con otro remoto ('+(existing.stdout.strip() or 'desconocido')+'). Bórrala para cambiar de repositorio.')
+    else:
+        # Objects come from the operator's checkout, so enabling needs no
+        # network; the remote recorded is where later fetches go.
+        clone=git(*trust,'clone','--quiet','--no-hardlinks',checkout,SOURCE,cwd=INSTALL,timeout=600)
+        if clone.returncode:
+            raise ValueError('No se pudo preparar la copia para actualizaciones: '+clone.stderr.strip()[-300:])
+        set_url=git('remote','set-url','origin',url)
+        if set_url.returncode:
+            raise ValueError('No se pudo fijar el remoto de la copia para actualizaciones.')
+    cfg.update(remote_upgrade=True,source_remote=url,source_branch=cfg.get('source_branch') or 'main')
+    rewrite_config(config_path,cfg)
+    # The sender reads its permission when it starts, and the upgrade before
+    # this already restarted it: restart it again if it is running, and leave
+    # a deliberately stopped one stopped.
+    command('systemctl','try-restart','logsentinel-client-'+name+'.service')
+    write_state(name,status='installed',commit=head.stdout.strip(),version=installed_version(checkout),message='')
+    python=shutil.which('python3') or sys.executable
+    service,timer=upgrade_unit_names(name)
+    (UNITS/service).write_text(upgrade_unit_text(name,python));(UNITS/service).chmod(0o644)
+    (UNITS/timer).write_text(upgrade_timer_text(name));(UNITS/timer).chmod(0o644)
+    command('systemd-analyze','verify',UNITS/service,stdout=subprocess.DEVNULL)
+    command('systemctl','daemon-reload')
+    command('systemctl','enable','--now',timer)
+    print('Actualización remota permitida en este equipo para "'+name+'": el central puede ofrecer un commit de',url,'(rama',cfg['source_branch']+'); este equipo lo verifica e instala con el temporizador',timer+'.')
+    print('Para retirarlo: sudo ./setup-client.sh --upgrade --name',name,'--deny-remote-upgrade')
+
+
+def quiet(*args):
+    """A best-effort system command whose failure must not stop a teardown."""
+    return subprocess.run([str(a) for a in args],capture_output=True)
+
+
+def disable_remote_upgrade(name):
+    config_path,cfg=read_config(name)
+    service,timer=upgrade_unit_names(name)
+    quiet('systemctl','disable','--now',timer)
+    (UNITS/timer).unlink(missing_ok=True)
+    (UNITS/service).unlink(missing_ok=True)
+    quiet('systemctl','daemon-reload')
+    cfg['remote_upgrade']=False
+    rewrite_config(config_path,cfg)
+    command('systemctl','try-restart','logsentinel-client-'+name+'.service')
+    write_state(name,status='disabled',commit=read_state(name).get('commit',''),version=read_state(name).get('version',''),message='')
+    print('Actualización remota retirada para "'+name+'": el central puede seguir ofreciendo, este equipo no la atiende.')
+
+
+def installed_version(checkout):
+    text=(Path(checkout)/'logsentinel'/'__init__.py').read_text()
+    found=re.search(r'__version__\s*=\s*["\']([^"\']+)["\']',text)
+    return found.group(1) if found and VERSION_RE.match(found.group(1)) else ''
+
+
+def read_request(cfg):
+    """The sender's request: a regular file it owns, small, with a commit and a version.
+
+    Anything else is not an error to act on, only a reason to do nothing: the
+    sender is the less trusted party and its file must not steer root."""
+    spool=Path(cfg['spool'])
+    try:
+        fd=os.open(spool/REQUEST_FILE,os.O_RDONLY|os.O_NONBLOCK|os.O_NOFOLLOW)
+    except FileNotFoundError:
+        return None
+    except OSError:
+        return 'unreadable'
+    with os.fdopen(fd,'rb') as handle:
+        info=os.fstat(handle.fileno())
+        owner=pwd.getpwnam(cfg['account']).pw_uid
+        if not stat.S_ISREG(info.st_mode) or info.st_uid!=owner or info.st_size>4096:
+            return 'unreadable'
+        try:
+            value=json.loads(handle.read(4096))
+        except ValueError:
+            return 'unreadable'
+    if (not isinstance(value,dict) or not isinstance(value.get('commit'),str) or not COMMIT_RE.match(value['commit'])
+            or not isinstance(value.get('version'),str) or not VERSION_RE.match(value['version'])):
+        return 'unreadable'
+    return dict(commit=value['commit'],version=value['version'])
+
+
+def disk_pressure():
+    try:
+        for line in Path('/proc/pressure/io').read_text().splitlines():
+            if line.startswith('full '):
+                return float(dict(part.split('=') for part in line.split()[1:])['avg10'])
+    except (OSError,ValueError,KeyError):
+        pass
+    return None
+
+
+def run_installer(name):
+    """The ordinary upgrade, from the verified checkout, under the lock this job holds."""
+    env=dict(os.environ,LOGSENTINEL_UPGRADE_LOCK_HELD=str(os.getpid()))
+    return subprocess.run([sys.executable,'-I',str(SOURCE/'logsentinel'/'client_setup.py'),'--upgrade','--name',name],
+                          capture_output=True,text=True,timeout=3600,env=env,stdin=subprocess.DEVNULL)
+
+
+def remote_upgrade(name):
+    """One timer tick: act on the sender's request if, and only if, it checks out."""
+    config_path,cfg=read_config(name)
+    try:
+        lock=upgrade_lock()
+    except ValueError:
+        return 'busy'
+    try:
+        return remote_upgrade_locked(name,cfg)
+    finally:
+        if lock is not None:
+            os.close(lock)
+
+
+def remote_upgrade_locked(name, cfg):
+    if not cfg.get('remote_upgrade'):
+        write_state(name,status='disabled',commit=read_state(name).get('commit',''),version=read_state(name).get('version',''),message='')
+        return 'disabled'
+    request=read_request(cfg)
+    if request is None:
+        return 'idle'
+    last=read_state(name)
+    if request=='unreadable':
+        write_state(name,status='refused',commit='',version='',message='La petición del emisor no es legible o no es suya.')
+        return 'refused'
+    commit,version=request['commit'],request['version']
+    same=last.get('commit')==commit
+    if same and last.get('status') in ('installed','installing'):
+        return 'done'
+    if same and last.get('status')=='failed':
+        # Not retried: the installer left a backup and a stopped service that an
+        # operator must look at. A different target starts afresh.
+        return 'failed'
+    if same and last.get('status')=='deferred' and time.time()<float(last.get('next_after') or 0):
+        return 'waiting'
+    attempts=int(last.get('attempts') or 0) if same else 0
+
+    def defer(message):
+        wait=min(DEFER_MAX_SECONDS,DEFER_BASE_SECONDS*2**attempts)
+        write_state(name,status='deferred',commit=commit,version=version,message=message,attempts=attempts+1,next_after=time.time()+wait)
+        return 'deferred'
+
+    def refuse(message):
+        write_state(name,status='refused',commit=commit,version=version,message=message)
+        return 'refused'
+
+    installed=last.get('commit') if COMMIT_RE.match(str(last.get('commit') or '')) else ''
+    installed_version_text=str(last.get('version') or '')
+    if installed_version_text and version_key(version)<version_key(installed_version_text):
+        return refuse('Retrocedería de la versión '+installed_version_text+' a la '+version+'.')
+    pressure=disk_pressure()
+    if pressure is not None and pressure>=25:
+        return defer('Disco bajo presión de E/S.')
+    branch=cfg.get('source_branch') or 'main'
+    fetch=git('fetch','--quiet','origin',branch,timeout=600)
+    if fetch.returncode:
+        return defer('No se pudo consultar el repositorio: '+fetch.stderr.strip()[-200:])
+    if git('cat-file','-e',commit+'^{commit}').returncode:
+        return refuse('El commit ofrecido no está publicado en origin/'+branch+' (no se encuentra en el repositorio).')
+    if git('merge-base','--is-ancestor',commit,'origin/'+branch).returncode:
+        return refuse('El commit ofrecido no está publicado en origin/'+branch+'.')
+    if installed and git('merge-base','--is-ancestor',installed,commit).returncode:
+        return refuse('El commit ofrecido no desciende del instalado: sería un retroceso.')
+    shown=git('show',commit+':logsentinel/__init__.py')
+    found=re.search(r'__version__\s*=\s*["\']([^"\']+)["\']',shown.stdout if not shown.returncode else '')
+    if not found or found.group(1)!=version:
+        return refuse('La versión anunciada ('+version+') no es la del commit ofrecido.')
+    checkout=git('checkout','--quiet','--detach',commit)
+    if checkout.returncode:
+        return defer('No se pudo preparar el commit: '+checkout.stderr.strip()[-200:])
+    write_state(name,status='installing',commit=commit,version=version,message='')
+    try:
+        result=run_installer(name)
+    except subprocess.TimeoutExpired:
+        write_state(name,status='failed',commit=commit,version=version,message='La instalación no terminó en una hora; revisa el equipo.')
+        return 'failed'
+    if result.returncode==0:
+        write_state(name,status='installed',commit=commit,version=version,message='')
+        return 'installed'
+    tail=' '.join((result.stderr or result.stdout or '').strip().splitlines()[-2:])[-300:]
+    if 'Actualización incompleta' in (result.stderr or ''):
+        # After the backup: the installer stopped the service on purpose and
+        # restored the previous unit. Nothing automatic should touch it again.
+        write_state(name,status='failed',commit=commit,version=version,message=tail)
+        return 'failed'
+    return defer(tail or 'La comprobación previa falló.')
+
+
 def main(argv=None):
     argv=list(sys.argv[1:] if argv is None else argv)
+    if argv and argv[0]=='remote-upgrade':
+        parser=argparse.ArgumentParser()
+        parser.add_argument('action');parser.add_argument('--name',required=True)
+        args=parser.parse_args(argv)
+        if os.geteuid()!=0:
+            raise ValueError('La actualización remota la ejecuta root desde su temporizador.')
+        outcome=remote_upgrade(args.name)
+        print('remote-upgrade:',outcome)
+        return 1 if outcome in ('failed','refused') else 0
     if argv and argv[0] in ('run','grant','backup','migrate'):
         parser=argparse.ArgumentParser()
         parser.add_argument('action');parser.add_argument('--config',required=True);parser.add_argument('--once',action='store_true');parser.add_argument('--target')
@@ -556,7 +916,11 @@ def main(argv=None):
     parser.add_argument('--include-history',action='store_true',help='Importar también historial en una instalación nueva')
     parser.add_argument('--ca-fingerprint',help='Huella SHA-256 del certificado del central, tal como la mostró al crear el alta')
     parser.add_argument('--plan',action='store_true',help='Mostrar el recorrido sin instalar ni enviar nada')
+    policy=parser.add_mutually_exclusive_group()
+    policy.add_argument('--allow-remote-upgrade',action='store_true',help='Permitir que este equipo instale el commit que ofrezca el central, verificado contra el remoto de esta copia (desactivado por defecto)')
+    policy.add_argument('--deny-remote-upgrade',action='store_true',help='Retirar ese permiso y su temporizador')
     parser.add_argument('--prepared',action='store_true',help=argparse.SUPPRESS)
+    parser.add_argument('--source-checkout',help=argparse.SUPPRESS)
     args=parser.parse_args(argv)
     if sys.platform!='linux' or sys.version_info<(3,10):
         raise ValueError('Se requiere Linux con systemd y Python 3.10 o posterior.')
@@ -581,6 +945,8 @@ def main(argv=None):
         print('Huella del certificado del central:',ca_fingerprint(package['ca_certificate']),'\nComprueba que coincide con la que mostró el central antes de instalar.')
     if args.plan:
         print('Plan: actualizar runtime con copia coherente; conservar identidad y estado del servicio. No se ha cambiado nada.' if args.upgrade else 'Plan: instalar Python aislado, conceder lectura, canjear el alta HTTPS y activar un servicio emisor. No se ha cambiado nada.')
+        if args.allow_remote_upgrade:
+            print('Además: permitir la actualización remota (copia del repositorio en '+str(SOURCE)+' y temporizador de root).')
         return
     if os.geteuid()!=0:
         raise ValueError('Ejecuta el mismo comando con sudo. El emisor funcionará después sin root.')
@@ -594,7 +960,7 @@ def main(argv=None):
     if not args.prepared:
         repo=Path(__file__).resolve().parents[1]
         runtime=bootstrap(repo)
-        os.execv(str(runtime/'bin/python'),[str(runtime/'bin/python'),'-m','logsentinel.client_setup',*argv,'--prepared'])
+        os.execv(str(runtime/'bin/python'),[str(runtime/'bin/python'),'-m','logsentinel.client_setup',*argv,'--prepared','--source-checkout',str(repo)])
     runtime=Path(sys.prefix)
     if runtime.parent!=INSTALL or not (runtime/'ready').is_file():
         raise ValueError('Usa setup-client.sh desde el repositorio para preparar el instalador.')
@@ -602,11 +968,15 @@ def main(argv=None):
         upgrade_client(args,desired,runtime)
     else:
         configure(args,desired,package,runtime)
+    if args.allow_remote_upgrade:
+        enable_remote_upgrade(args.name,args.source_checkout or Path(__file__).resolve().parents[1])
+    elif args.deny_remote_upgrade:
+        disable_remote_upgrade(args.name)
 
 
 if __name__=='__main__':
     try:
-        main()
+        sys.exit(main() or 0)
     except KeyboardInterrupt:
         print('Interrumpido. Se conservan la cola y las credenciales ya creadas.',file=sys.stderr)
         sys.exit(130)
