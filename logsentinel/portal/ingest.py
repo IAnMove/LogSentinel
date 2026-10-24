@@ -12,15 +12,30 @@ import hashlib
 import hmac
 import json
 import time
+from typing import Literal
 
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import JSONResponse
 
+from .build_info import running_build
 from .limits import BodyLimit
 from .store import dumps
 from .collect import MAX_LINE, bound_event, machine_zone, normalize
 from .enroll import register_enrollment
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
+
+
+class SenderUpgradeReport(BaseModel):
+    """What a sender's host did with the offered build; written there by root."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+    policy: Literal["enabled", "disabled"]
+    offered: str = Field(default="", max_length=40, pattern=r"^[0-9a-f]*$")
+    status: str = Field(default="", max_length=40, pattern=r"^[a-z_]*$")
+    commit: str = Field(default="", max_length=40, pattern=r"^[0-9a-f]*$")
+    version: str = Field(default="", max_length=80, pattern=r"^[A-Za-z0-9_.-]*$")
+    observed: float = Field(default=0, ge=0, le=10**12)
+    message: str = Field(default="", max_length=300)
 
 
 class SenderHeartbeat(BaseModel):
@@ -36,10 +51,29 @@ class SenderHeartbeat(BaseModel):
     io_pressure_percent: float | None = Field(default=None, ge=0, le=100)
     build: str = Field(default="", max_length=80, pattern=r"^[A-Za-z0-9_.-]*$")
     rejected: int = Field(default=0, ge=0, le=1000000000)
+    upgrade: SenderUpgradeReport | None = None
 
 
-def register_ingest(app, store):
+def upgrade_offer(store, source, build):
+    """The build a sender of this source is invited to install, or None.
+
+    Only a committed, pushed checkout can be named: the sender verifies the
+    commit against the repository it trusts, so a local, uncommitted change has
+    nothing it could point at. Both the global switch and the machine's must be
+    on; the sender's own host has the last word and may ignore the offer."""
+    if not build or not build.get("commit") or build.get("dirty"):
+        return None
+    machine = store.get("machine", source["machine_id"]) or {}
+    if not machine.get("remote_upgrade") or not store.settings().remote_upgrade:
+        return None
+    return dict(version=build["version"], commit=build["commit"])
+
+
+def register_ingest(app, store, build=None):
     """Attach the sender-facing routes to an app."""
+    # Captured once: the checkout may move under a running central, and what
+    # is announced must be what this process runs.
+    build = running_build() if build is None else build
 
     @app.get("/ingest-info")
     def ingest_info():
@@ -74,17 +108,36 @@ def register_ingest(app, store):
             state = "source_disabled"
         elif not store.monitoring_active(source["machine_id"]):
             state = "machine_paused"
+        # The key is always present, null when nothing is offered: a sender
+        # reads its presence as "this central understands upgrade reports"
+        # before adding them to its heartbeat, which older centrals refuse.
         return dict(
             version=1,
             state=state,
             capture_allowed=state == "active",
             delivery_allowed=state == "active",
             retry_after=30,
+            upgrade=upgrade_offer(store, source, build),
         )
+
+    def note_offer(id, offer):
+        """Remember when a commit was first offered to this source.
+
+        Health uses it: a sender that falls silent after an offer may have been
+        left stopped by a failed upgrade, and its own heartbeat cannot say so."""
+        key = "upgrade_offer:" + id
+        current = json.loads(store.meta(key) or "{}")
+        if not offer:
+            if current:
+                store.set_meta(key, "")
+        elif current.get("commit") != offer["commit"]:
+            store.set_meta(key, dumps(dict(offer, since=time.time())))
 
     @app.get("/sender-control/{id}")
     def sender_control(id: str, request: Request):
-        return control_state(push_source(id, request, allow_paused=True))
+        state = control_state(push_source(id, request, allow_paused=True))
+        note_offer(id, state["upgrade"])
+        return state
 
     # The store is synchronous SQLite: keep it off the event loop that also
     # accepts every other sender's connection.
@@ -207,7 +260,7 @@ def register_ingest(app, store):
         }
 
 
-def create_ingest_app(store, telemetry=None):
+def create_ingest_app(store, telemetry=None, build=None):
     """Build a listener carrying reception and nothing else."""
     app = FastAPI(
         title="LogSentinel reception",
@@ -252,7 +305,7 @@ def create_ingest_app(store, telemetry=None):
     def healthz():
         return {"status": "ok"}
 
-    register_ingest(app, store)
+    register_ingest(app, store, build)
     register_enrollment(app, store)
     if telemetry is not None:
         from .telemetry_api import register_metrics_ingest

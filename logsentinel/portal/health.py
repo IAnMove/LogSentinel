@@ -6,10 +6,24 @@ import shutil
 import time
 import threading
 
+from logsentinel import __version__
 from .models import Source
 from .rules import sanitize
 from .logs import report
 from .store import dumps, uid
+
+# A sender that stops answering this long after being offered a build may have
+# been left stopped by a failed upgrade; its own heartbeat cannot report that.
+UPGRADE_SILENCE_SECONDS = 1200
+
+
+def version_key(text):
+    parts = []
+    for part in str(text).split("."):
+        if not part[:1].isdigit():
+            break
+        parts.append(int("".join(c for c in part if c.isdigit())))
+    return tuple(parts)
 
 
 class HealthMonitor:
@@ -97,6 +111,8 @@ class HealthMonitor:
             health = json.loads(self.store.meta("health:" + source["id"]) or "{}")
             remote = source["kind"] == "push"
             timeout = source.get("heartbeat_timeout_seconds", 0) if remote else 60
+            if remote:
+                self.upgrade_conditions(add, source, health, now)
             if remote and not timeout and not health:
                 continue  # A quiet log is not evidence of a broken sender.
             last = health.get("heartbeat", health.get("checked"))
@@ -194,6 +210,68 @@ class HealthMonitor:
         )
         return checks
 
+    def upgrade_conditions(self, add, source, health, now):
+        """What the central can tell about a sender's version and its upgrades."""
+        id, machine = source["id"], source["machine_id"]
+        sender = health.get("sender") or {}
+        report = sender.get("upgrade") or {}
+        build = sender.get("build", "")
+        who = dict(source_id=id, source_name=source["name"])
+        add(
+            "version:" + id,
+            machine,
+            bool(build) and version_key(build) < version_key(__version__),
+            "Sender runs an older LogSentinel than the central",
+            dict(
+                who,
+                sender_version=build,
+                central_version=__version__,
+                meaning="The central keeps accepting it; upgrade the sender host when convenient",
+            ),
+            "MEDIUM",
+            liveness=False,
+        )
+        status = report.get("status", "")
+        add(
+            "upgrade:" + id,
+            machine,
+            status in ("failed", "refused"),
+            "Remote upgrade failed on a sender host",
+            dict(
+                who,
+                status=status,
+                message=report.get("message", ""),
+                commit=report.get("commit", ""),
+                version=report.get("version", ""),
+                meaning=(
+                    "The installer stopped the sender and kept a backup; it will not retry this commit"
+                    if status == "failed"
+                    else "The host refused the offered commit; it was not installed"
+                ),
+            ),
+            "HIGH" if status == "failed" else "MEDIUM",
+            liveness=False,
+        )
+        offer = json.loads(self.store.meta("upgrade_offer:" + id) or "{}")
+        installed = status == "installed" and report.get("commit") == offer.get("commit")
+        last = health.get("heartbeat") or 0
+        since = float(offer.get("since") or now)
+        add(
+            "upgrade_silence:" + id,
+            machine,
+            bool(offer) and not installed and now - max(last, since) > UPGRADE_SILENCE_SECONDS,
+            "Sender silent after an upgrade offer",
+            dict(
+                who,
+                offered_commit=offer.get("commit", ""),
+                offered_since=offer.get("since"),
+                last_heartbeat=health.get("heartbeat"),
+                meaning="No heartbeat since the offer: a failed upgrade may have left the sender stopped. Check the host",
+            ),
+            "HIGH",
+            liveness=False,
+        )
+
     def report(self, check, recovered=False, notify=True):
         machine = check["machine_id"]
         if not machine:
@@ -247,6 +325,9 @@ class HealthMonitor:
                 "Observer worker needs attention": "Un proceso del observador necesita atención",
                 "Recent model requests failed": "Han fallado las últimas consultas al modelo",
                 "Log review is behind incoming volume": "La revisión de logs va por detrás del volumen recibido",
+                "Sender runs an older LogSentinel than the central": "Un emisor ejecuta una versión de LogSentinel anterior a la del central",
+                "Remote upgrade failed on a sender host": "La actualización remota falló en el equipo de un emisor",
+                "Sender silent after an upgrade offer": "Un emisor dejó de dar señal tras ofrecerle una actualización",
             }.get(check["title"], check["title"])
             if es
             else check["title"]

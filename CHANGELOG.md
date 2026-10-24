@@ -3,9 +3,9 @@
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/).
 Cada entrada corresponde a un commit; su mensaje explica el porqué.
 
-## Sin publicar
+## 1.1.0 - 2026-10-24
 
-Revisión general de fiabilidad, seguridad y mantenimiento (rama `review/hardening-2026-09`).
+Primera versión numerada tras la revisión general de fiabilidad, seguridad y mantenimiento de septiembre y octubre de 2026. El número importa desde ahora: cada emisor comunica el suyo, Fuentes lo muestra y Salud avisa del que va por detrás del central.
 
 ### Cambia el comportamiento
 
@@ -35,6 +35,10 @@ Revisión general de fiabilidad, seguridad y mantenimiento (rama `review/hardeni
 
 ### Añadido
 
+- **Actualización remota de emisores (oferta).** Un interruptor global en Salud y supervisión y otro por máquina hacen que la respuesta de control a los emisores de esa máquina nombre la versión y el commit que ejecuta el central (`upgrade`); apagados, o con un checkout sin commit o con cambios locales, la clave va vacía. El central solo anuncia: el equipo del emisor decide si la atiende.
+- **El emisor anota la oferta y cuenta qué hizo su equipo.** Si la respuesta de control trae una oferta válida (commit de 40 hexadecimales y versión) y root ha permitido la actualización remota en ese equipo, el emisor deja `upgrade-request.json` en su cola para el trabajo de root; una oferta retirada lo borra, una malformada se ignora sin perder el lease. En el heartbeat informa de la política del equipo, la oferta vista y el último resultado de root (`upgrade`), solo a un central que ya envía esa clave: uno antiguo rechazaría el campo. Fuentes lo muestra junto a la versión.
+- **El equipo del emisor instala lo ofrecido solo si lo verifica él.** `setup-client.sh --allow-remote-upgrade` (al instalar o en un `--upgrade`) clona el repositorio del que se instaló en `/opt/logsentinel-client/source`, recuerda su remoto y rama, y activa un temporizador de root (cada 15 min). El trabajo lee de la petición del emisor solo un commit de 40 hexadecimales y una versión, hace `fetch`, exige que el commit esté publicado en `origin/main`, que descienda del instalado (nunca retrocede) y que la versión anunciada sea la del commit, y entonces ejecuta el `--upgrade` normal bajo un cerrojo compartido con las actualizaciones manuales. Un fallo previo a la copia se reintenta con espera creciente; uno posterior (servicio detenido, copia hecha) no se repite hasta que cambie el objetivo. `--deny-remote-upgrade` retira permiso y temporizador. Desactivado por defecto.
+- **Salud vigila las versiones y las actualizaciones de los emisores.** Tres condiciones nuevas por fuente remota, ninguna afecta a `/healthz`: emisor con versión anterior a la del central (MEDIUM); actualización remota fallida (HIGH; el instalador dejó el servicio detenido y una copia) o rechazada por el equipo (MEDIUM, con el motivo); y emisor sin señal durante 20 minutos tras ofrecerle un commit que no ha instalado (HIGH), independiente del plazo de heartbeat de la fuente, porque un emisor que la actualización dejó parado no puede avisar por sí mismo.
 - `scripts/check_publishable.py`: busca rutas personales, secretos y nombres internos en el árbol y en todo el historial (`--history`), y dice qué ramas alcanzan cada hallazgo. Una prueba lo ejecuta.
 - `scripts/check_wheel.py`, `scripts/check_i18n.js`, ruff y mypy en la CI, los once recorridos de navegador y Python 3.14.
 - Registro del servidor con traza, redactado y sin repeticiones (`logsentinel.portal.logs`).
@@ -45,6 +49,7 @@ Revisión general de fiabilidad, seguridad y mantenimiento (rama `review/hardeni
 
 ### Arreglado
 
+- La guía de clientes indicaba `git pull --ff-only` para actualizar; en una copia clonada antes de rehacer el historial del repositorio (octubre de 2026) ese comando falla. Ahora explica cómo colocar la rama local sobre la historia nueva.
 - La lectura de una carpeta abortaba en el primer archivo con error; un archivo `.gz`, `.xz` o `.bz2` truncado hacía caer el emisor en bucle.
 - Una línea de 256 KB con `authentication failure;` detenía la detección de su máquina.
 - El borrado de eventos recorría toda la tabla `signal_hits` por cada evento (35 s para 5 000 eventos con 100 000 aciertos; 0,08 s con el índice).

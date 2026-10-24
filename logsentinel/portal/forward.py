@@ -12,7 +12,7 @@ from .models import Source, check_url
 from .store import Store
 from .sender import blocking, run_workers, spool_lock, status
 from .sender_safety import SenderLimits, CaptureGate, error_detail
-from .sender_control import SenderControl
+from .sender_control import SenderControl, UpgradeChannel
 
 
 # The receiver accepts up to 500 events per request. A batch of 100 every two
@@ -32,6 +32,7 @@ async def forward(
     journal=False,
     new_only=False,
     limits=None,
+    upgrade=None,
 ):
     check_url(receiver)
     if urlsplit(receiver).scheme != "https" and urlsplit(receiver).hostname not in (
@@ -106,7 +107,14 @@ async def forward(
                 trust_env=False,
                 follow_redirects=False,
             ) as client:
-                control = SenderControl(store, client, receiver, source_id, headers)
+                control = SenderControl(
+                    store,
+                    client,
+                    receiver,
+                    source_id,
+                    headers,
+                    UpgradeChannel(store, **(upgrade or {})),
+                )
 
                 async def capture():
                     control.require(capture=True)
