@@ -62,6 +62,18 @@ async function healthView(root) {
             "Cobertura del análisis",
             "Analysis coverage",
           ),
+          "Sender runs an older LogSentinel than the central": bilingual(
+            "Versión del emisor",
+            "Sender version",
+          ),
+          "Remote upgrade failed on a sender host": bilingual(
+            "Actualización remota",
+            "Remote upgrade",
+          ),
+          "Sender silent after an upgrade offer": bilingual(
+            "Silencio tras ofrecer una actualización",
+            "Silence after an upgrade offer",
+          ),
         }[check.title] || check.title;
       const item = panel(title);
       item.append(

@@ -120,9 +120,24 @@ def register_ingest(app, store, build=None):
             upgrade=upgrade_offer(store, source, build),
         )
 
+    def note_offer(id, offer):
+        """Remember when a commit was first offered to this source.
+
+        Health uses it: a sender that falls silent after an offer may have been
+        left stopped by a failed upgrade, and its own heartbeat cannot say so."""
+        key = "upgrade_offer:" + id
+        current = json.loads(store.meta(key) or "{}")
+        if not offer:
+            if current:
+                store.set_meta(key, "")
+        elif current.get("commit") != offer["commit"]:
+            store.set_meta(key, dumps(dict(offer, since=time.time())))
+
     @app.get("/sender-control/{id}")
     def sender_control(id: str, request: Request):
-        return control_state(push_source(id, request, allow_paused=True))
+        state = control_state(push_source(id, request, allow_paused=True))
+        note_offer(id, state["upgrade"])
+        return state
 
     # The store is synchronous SQLite: keep it off the event loop that also
     # accepts every other sender's connection.
