@@ -763,6 +763,15 @@ function objectForm(kind, o) {
     add("os", t("Sistema / distribución"), "text", o.os);
     add("timezone", t("Zona horaria IANA"), "text", o.timezone || "UTC");
     add("notes", t("Contexto de la máquina"), "textarea", o.notes);
+    add(
+      "remote_upgrade",
+      bilingual(
+        "Ofrecer a sus emisores la versión del central (cada equipo decide si la acepta)",
+        "Offer its senders the central's build (each host decides whether to accept)",
+      ),
+      "checkbox",
+      o.remote_upgrade,
+    );
   }
   if (kind === "source") {
     add("machine_id", t("Máquina"), "select", o.machine_id || scope, machines);

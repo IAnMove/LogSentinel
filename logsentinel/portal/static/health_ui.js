@@ -129,6 +129,15 @@ async function healthView(root) {
       "number",
       S.settings.storage_warning_percent,
     ),
+    field(
+      "remote_upgrade",
+      bilingual(
+        "Ofrecer la versión del central a los emisores de las máquinas marcadas",
+        "Offer the central's build to senders of the machines marked for it",
+      ),
+      "checkbox",
+      S.settings.remote_upgrade,
+    ),
   );
   const save = el("button", t("Guardar"));
   form.append(save);
