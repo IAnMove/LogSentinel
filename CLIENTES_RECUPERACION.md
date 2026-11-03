@@ -15,9 +15,16 @@ Desde el repositorio del cliente:
 
 ```bash
 sudo systemctl stop logsentinel-client-logs
-git pull --ff-only
+git fetch origin
+git checkout -B main origin/main
 sudo ./setup-client.sh --upgrade --name logs
 ```
+
+El historial del repositorio público se rehizo en octubre de 2026 con el mismo
+nombre. En una copia clonada antes, `git pull` falla porque las dos historias no
+tienen un antepasado común; `checkout -B main origin/main` coloca la rama local
+sobre la nueva historia sin tocar nada fuera del repositorio. Si tienes cambios
+propios en esa copia, guárdalos antes (`git stash` o una rama aparte).
 
 No necesitas otra alta. El actualizador conserva configuración, identidad,
 credencial, CA, eventos y cursores. Guarda una copia SQLite coherente y la unidad
@@ -48,6 +55,54 @@ Si falla una actualización, el cliente queda detenido y se restaura su unidad
 anterior. No se sobrescribe automáticamente la cola con la copia: podría contener
 eventos nuevos. Conserva ambas para decidir la recuperación. No borres el spool
 para resolver errores de espacio o E/S.
+
+## Actualización remota (opcional, desactivada por defecto)
+
+El central nunca ejecuta nada en un emisor: su único canal hacia él es la
+respuesta de control, que puede **ofrecer** la versión y el commit que el propio
+central ejecuta (interruptor global en *Salud y supervisión* y otro por máquina,
+ambos apagados de serie). Quien decide es root en el equipo del emisor:
+
+```bash
+sudo ./setup-client.sh --upgrade --name logs --allow-remote-upgrade   # permitir
+sudo ./setup-client.sh --upgrade --name logs --deny-remote-upgrade    # retirar
+```
+
+Al permitirla, el instalador clona el repositorio **de esa copia** en
+`/opt/logsentinel-client/source`, anota su remoto y rama (`main`) en la
+configuración de root y activa `logsentinel-client-upgrade-logs.timer`, que cada
+15 minutos ejecuta un trabajo de root con el Python del sistema y solo la
+biblioteca estándar. El emisor, con su cuenta sin privilegios, se limita a dejar
+en su cola `upgrade-request.json` con el commit ofrecido; el trabajo:
+
+1. lee de ese archivo únicamente un commit de 40 hexadecimales y una versión
+   (si es un enlace, no es del emisor, pesa más de 4 KiB o tiene otra forma, lo
+   rechaza sin usarlo);
+2. hace `git fetch` del remoto anotado y exige que el commit exista, esté
+   publicado en `origin/main`, descienda del commit instalado (nunca retrocede:
+   el esquema de la cola solo avanza) y lleve en su `__init__.py` la versión
+   anunciada;
+3. ejecuta entonces el `--upgrade` normal desde esa copia, con la misma copia
+   coherente, las mismas comprobaciones de espacio y presión de E/S y bajo un
+   cerrojo que también toma la actualización manual.
+
+Un fallo **antes** de la copia (presión de disco, falta de espacio, sin red) se
+reintenta con espera creciente (15 min, 30, 60… hasta un día). Un fallo
+**después** (el instalador dejó el servicio detenido y una copia en
+`/opt/logsentinel-client/backup-…`) no se repite para ese commit: lo verás en
+Fuentes y como problema HIGH en Salud, y se retoma a mano como cualquier
+actualización fallida. El central abre además un problema si un emisor al que
+ofreció un commit deja de dar señal 20 minutos sin haberlo instalado, aunque la
+fuente no tenga plazo de heartbeat configurado.
+
+Requisitos y límites: `git` y `python3` en el emisor; salida de red de root al
+remoto y al índice de paquetes (el runtime nuevo se instala con `pip`); el
+central debe ejecutar un checkout con commit publicado y sin cambios locales
+(con cambios locales no ofrece nada). Permitir o retirar el permiso reinicia el
+servicio emisor si estaba activo, para que lea la nueva política; uno detenido
+a propósito sigue detenido. El central no puede cambiar el remoto ni
+la rama: eso solo lo hace root en el emisor. Prueba primero en una o dos
+máquinas antes de marcar el resto.
 
 ## Límites predeterminados
 

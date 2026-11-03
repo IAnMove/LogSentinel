@@ -42,6 +42,10 @@ class Machine(Model):
     os: str = Field(default="", max_length=200)
     timezone: str = "UTC"
     notes: str = Field(default="", max_length=4000)
+    # The central may tell this machine's senders which build to install. The
+    # sender's host decides separately whether it listens (off unless root
+    # enabled it there), so this is an offer, never a command.
+    remote_upgrade: bool = False
 
     @field_validator("timezone")
     @classmethod
@@ -110,6 +114,9 @@ class Settings(Model):
     health_alerts: bool = True
     health_grace_seconds: int = Field(default=30, ge=5, le=3600)
     storage_warning_percent: int = Field(default=80, ge=50, le=99)
+    # Global switch for the per-machine offer above: off, and no sender is
+    # told about a target build whatever its machine says.
+    remote_upgrade: bool = False
 
     @model_validator(mode="after")
     def budgets(self):

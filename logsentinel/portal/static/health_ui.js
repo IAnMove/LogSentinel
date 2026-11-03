@@ -62,6 +62,18 @@ async function healthView(root) {
             "Cobertura del análisis",
             "Analysis coverage",
           ),
+          "Sender runs an older LogSentinel than the central": bilingual(
+            "Versión del emisor",
+            "Sender version",
+          ),
+          "Remote upgrade failed on a sender host": bilingual(
+            "Actualización remota",
+            "Remote upgrade",
+          ),
+          "Sender silent after an upgrade offer": bilingual(
+            "Silencio tras ofrecer una actualización",
+            "Silence after an upgrade offer",
+          ),
         }[check.title] || check.title;
       const item = panel(title);
       item.append(
@@ -128,6 +140,15 @@ async function healthView(root) {
       ),
       "number",
       S.settings.storage_warning_percent,
+    ),
+    field(
+      "remote_upgrade",
+      bilingual(
+        "Ofrecer la versión del central a los emisores de las máquinas marcadas",
+        "Offer the central's build to senders of the machines marked for it",
+      ),
+      "checkbox",
+      S.settings.remote_upgrade,
     ),
   );
   const save = el("button", t("Guardar"));

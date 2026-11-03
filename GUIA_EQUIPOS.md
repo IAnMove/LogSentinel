@@ -80,7 +80,10 @@ no vuelve a importar historial ni canjea otra credencial si ya tiene una. El
 instalador elimina el JSON de alta al terminar: para actualizar, puedes usar la
 copia del paquete original o pedir otro para la misma fuente y receptor.
 Rechaza convertir una instalación existente en otra fuente. Guarda la cola al
-actualizar; no la borres para resolver un error de conexión.
+actualizar; no la borres para resolver un error de conexión. Si quieres que el
+equipo acepte las versiones que ofrezca el central, añade
+`--allow-remote-upgrade` (ver *Actualización remota* en
+[CLIENTES_RECUPERACION.md](CLIENTES_RECUPERACION.md)); por defecto no lo hace.
 
 ```bash
 sudo systemctl restart logsentinel-client-logs

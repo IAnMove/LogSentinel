@@ -1,6 +1,10 @@
 """Authenticated control independent of log delivery, including while paused."""
 
 import asyncio
+import json
+import os
+import re
+import tempfile
 import time
 import sqlite3
 import httpx
@@ -10,12 +14,92 @@ from .sender import blocking, status
 from .sender_safety import SenderWait, error_detail, io_pressure
 
 
+COMMIT = re.compile(r"^[0-9a-f]{40}$")
+VERSION = re.compile(r"^[A-Za-z0-9_.-]{1,80}$")
+# The file this unprivileged process leaves for the root job that may act on
+# it; the job treats it as untrusted input and only ever reads the commit.
+REQUEST_FILE = "upgrade-request.json"
+
+
+class UpgradeChannel:
+    """What the sender knows about remote upgrades, without the power to do one.
+
+    The central offers a commit; this process can only write it down in its
+    own spool. Whether anything happens next is decided by root on this host:
+    the policy flag is in root's configuration, and the result file is root's.
+    """
+
+    def __init__(self, store, enabled=False, state_path=None):
+        self.store, self.enabled = store, bool(enabled)
+        self.state_path = state_path
+        self.offered = None
+
+    def accept(self, offer):
+        """Validate the central's offer; anything malformed counts as no offer."""
+        if (
+            isinstance(offer, dict)
+            and isinstance(offer.get("commit"), str)
+            and COMMIT.match(offer["commit"])
+            and isinstance(offer.get("version"), str)
+            and VERSION.match(offer["version"])
+        ):
+            self.offered = dict(version=offer["version"], commit=offer["commit"])
+        else:
+            self.offered = None
+        path = self.store.directory / REQUEST_FILE
+        if self.offered is None or not self.enabled:
+            path.unlink(missing_ok=True)
+            return
+        wanted = json.dumps(dict(self.offered, seen=int(time.time())))
+        try:
+            if json.loads(path.read_text()).get("commit") == self.offered["commit"]:
+                return
+        except (OSError, ValueError, AttributeError):
+            pass
+        fd, temp = tempfile.mkstemp(prefix=".upgrade-", dir=self.store.directory)
+        with os.fdopen(fd, "w") as handle:
+            handle.write(wanted)
+        os.replace(temp, path)
+
+    def report(self):
+        """The heartbeat field: policy, what was offered and root's last result."""
+        result = dict(
+            policy="enabled" if self.enabled else "disabled",
+            offered=self.offered["commit"] if self.offered else "",
+        )
+        try:
+            state = json.loads(self.state_path.read_text()) if self.state_path else {}
+        except (OSError, ValueError):
+            state = {}
+        if not isinstance(state, dict):
+            state = {}
+        for key, pattern in (
+            ("status", r"^[a-z_]{1,40}$"),
+            ("commit", r"^[0-9a-f]{40}$"),
+            ("version", r"^[A-Za-z0-9_.-]{1,80}$"),
+        ):
+            value = state.get(key)
+            if isinstance(value, str) and re.match(pattern, value):
+                result[key] = value
+        if isinstance(state.get("observed"), (int, float)) and 0 <= state["observed"] < 10**12:
+            result["observed"] = float(state["observed"])
+        if isinstance(state.get("message"), str):
+            result["message"] = "".join(
+                c for c in state["message"] if c.isprintable()
+            )[:300]
+        return result
+
+
 class SenderControl:
-    def __init__(self, store, client, receiver, source_id, headers):
+    def __init__(self, store, client, receiver, source_id, headers, upgrade=None):
         self.store, self.client = store, client
         self.base, self.source, self.headers = receiver.rstrip("/"), source_id, headers
         self.capture_allowed = self.delivery_allowed = False
         self.state, self.lease_until = "control_unavailable", 0
+        self.upgrade = upgrade or UpgradeChannel(store)
+        # Only a central that itself sends the upgrade key understands the
+        # report; an older one refuses a heartbeat with a field it does not know.
+        self.central_offers = False
 
     def require(self, capture=False):
         allowed = self.capture_allowed if capture else self.delivery_allowed
@@ -47,6 +131,14 @@ class SenderControl:
                     value["delivery_allowed"],
                 )
                 self.state, self.lease_until = value["state"], time.monotonic() + 90
+                self.central_offers = "upgrade" in value
+                if self.central_offers:
+                    try:
+                        self.upgrade.accept(value["upgrade"])
+                    except OSError:
+                        # A spool that cannot take the request file must not
+                        # cost the heartbeat that keeps this sender authorised.
+                        pass
             cache = getattr(self.store, "_sender_status", {})
             capture = cache.get("capture", {})
             capture_stalled = (
@@ -88,6 +180,8 @@ class SenderControl:
                     build=__version__,
                     io_pressure_percent=io_pressure(),
                 )
+                if self.central_offers:
+                    payload["upgrade"] = self.upgrade.report()
             response = await self.client.post(
                 self.base + "/heartbeat/" + self.source,
                 headers=self.headers,

@@ -135,6 +135,12 @@ qué componente falla mientras el portal está en marcha.
   (la cuenta sin login del emisor, solo lectura de esas rutas), el **token de
   fuente** (solo escribir eventos de esa fuente) y la **clave del panel** (todo).
 
+**Versiones y actualización.** Cada emisor comunica su versión en el heartbeat y
+Fuentes la muestra. Primero se actualiza el central y después los emisores; un
+emisor nuevo contra un central antiguo sigue funcionando (no envía los campos que
+ese central no conoce) y uno antiguo contra un central nuevo también. La
+actualización remota, si la activas, está descrita en `CLIENTES_RECUPERACION.md`.
+
 ## 8. Métricas de otros equipos
 
 `logsentinel metrics-forward --receiver URL --machine-id ID --interval 60` envía

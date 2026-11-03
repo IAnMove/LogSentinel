@@ -1,5 +1,6 @@
 """Regressions for paused receivers, saturated legacy queues and slow storage."""
 
+from logsentinel import __version__
 import asyncio
 from contextlib import contextmanager
 import hashlib
@@ -85,7 +86,7 @@ async def test_pause_retains_cursor_and_ids_without_capture_then_explicit_resume
     assert len(store.events()) == 1
     health = json.loads(store.meta("health:" + sid))
     assert health["status"] == "paused" and health["sender_pending"] == 1
-    assert health["sender"]["build"] == "1.0.1"
+    assert health["sender"]["build"] == __version__
     with TestClient(app) as c:
         assert c.get("/sender-control/" + sid).status_code == 401
         response = c.post(

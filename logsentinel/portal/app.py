@@ -128,7 +128,7 @@ def create_app(directory, background=True):
     app.state.lifecycle = lifecycle
     register_machines(app, lifecycle)
     register_optimizer(app, store, monitor)
-    register_ingest(app, store)
+    register_ingest(app, store, ctx.build)
     register_enrollment(app, store)
     register_admin(app, ctx)
     return app
