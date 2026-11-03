@@ -23,6 +23,7 @@ Revisión general de fiabilidad, seguridad y mantenimiento (rama `review/hardeni
 - **Fuentes.** Una carpeta con un archivo ilegible sigue leyendo los demás y lo dice; lee los 100 más recientes (antes los 100 primeros por nombre); los comprimidos respetan «importar histórico»; los archivos borrados liberan su descriptor; `journalctl` se invoca con `--all`. Las fechas syslog sin año nunca caen en el futuro y las que carecen de zona usan la de la máquina.
 - **Rutas prohibidas como fuente.** Directorios de credenciales (`.ssh`, `.aws`…), claves, `.env`, `/proc`, `/dev`, los directorios personales y las carpetas que contengan credenciales.
 - **Reinicio de `./portal`.** Ya no actualiza pip ni consulta el índice en cada arranque.
+- **Hueco del journal.** Si la posición guardada del journal desaparece (apagado sin sincronizar, limpieza del journal), la captura ya no se queda parada para siempre con «Journal cursor unavailable». Registra el hueco, lo notifica como la condición de salud «Journal coverage gap» (MEDIUM; indica la última entrada leída y desde cuándo se reanuda; se cierra sola a las 24 h) y continúa desde el instante de la entrada perdida, sin retroceder más de 24 h. Las entradas anteriores que ya no se leyeron no se recuperan, y el aviso lo dice. Un cursor intacto se comporta como antes. El emisor remoto aplica la misma reanudación y la registra en su propio registro y métrica, pero el aviso al central aún no viaja en el latido.
 
 ### Seguridad
 

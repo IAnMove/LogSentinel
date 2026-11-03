@@ -117,6 +117,39 @@ class HealthMonitor:
                     meaning="Checks or sender heartbeats, not log volume, determine availability",
                 ),
             )
+            gap = {}
+            if source["kind"] == "journald":
+                try:
+                    gap = json.loads(self.store.meta("journal_gap:" + source["id"]) or "{}")
+                except ValueError:
+                    gap = {}
+            if gap.get("detected"):
+
+                def iso(t):
+                    return (
+                        datetime.fromtimestamp(t, timezone.utc).isoformat(timespec="seconds")
+                        if t
+                        else None
+                    )
+
+                # Capture resumed by itself; this tells the owner which window
+                # may be missing. It clears after a day, a new gap renews it.
+                add(
+                    "journal_gap:" + source["id"],
+                    source["machine_id"],
+                    now - gap["detected"] < 24 * 3600,
+                    "Journal coverage gap",
+                    dict(
+                        source_id=source["id"],
+                        source_name=source["name"],
+                        last_entry_before_gap=iso(gap.get("lost_cursor_time")),
+                        capture_resumed_from=iso(gap.get("resumed_from")),
+                        lookback_capped=bool(gap.get("lookback_capped")),
+                        detected=iso(gap["detected"]),
+                        meaning="The saved journal position was gone (unclean shutdown or journal cleanup). Entries between the two times were not collected; capture continues from the second one.",
+                    ),
+                    "MEDIUM",
+                )
         quota = cfg.disk_limit_mb * 1024**2
         reserve = cfg.min_free_mb * 1024**2
         size = self.store.size()
@@ -247,6 +280,7 @@ class HealthMonitor:
                 "Observer worker needs attention": "Un proceso del observador necesita atención",
                 "Recent model requests failed": "Han fallado las últimas consultas al modelo",
                 "Log review is behind incoming volume": "La revisión de logs va por detrás del volumen recibido",
+                "Journal coverage gap": "Hueco de cobertura del journal",
             }.get(check["title"], check["title"])
             if es
             else check["title"]

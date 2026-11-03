@@ -14,7 +14,7 @@ import time
 import threading
 from datetime import timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
-from .journal_stream import read_journal
+from .journal_stream import JournalReadError, read_journal
 from .logs import report
 from contextlib import nullcontext
 from pathlib import Path
@@ -31,6 +31,25 @@ MAX_LINE = 256_000
 # A journal record can carry fields of any size with --all; this is the most
 # read for one record before it is cut to MAX_LINE.
 JOURNAL_RECORD_CEILING = 8 * 1024 * 1024
+# After the saved journal position disappears (an unclean shutdown, or a
+# vacuum), capture resumes from where that record was, but never reads further
+# back than this: a long outage must not flood the store with old lines.
+JOURNAL_GAP_LOOKBACK = 24 * 3600
+
+
+class JournalCursorLost(ValueError):
+    """The saved journal position no longer exists; entries may be missing."""
+
+
+def cursor_time(cursor):
+    """Wall-clock seconds of a journal cursor (its t= field), or None."""
+    for part in str(cursor).split(";"):
+        if part.startswith("t="):
+            try:
+                return int(part[2:], 16) / 1e6
+            except ValueError:
+                return None
+    return None
 MAX_FOLDER_FILES = 100
 # An xz header can ask the decoder for a gigabyte of dictionary; an archive that
 # needs more than this to be read is refused rather than allowed to exhaust memory.
@@ -667,10 +686,51 @@ class Collector:
 
     def journal(self, source):
         cursor = self.store.cursor(source["id"], "journal") or {}
+        try:
+            return self._journal(source, cursor)
+        except JournalReadError as exc:
+            if exc.code != "journal_retention_gap" or not cursor.get("cursor"):
+                raise
+            lost = JournalCursorLost("Journal cursor unavailable: possible retention gap; cursor preserved")
+        except JournalCursorLost as exc:
+            lost = exc
+        # Not silent and not stuck: record exactly which window is uncovered
+        # (the health monitor turns this into a notification), then resume.
+        now = time.time()
+        gap_from = cursor_time(cursor["cursor"])
+        since = max(gap_from or 0, now - JOURNAL_GAP_LOOKBACK)
+        key = "journal_gap:" + source["id"]
+        try:
+            known = json.loads(self.store.meta(key) or "{}")
+        except ValueError:
+            known = {}
+        if known.get("lost_cursor") != cursor["cursor"]:
+            # Count and announce each lost position once, not on every poll
+            # while the journal is quiet and the cursor has not moved yet.
+            self.store.set_meta(
+                key,
+                dumps(
+                    dict(
+                        detected=now,
+                        lost_cursor=cursor["cursor"],
+                        lost_cursor_time=gap_from,
+                        resumed_from=since,
+                        lookback_capped=bool(gap_from and gap_from < since),
+                    )
+                ),
+            )
+            self.store.metric(source["id"], "journal_gaps", 1)
+            report("journal gap " + source["id"], lost, trace=False)
+        return self._journal(source, cursor, since=since)
+
+    def _journal(self, source, cursor, since=None):
         # Without --all, journalctl writes any field over 4096 bytes as null,
         # and a record whose MESSAGE is null used to be dropped without a trace.
         cmd = ["journalctl", "--no-pager", "--all", "-o", "json"]
-        if cursor.get("cursor"):
+        verify = bool(cursor.get("cursor")) and since is None
+        if since is not None:
+            cmd += ["--since", "@%.6f" % since]
+        elif cursor.get("cursor"):
             # Include the saved record to verify that retention did not erase it.
             cmd += ["--cursor", cursor["cursor"]]
         elif not source.get("history"):
@@ -679,8 +739,8 @@ class Collector:
         # Reserve a second bounded record so a large saved line cannot starve
         # the next record on every poll.
         budget = source['max_batch_bytes']
-        raw, limited = read_journal(cmd, budget * (2 if cursor.get('cursor') else 1))
-        if limited and b"\n" not in raw[: budget * (2 if cursor.get("cursor") else 1)]:
+        raw, limited = read_journal(cmd, budget * (2 if verify else 1))
+        if limited and b"\n" not in raw[: budget * (2 if verify else 1)]:
             # The first record alone is bigger than the batch. Reading again
             # with room for one record of any size the store can cut keeps the
             # source moving; raising here left the cursor in place and the
@@ -690,7 +750,7 @@ class Collector:
         entries = []
         last = None
         skipped = 0
-        cursor_verified = not bool(cursor.get("cursor"))
+        cursor_verified = not verify
         used = 0
         for line in raw.splitlines(keepends=True):
             if not line.endswith(b"\n"):
@@ -710,7 +770,7 @@ class Collector:
                 continue
             if not cursor_verified:
                 if mark != cursor['cursor']:
-                    raise ValueError("Journal cursor unavailable: possible retention gap; cursor preserved")
+                    raise JournalCursorLost("Journal cursor unavailable: possible retention gap; cursor preserved")
                 cursor_verified = True
                 continue
             if used + len(line) > budget and last is not None:

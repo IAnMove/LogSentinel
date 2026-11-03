@@ -288,24 +288,6 @@ def test_journal_stream_is_bounded_without_disk_temporaries(monkeypatch):
     assert limited and len(output) == 8192
 
 
-def test_missing_journal_cursor_is_visible_and_never_advanced(tmp_path, monkeypatch):
-    store = Store(tmp_path)
-    source = dict(
-        Source(
-            name="journal", machine_id="sender", kind="journald", enabled=True
-        ).model_dump(),
-        id="sender",
-    )
-    store.ingest(source, [], "journal", {"cursor": "old"})
-    monkeypatch.setattr(
-        "logsentinel.portal.collect.read_journal",
-        lambda *_: (b'{"__CURSOR":"new","MESSAGE":"after rotation"}\n', False),
-    )
-    with pytest.raises(ValueError, match="retention gap"):
-        Collector(store).poll(source, True)
-    assert store.cursor("sender", "journal") == {"cursor": "old"} and not store.events()
-
-
 def test_large_inclusive_cursor_does_not_starve_next_record(tmp_path, monkeypatch):
     store = Store(tmp_path)
     source = dict(
