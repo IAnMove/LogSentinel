@@ -74,6 +74,14 @@ async function healthView(root) {
             "Silencio tras ofrecer una actualización",
             "Silence after an upgrade offer",
           ),
+          "Sender has never connected": bilingual(
+            "Emisor nunca conectado",
+            "Sender never connected",
+          ),
+          "Automatic analysis has been off for over a day": bilingual(
+            "Análisis automático apagado",
+            "Automatic analysis off",
+          ),
         }[check.title] || check.title;
       const item = panel(title);
       item.append(

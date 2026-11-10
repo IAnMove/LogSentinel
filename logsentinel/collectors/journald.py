@@ -11,6 +11,20 @@ from logsentinel.core.models import LogEntry, LogSourceType
 from logsentinel.collectors.base import BaseCollector
 
 
+PRIVATE_IDENTIFIER = "logsentinel-activity"
+
+
+def private_journal_line(line: str) -> bool:
+    """True for a journal record that belongs to the brain, not to the logs."""
+    if PRIVATE_IDENTIFIER not in line:
+        return False
+    try:
+        data = json.loads(line)
+    except (ValueError, RecursionError):
+        return False
+    return isinstance(data, dict) and data.get("SYSLOG_IDENTIFIER") == PRIVATE_IDENTIFIER
+
+
 class JournaldCollector(BaseCollector):
     """Streams logs from systemd journal via journalctl -f -o json."""
 
@@ -130,6 +144,11 @@ class JournaldCollector(BaseCollector):
             return None
 
         if not message.strip():
+            return None
+        # Shell commands recorded for the brain travel through the journal but
+        # are not logs: they carry what people typed, go only to the brain's
+        # own store, and must never reach the review or the model through here.
+        if data.get("SYSLOG_IDENTIFIER") == PRIVATE_IDENTIFIER:
             return None
 
         # Extract service

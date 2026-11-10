@@ -15,6 +15,7 @@ function machineActions(machine) {
       ),
     ];
   return [
+    button(bilingual("Abrir ficha", "Open machine page"), () => openMachine(machine.id)),
     button(
       machine.monitoring_paused
         ? bilingual("Reanudar esta máquina", "Resume this machine")
@@ -67,6 +68,8 @@ async function confirmMachineDeletion(machine) {
     usage: bilingual("Registros de consumo", "Usage records"),
     telemetry_samples: bilingual("Muestras de métricas", "Metric samples"),
     telemetry_rollups: bilingual("Resúmenes de métricas", "Metric summaries"),
+    brain_commands: bilingual("Órdenes recordadas", "Remembered commands"),
+    brain_changes: bilingual("Cambios de inventario", "Inventory changes"),
     destinations: bilingual(
       "Notificadores exclusivos",
       "Scoped notification channels",

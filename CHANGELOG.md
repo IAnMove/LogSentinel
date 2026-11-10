@@ -3,6 +3,13 @@
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/).
 Cada entrada corresponde a un commit; su mensaje explica el porqué.
 
+## Sin publicar
+
+- **El portal ya no se lee a sí mismo.** Las peticiones correctas de los emisores dejaban una línea de acceso en el journal que el propio portal recogía, guardaba y enviaba al modelo; en una instalación eran tres de cada cinco líneas del journal local. Ahora solo se registran las peticiones rechazadas o fallidas (4xx y 5xx).
+- **Autovigilancia.** Tres avisos nuevos en Salud: un emisor que no se ha conectado nunca una hora después de activar su fuente, el análisis automático apagado más de un día, y un recordatorio diario mientras una condición siga mal (antes se avisaba una sola vez).
+- **Cerebro.** Inventario de cada equipo (sistema, paquetes, servicios activados, puertos a la escucha, cuentas) con los cambios entre inventarios calculados sin modelo, y registro opcional de las órdenes de shell interactivas con su directorio y proyecto. Vista **Cerebro** con búsqueda, «dónde se ha trabajado» por proyecto y equipo, y preguntas al modelo sobre esos datos con vista previa de lo que se enviaría. Emisor `logsentinel brain-forward` y gancho de shell `logsentinel brain-hook --install`. Estos datos no entran nunca en la revisión automática.
+- **Logs en vivo y ficha de equipo.** Vista **En vivo** con las últimas líneas guardadas y las que van llegando de todos los equipos, y **Ficha del equipo** con identidad, fuentes y su estado, recursos, problemas abiertos, actividad reciente y sus logs en vivo. No consumen tokens.
+
 ## 1.1.0 - 2026-10-24
 
 Primera versión numerada tras la revisión general de fiabilidad, seguridad y mantenimiento de septiembre y octubre de 2026. El número importa desde ahora: cada emisor comunica el suyo, Fuentes lo muestra y Salud avisa del que va por detrás del central.

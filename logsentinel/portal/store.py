@@ -39,6 +39,9 @@ VACUUM_MIN_FRACTION = 0.5
 VACUUM_DISK_MARGIN = 256 * 1024**2
 # Token statistics and the audit trail outlive the log evidence, but not forever.
 LEDGER_MIN_DAYS = 365
+# How far back a live view looks for lines of its scope. A machine that has
+# been quiet for longer shows an empty tail rather than costing a full scan.
+TAIL_LOOKBACK_ROWS = 200_000
 BACKUPS_KEPT = 5
 FINAL_JOBS = ("done", "cancelled", "failed", "partial", "split")
 FINAL_DELIVERIES = ("delivered", "accepted", "failed", "muted", "cancelled", "unknown")
@@ -696,6 +699,51 @@ class Store:
                     cache[sid] = self._decode_segment(segment)
                 out.append(dict(deepcopy(cache[sid][row["ordinal"]]), **dict(row)))
             return out
+
+    def tail(self, machine_id="", source_id="", after=None, limit=200):
+        """Log lines in arrival order for a live view: (events, position).
+
+        Without a position, the most recent lines; with one, only what arrived
+        after it. The position is the row number, which grows with every line
+        stored, so a viewer that polls never misses or repeats one. Metrics and
+        health records are the observer's own and are left out. The scope is
+        filtered while walking the newest rows instead of through an index:
+        a poll every two seconds must cost what arrived, not what is stored."""
+        limit = max(1, min(int(limit), 1000))
+        scope, params = "", []
+        for column, value in (("machine_id", machine_id), ("source_id", source_id)):
+            if value:
+                scope += " AND +" + column + "=?"
+                params.append(value)
+        scope += " AND +source_id NOT LIKE 'metrics:%' AND +source_id NOT LIKE 'health:%'"
+        with self.connect() as db:
+            newest = db.execute("SELECT max(rowid) FROM events").fetchone()[0] or 0
+            if after is None:
+                rows = db.execute(
+                    "SELECT rowid AS position,* FROM events WHERE rowid>?" + scope + " ORDER BY rowid DESC LIMIT ?",
+                    (newest - TAIL_LOOKBACK_ROWS, *params, limit),
+                ).fetchall()[::-1]
+            else:
+                rows = db.execute(
+                    "SELECT rowid AS position,* FROM events WHERE rowid>?" + scope + " ORDER BY rowid LIMIT ?",
+                    (max(int(after), newest - TAIL_LOOKBACK_ROWS), *params, limit),
+                ).fetchall()
+            cache: dict = {}
+            out = []
+            for row in rows:
+                sid = row["segment_id"]
+                if sid not in cache:
+                    segment = db.execute(
+                        "SELECT data,sha FROM segments WHERE id=?", (sid,)
+                    ).fetchone()
+                    cache[sid] = self._decode_segment(segment) if segment else None
+                if cache[sid] is None:
+                    continue
+                out.append(dict(deepcopy(cache[sid][row["ordinal"]]), **dict(row)))
+        # A full page means more is waiting right after its last line; otherwise
+        # the viewer is level with the newest row, whatever its scope.
+        position = out[-1]["position"] if len(rows) == limit and out else newest
+        return out, position
 
     def neighbors(self, ids, radius=2):
         neighbors = []

@@ -45,6 +45,7 @@ def test_only_login_enrollment_and_token_authenticated_reception_accept_a_post_w
         "/heartbeat/{id}", # a per-source token is the credential
         "/ingest/{id}",
         "/ingest-metrics/{id}",
+        "/ingest-brain/{id}",
     }
 
 

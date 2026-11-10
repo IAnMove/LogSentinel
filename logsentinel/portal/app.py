@@ -11,6 +11,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from .brain_api import register_brain
 from .disk_info import register_disk_info
 from .enroll import register_enrollment
 from .ingest import register_ingest
@@ -40,6 +41,21 @@ def create_app(directory, background=True):
     )
     researcher, telemetry, disk_scans = ctx.researcher, ctx.telemetry, ctx.disk_scans
     outbox, health_monitor = ctx.outbox, ctx.health_monitor
+    brain = ctx.brain
+
+    async def remembering():
+        # Inventory and activity of the central's own machine. A failure is
+        # recorded per machine inside tick; this guards the loop itself.
+        from .logs import report
+
+        while True:
+            try:
+                await asyncio.to_thread(brain.tick)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                report("brain worker", exc)
+            await asyncio.sleep(15)
     collecting, working, detecting, delivering, measuring, supervising = build_workers(
         ctx
     )
@@ -71,6 +87,7 @@ def create_app(directory, background=True):
                     delivering,
                     measuring,
                     supervising,
+                    remembering,
                 )
             ]
             if background
@@ -99,11 +116,13 @@ def create_app(directory, background=True):
     app.state.analyzer = analyzer
     app.state.researcher = researcher
     app.state.telemetry = telemetry
+    app.state.brain = brain
     app.state.monitor = monitor
     app.state.outbox = outbox
     app.state.health = health_monitor
     app.state.sessions = ctx.sessions
     register_telemetry(app, telemetry)
+    register_brain(app, brain, analyzer)
     register_disk_info(app, disk_scans)
     register_widget(app, store, monitor, telemetry, health_monitor)
 

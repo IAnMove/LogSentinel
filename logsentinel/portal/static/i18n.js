@@ -7,6 +7,9 @@ const translations = {
   "Cobertura y capacidad": "Coverage and capacity",
   "Eventos de evidencia": "Evidence events",
   "Salud del observador": "Observer health",
+  Cerebro: "Brain",
+  "En vivo": "Live",
+  "Ficha del equipo": "Machine page",
   "Plazo sin señal del emisor remoto (segundos, 0 desactiva)":
     "Remote heartbeat timeout (seconds, 0 disables)",
   "Umbral crítico (%)": "Critical threshold (%)",

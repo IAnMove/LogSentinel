@@ -15,6 +15,14 @@ from .store import dumps, uid
 # A sender that stops answering this long after being offered a build may have
 # been left stopped by a failed upgrade; its own heartbeat cannot report that.
 UPGRADE_SILENCE_SECONDS = 1200
+# An enabled reception source nothing has ever reached: the sender was never
+# installed, or its tunnel never came up. An hour covers a slow first install.
+NEVER_CONNECTED_SECONDS = 3600
+# Automatic analysis left off this long is more likely forgotten than intended.
+ANALYSIS_OFF_SECONDS = 24 * 3600
+# A condition that stays bad is announced again this often: one message weeks
+# ago is not supervision.
+REMINDER_SECONDS = 24 * 3600
 
 
 def version_key(text):
@@ -113,11 +121,27 @@ class HealthMonitor:
             timeout = source.get("heartbeat_timeout_seconds", 0) if remote else 60
             if remote:
                 self.upgrade_conditions(add, source, health, now)
+            since = float(self.store.meta("health_since:source:" + source["id"]) or now)
+            self.store.set_meta("health_since:source:" + source["id"], str(since))
+            if remote:
+                # Any delivery or heartbeat leaves a health record. None at all,
+                # long after the source was enabled, is not a quiet log: nothing
+                # on the other side has ever spoken to this central.
+                add(
+                    "never_connected:" + source["id"],
+                    source["machine_id"],
+                    not health and now - since > NEVER_CONNECTED_SECONDS,
+                    "Sender has never connected",
+                    dict(
+                        source_id=source["id"],
+                        source_name=source["name"],
+                        enabled_since=since,
+                        meaning="The source is enabled but no sender has delivered or sent a heartbeat. Install the sender on that machine, check its tunnel, or remove the source",
+                    ),
+                )
             if remote and not timeout and not health:
                 continue  # A quiet log is not evidence of a broken sender.
             last = health.get("heartbeat", health.get("checked"))
-            since = float(self.store.meta("health_since:source:" + source["id"]) or now)
-            self.store.set_meta("health_since:source:" + source["id"], str(since))
             stale = bool(timeout) and now - max(last or since, since) > timeout
             add(
                 "source:" + source["id"],
@@ -166,6 +190,27 @@ class HealthMonitor:
                     ),
                     "MEDIUM",
                 )
+        # Pausing the analysis is a legitimate choice; forgetting it paused is
+        # how weeks of logs go unread with every other check green.
+        configured = bool(self.store.meta("setup_completed"))
+        off_since = None
+        if cfg.enabled or not configured:
+            self.store.set_meta("analysis_off_since", "")
+        else:
+            off_since = float(self.store.meta("analysis_off_since") or now)
+            self.store.set_meta("analysis_off_since", str(off_since))
+        add(
+            "analysis_off",
+            local,
+            off_since is not None and now - off_since > ANALYSIS_OFF_SECONDS,
+            "Automatic analysis has been off for over a day",
+            dict(
+                off_since=off_since,
+                meaning="Logs are still captured but nothing reviews them. Turn automatic analysis back on in Model and analysis, or keep it off knowingly",
+            ),
+            "MEDIUM",
+            liveness=False,
+        )
         quota = cfg.disk_limit_mb * 1024**2
         reserve = cfg.min_free_mb * 1024**2
         size = self.store.size()
@@ -362,6 +407,8 @@ class HealthMonitor:
                 "Sender runs an older LogSentinel than the central": "Un emisor ejecuta una versión de LogSentinel anterior a la del central",
                 "Remote upgrade failed on a sender host": "La actualización remota falló en el equipo de un emisor",
                 "Sender silent after an upgrade offer": "Un emisor dejó de dar señal tras ofrecerle una actualización",
+                "Sender has never connected": "Un emisor no se ha conectado nunca",
+                "Automatic analysis has been off for over a day": "El análisis automático lleva más de un día apagado",
             }.get(check["title"], check["title"])
             if es
             else check["title"]
@@ -416,9 +463,15 @@ class HealthMonitor:
                         or not state.get("problem_id")
                         or check["severity"] == "CRITICAL"
                         and state.get("severity") != "CRITICAL"
+                        # Still bad a day later: say so again. Told once, a
+                        # source stayed broken for weeks with nobody reminded.
+                        or now - state.get("reported", now) >= REMINDER_SECONDS
                     )
                 ):
                     state["problem_id"] = self.report(check)
+                    state["reported"] = now
+                elif active and state.get("problem_id") and "reported" not in state:
+                    state["reported"] = now  # conditions recorded before reminders existed
                 if not check["bad"] and state.get("active") and state.get("problem_id"):
                     check["severity"] = state.get("severity", check["severity"])
                     self.report(check, recovered=True, notify=cfg.health_alerts)
@@ -435,6 +488,8 @@ class HealthMonitor:
                 report("health check " + check["key"], exc)
                 check["persistence_error"] = "Could not record this condition: " + type(exc).__name__
                 active = state.get("active", False)
+            if not active:
+                state.pop("reported", None)
             state.update(
                 active=active,
                 bad_since=bad_since,

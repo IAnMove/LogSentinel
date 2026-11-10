@@ -7,6 +7,7 @@ from typing import Any
 
 from ..analysis import Analyzer
 from ..auth import SessionAuth
+from ..brain import Brain
 from ..build_info import running_build
 from ..collect import Collector
 from ..disk_info import DiskScans
@@ -27,6 +28,7 @@ class Context:
     monitor: Monitor
     researcher: Researcher
     telemetry: Telemetry
+    brain: Brain
     disk_scans: DiskScans
     outbox: Outbox
     health_monitor: HealthMonitor
@@ -42,6 +44,7 @@ def build_context(directory, background=True) -> Context:
     monitor = Monitor(store, analyzer, background)
     researcher = Researcher(store, analyzer)
     telemetry = Telemetry(store, analyzer)
+    brain = Brain(store)
     disk_scans = DiskScans(store, telemetry)
     outbox = Outbox(store)
     health_monitor = HealthMonitor(store, analyzer, monitor, telemetry, background)
@@ -54,6 +57,7 @@ def build_context(directory, background=True) -> Context:
         monitor=monitor,
         researcher=researcher,
         telemetry=telemetry,
+        brain=brain,
         disk_scans=disk_scans,
         outbox=outbox,
         health_monitor=health_monitor,

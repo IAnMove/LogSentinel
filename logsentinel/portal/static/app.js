@@ -17,6 +17,9 @@ const names = {
   machine: t("Máquinas"),
   metrics: t("Métricas"),
   health: t("Salud del observador"),
+  brain: t("Cerebro"),
+  live: t("En vivo"),
+  machine_detail: t("Ficha del equipo"),
   capacity: t("Cobertura y capacidad"),
   appearance: t("Apariencia"),
   desktop: t("Escritorio"),
@@ -305,7 +308,7 @@ function navigate(v) {
 const navGroups = [
   {
     label: ["Observar", "Watch"],
-    keys: ["summary", "problems", "events", "metrics", "capacity", "health", "activity"],
+    keys: ["summary", "machine_detail", "live", "problems", "events", "metrics", "brain", "capacity", "health", "activity"],
   },
   {
     label: ["Configurar", "Configure"],
@@ -377,6 +380,9 @@ async function render() {
   if (view === "problem_detail") return problemPage(root);
   if (view === "metrics") return metricsView(root);
   if (view === "health") return healthView(root);
+  if (view === "brain") return brainView(root);
+  if (view === "live") return liveView(root);
+  if (view === "machine_detail") return machineDetailView(root);
   if (view === "capacity") return capacityView(root);
   if (view === "appearance") return appearanceView(root);
   if (view === "desktop") return desktopView(root);

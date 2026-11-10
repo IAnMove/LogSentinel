@@ -224,6 +224,25 @@ def register_objects(app, ctx):
             "exhausted": exhausted,
         }
 
+    @app.get("/api/live")
+    def live(
+        machine_id: str = "",
+        source_id: str = "",
+        after: int | None = None,
+        limit: int = 200,
+    ):
+        """The tail of the stored logs, and then whatever arrives after it."""
+        if after is not None and after < 0 or not 1 <= limit <= 1000:
+            raise HTTPException(400, "Use a position of 0 or more and a limit of 1–1000")
+        rows, position = store.tail(machine_id, source_id, after, limit)
+        keep = ("position", "id", "machine_id", "source_id", "received", "timestamp", "service", "priority", "message", "status")
+        return {
+            "events": sanitize(
+                [{k: row.get(k) for k in keep} for row in rows], protected_secrets(store)
+            ),
+            "position": position,
+        }
+
     @app.get("/api/stats")
     def stats(machine_id: str = ""):
         return store.stats(machine_id)

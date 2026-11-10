@@ -779,6 +779,7 @@ def portal(data_dir: str = typer.Option("~/.local/share/logsentinel/portal", "--
             if path and not Path(path).expanduser().is_file():
                 raise typer.BadParameter(f"Cannot read the TLS {label}: {path}")
     from logsentinel.portal.logs import configure as configure_logging
+    from logsentinel.portal.logs import uvicorn_log_config
 
     configure_logging()
     application = create_app(data_dir)
@@ -788,7 +789,13 @@ def portal(data_dir: str = typer.Option("~/.local/share/logsentinel/portal", "--
     key_path = application.state.store.write_access_key()
     console.print("Read the access key for local login from:", key_path, markup=False)
     if not ingest_listen:
-        uvicorn.run(application, host="127.0.0.1", port=port, proxy_headers=False)
+        uvicorn.run(
+            application,
+            host="127.0.0.1",
+            port=port,
+            proxy_headers=False,
+            log_config=uvicorn_log_config(),
+        )
         return
 
     from logsentinel.portal.ingest import create_ingest_app
@@ -799,19 +806,26 @@ def portal(data_dir: str = typer.Option("~/.local/share/logsentinel/portal", "--
     servers = [
         uvicorn.Server(
             uvicorn.Config(
-                application, host="127.0.0.1", port=port, proxy_headers=False
+                application,
+                host="127.0.0.1",
+                port=port,
+                proxy_headers=False,
+                log_config=uvicorn_log_config(),
             )
         ),
         uvicorn.Server(
             uvicorn.Config(
                 create_ingest_app(
-                    application.state.store, application.state.telemetry
+                    application.state.store,
+                    application.state.telemetry,
+                    brain=application.state.brain,
                 ),
                 host=ingest_host,
                 port=ingest_port,
                 proxy_headers=False,
                 ssl_certfile=tls_cert,
                 ssl_keyfile=tls_key,
+                log_config=uvicorn_log_config(),
                 # The panel is loopback only; this listener answers the network,
                 # so a flood of connections gets a 503 rather than all the memory.
                 limit_concurrency=INGEST_MAX_CONNECTIONS,
@@ -868,6 +882,47 @@ def metrics_forward_command(
     if not token:
         raise typer.BadParameter("Set LOGSENTINEL_METRICS_TOKEN to the machine's metrics token")
     asyncio.run(forward_metrics(receiver, machine_id, token, spool, interval, disk, once))
+
+
+@app.command(name="brain-forward")
+def brain_forward_command(
+    receiver: str = typer.Option(..., "--receiver"),
+    machine_id: str = typer.Option(..., "--machine-id"),
+    inventory_interval: int = typer.Option(86400, "--inventory-interval", min=300, max=604800, help="Seconds between inventories"),
+    activity: bool = typer.Option(True, "--activity/--no-activity", help="Also send the commands recorded by the shell hook"),
+    spool: str = typer.Option("~/.local/share/logsentinel/brain-spool", "--spool"),
+    once: bool = typer.Option(False, "--once"),
+):
+    """Send this host's inventory and recorded shell activity. Token: LOGSENTINEL_BRAIN_TOKEN."""
+    import os
+    from logsentinel.portal.brain_forward import forward_brain
+    token = os.environ.get("LOGSENTINEL_BRAIN_TOKEN", "")
+    if not token:
+        raise typer.BadParameter("Set LOGSENTINEL_BRAIN_TOKEN to the machine's brain token")
+    asyncio.run(forward_brain(receiver, machine_id, token, spool, inventory_interval, activity, once=once))
+
+
+@app.command(name="brain-hook")
+def brain_hook_command(
+    install: bool = typer.Option(False, "--install", help="Write the hook for every interactive shell on this host (needs root)"),
+    remove: bool = typer.Option(False, "--remove", help="Remove the installed hook (needs root)"),
+):
+    """Print, install or remove the shell hook that records interactive commands in the journal."""
+    from logsentinel.portal.brain_collect import ACTIVITY_HOOK
+    from logsentinel.portal.brain_hook import install_hook, remove_hook
+    if install and remove:
+        raise typer.BadParameter("Choose --install or --remove")
+    try:
+        if install:
+            for line in install_hook():
+                console.print(line, markup=False)
+        elif remove:
+            for line in remove_hook():
+                console.print(line, markup=False)
+        else:
+            print(ACTIVITY_HOOK, end="")
+    except OSError as exc:
+        raise typer.BadParameter("Could not change the shell configuration (run as root): " + str(exc)) from None
 
 
 @app.command(name="enrollment-package")

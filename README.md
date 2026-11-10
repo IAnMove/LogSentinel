@@ -50,6 +50,8 @@ Los servidores LLM fuera de loopback requieren activar la autorización de enví
 - Volumen original/comprimido, cobertura y tokens por máquina; atribución estimada por fuente cuando se comparten llamadas. El uso no reportado se muestra como desconocido.
 - Registros de acceso de Apache y nginx (formato común y combinado): cada petición se guarda con su hora, cliente, ruta y estado, y seis detectores buscan errores 5xx, intentos masivos de login, secretos servidos, sondeos, escaneo de rutas y cargas de ataque. Ver `OPERACION.md`.
 - Backup coherente y restauración en un directorio nuevo.
+- **Ficha del equipo** y **En vivo**: todo lo de una máquina en una pantalla (fuentes y su estado, recursos, problemas abiertos, actividad) y los logs según llegan, de un equipo o de todos. Ver logs aquí no usa tokens.
+- **Cerebro**: inventario diario de cada equipo con sus cambios, y registro opcional de las órdenes de shell para saber en qué equipo y proyecto se trabajó. Ver [Cerebro](#cerebro).
 - Asistente de inicio, selector español/inglés persistente y ayuda LLM disponible desde cualquier pantalla. La ayuda de configuración no recibe logs ni credenciales; el asistente de logs usa una muestra reciente de la máquina seleccionada.
 
 ## Garantías y límites
@@ -67,6 +69,23 @@ Lo que esta versión asegura y lo que no, para que no haya que descubrirlo en un
 - **Ocultación de secretos.** Antes de enviar texto al modelo o a un destino se ocultan credenciales reconocibles: pares `clave=valor` y JSON, `Authorization`, `Bearer`, credenciales en URL, `--password`, cookies, claves PEM y prefijos de token conocidos. Es una lista, no una garantía: un secreto con otra forma pasa. Los originales se guardan sin redactar.
 - **Registro del servidor.** Los fallos de los procesos internos se escriben con su traza en stderr (el journal, si corre como servicio), con los secretos ocultos y un mismo fallo como máximo cada cinco minutos.
 - **Lo que no hace.** No garantiza detectar ataques nuevos ni resiste toda inyección de instrucciones en los logs: la detecta por frases, la marca como hallazgo y no deja que decida por sí sola silenciar un problema. «Sin revisar» nunca significa «sin problemas».
+
+## Cerebro
+
+Memoria de cada equipo, separada de la revisión de logs:
+
+- **Inventario.** Sistema, paquetes (dpkg, rpm o pacman), servicios activados, puertos a la escucha y cuentas con shell. Se envía una vez al día; el central guarda el inventario solo si cambió y anota cada diferencia (añadido, eliminado, cambiado) sin usar el modelo. Si un lector falla en el equipo, esa categoría figura como no leída, no como vacía.
+- **Actividad.** Con el gancho de shell instalado, cada orden interactiva de bash o zsh queda en el journal con su directorio y el repositorio git donde se ejecutó, y el emisor la envía. El usuario lo pone el journal, no el texto. Las credenciales reconocibles se ocultan en el equipo antes de guardarse. Una orden escrita con un espacio delante no se registra (con `HISTCONTROL=ignorespace` en bash, que es lo habitual). No cubre lo que ejecutan scripts, cron o agentes: solo lo tecleado en una shell interactiva.
+- **Preguntas.** La vista Cerebro busca por proyecto, equipo y texto sin modelo. Al preguntar, el central elige los registros que coinciden con la pregunta y solo esos van al modelo; **Ver qué se enviaría** muestra el contenido exacto antes. Nada del cerebro entra en la revisión automática.
+
+En el equipo central basta con activarlo en **Cerebro**. En otro equipo, genera allí su token y arranca el emisor con el mismo receptor que usa su emisor de logs:
+
+```bash
+LOGSENTINEL_BRAIN_TOKEN=... logsentinel brain-forward --receiver https://CENTRAL:8767 --machine-id ID
+sudo logsentinel brain-hook --install    # opcional: registrar las órdenes; --remove lo quita
+```
+
+La cuenta del emisor necesita el grupo `systemd-journal` para leer las órdenes. Registrar lo que se teclea en un equipo que usan otras personas requiere avisarles y, en una empresa, revisarlo con quien lleve protección de datos. Por defecto se conserva un año por equipo; se ajusta en la misma vista.
 
 ## Enviar desde otro equipo
 
@@ -129,13 +148,13 @@ Los recorridos de interfaz usan un navegador real y un modelo simulado, sin avis
 ```bash
 .venv/bin/python -m pip install -c constraints-tested-py312.txt playwright
 .venv/bin/python -m playwright install chromium
-for s in portal setup problem metrics providers capacity review_state chat machines_resources guidance themes; do
+for s in portal setup problem metrics providers capacity review_state chat machines_resources guidance themes brain live; do
   .venv/bin/python scripts/${s}_smoke.py
 done
 node scripts/omarchy_smoke.mjs
 ```
 
-`constraints-tested-py312.txt` registra las versiones con las que pasan; úsalo como constraints en Python 3.12. La CI ejecuta las pruebas en Python 3.10, 3.12, 3.13 y 3.14, el linter, los tipos, los once recorridos de navegador y comprueba el contenido del wheel (`scripts/check_wheel.py`).
+`constraints-tested-py312.txt` registra las versiones con las que pasan; úsalo como constraints en Python 3.12. La CI ejecuta las pruebas en Python 3.10, 3.12, 3.13 y 3.14, el linter, los tipos, los recorridos de navegador y comprueba el contenido del wheel (`scripts/check_wheel.py`).
 
 La CLI anterior (`logsentinel run`) se conserva como compatibilidad; usa otra base y no es el motor del portal. Recibe la misma redacción de secretos y el mismo transporte seguro, pero no las mejoras de flujo del portal. El experimento de horarios SSH queda desactivado por defecto.
 

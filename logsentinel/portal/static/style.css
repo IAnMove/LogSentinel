@@ -1221,3 +1221,50 @@ nav button {
 #page-title:focus {
   outline: none;
 }
+
+/* Brain: answers keep the model's line breaks; commands read as typed. */
+.brain-answer pre {
+  margin-top: 0.75rem;
+}
+.brain-answer:empty {
+  display: none;
+}
+
+/* Live logs: a terminal-like tail that keeps to the theme's own colours. */
+.live-tail {
+  height: 28rem;
+  overflow-y: auto;
+  margin-top: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+.live-line {
+  display: flex;
+  gap: 0.75rem;
+  align-items: baseline;
+}
+.live-time,
+.live-machine,
+.live-service {
+  flex: none;
+  opacity: 0.7;
+}
+.live-machine {
+  font-weight: 600;
+}
+.live-message {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+.live-error .live-message {
+  color: var(--danger);
+  font-weight: 600;
+}
+.live-warning .live-message {
+  font-weight: 600;
+}

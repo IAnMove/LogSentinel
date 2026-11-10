@@ -207,7 +207,13 @@ def register_ingest(app, store, build=None):
             ):
                 raise HTTPException(400, "Invalid event")
             if log_format == "journal":
-                from logsentinel.collectors.journald import JournaldCollector
+                from logsentinel.collectors.journald import JournaldCollector, private_journal_line
+
+                if private_journal_line(item["raw"]):
+                    # A sender older than the brain forwards the commands the
+                    # shell hook writes. Acknowledged so its queue moves on,
+                    # and not stored: they are not log evidence.
+                    continue
                 from logsentinel.config import JournaldSourceConfig
 
                 try:
@@ -240,7 +246,7 @@ def register_ingest(app, store, build=None):
                 headers={"Retry-After": str(retry_after)},
             )
         try:
-            count = store.ingest(source, entries)
+            count = store.ingest(source, entries) if entries else 0
         except OSError:
             raise HTTPException(507, "Storage full; retain and retry these events") from None
         except ValueError as exc:
@@ -260,7 +266,7 @@ def register_ingest(app, store, build=None):
         }
 
 
-def create_ingest_app(store, telemetry=None, build=None):
+def create_ingest_app(store, telemetry=None, build=None, brain=None):
     """Build a listener carrying reception and nothing else."""
     app = FastAPI(
         title="LogSentinel reception",
@@ -311,4 +317,8 @@ def create_ingest_app(store, telemetry=None, build=None):
         from .telemetry_api import register_metrics_ingest
 
         register_metrics_ingest(app, telemetry)
+    if brain is not None:
+        from .brain_api import register_brain_ingest
+
+        register_brain_ingest(app, brain)
     return app

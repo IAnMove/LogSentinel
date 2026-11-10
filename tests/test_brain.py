@@ -1,0 +1,422 @@
+"""The brain: what each machine has, what changed, and where work was done."""
+
+import hashlib
+import json
+import time
+
+import pytest
+
+from helpers import machine_source
+from logsentinel.portal import brain_collect
+from logsentinel.portal.analysis import ReviewClient
+from logsentinel.portal.brain import terms
+from logsentinel.portal.brain_data import differences
+from logsentinel.portal.brain_hook import MARK, install_hook, remove_hook
+
+
+def inventory(observed, **data):
+    data.setdefault("system", {"os": "Example Linux 1", "kernel": "6.0", "architecture": "x86_64", "hostname": "host"})
+    body = json.dumps(data, sort_keys=True)
+    return dict(
+        id="inv-%d" % observed,
+        kind="inventory",
+        observed=observed,
+        digest=hashlib.sha256(body.encode()).hexdigest(),
+        data=data,
+        errors=[],
+    )
+
+
+def command(n, observed, text, cwd="/home/alice/shop", project="shop", user="alice"):
+    return dict(id="cmd-%s" % n, kind="command", observed=observed, user=user, cwd=cwd, project=project, command=text)
+
+
+@pytest.fixture
+def remote(client):
+    """A machine with remote brain reports enabled and a sender token."""
+    c, store = client
+    machine, _ = machine_source(c)
+    assert c.post("/api/brain/%s/config" % machine, json={"enabled": True}).status_code == 200
+    token = c.post("/api/brain/%s/token" % machine).json()["token"]
+    return c, store, machine, {"Authorization": "Bearer " + token}
+
+
+def send(c, machine, headers, *items):
+    return c.post("/ingest-brain/" + machine, json={"items": list(items)}, headers=headers)
+
+
+def test_differences_name_what_was_added_removed_and_changed():
+    before = {"packages": {"nginx": "1.0", "curl": "8.0"}, "ports": {"tcp 0.0.0.0:22": "listening"}}
+    after = {"packages": {"nginx": "1.1", "git": "2.4"}, "ports": {"tcp 0.0.0.0:22": "listening"}}
+    assert differences(before, after) == [
+        ("packages", "removed", "curl", "8.0", ""),
+        ("packages", "added", "git", "", "2.4"),
+        ("packages", "changed", "nginx", "1.0", "1.1"),
+    ]
+
+
+def test_a_category_that_could_not_be_read_is_not_reported_as_emptied():
+    before = {"packages": {"nginx": "1.0"}, "users": {"alice": "uid 1000, /bin/bash"}}
+    after = {"users": {"alice": "uid 1000, /bin/bash"}}  # the package reader failed
+    assert differences(before, after) == []
+
+
+def test_reception_needs_the_machine_token_and_an_enabled_brain(remote):
+    c, store, machine, headers = remote
+    item = command(1, time.time(), "git status")
+    assert send(c, machine, {"Authorization": "Bearer wrong"}, item).status_code == 401
+    assert send(c, machine, {}, item).status_code == 401
+    assert send(c, machine, headers, item).status_code == 200
+    c.post("/api/brain/%s/config" % machine, json={"enabled": False})
+    assert send(c, machine, headers, item).status_code == 409
+    assert c.post("/ingest-brain/" + machine, json={"items": []}, headers=headers).status_code == 409
+
+
+def test_malformed_items_are_refused_whole(remote):
+    c, store, machine, headers = remote
+    assert send(c, machine, headers, {"id": "x", "kind": "command", "observed": time.time()}).status_code == 400
+    assert c.post("/ingest-brain/" + machine, json={"items": []}, headers=headers).status_code == 400
+    assert c.post("/ingest-brain/" + machine, json=[1], headers=headers).status_code == 400
+
+
+def test_the_first_inventory_is_a_baseline_and_later_ones_record_changes(remote):
+    c, store, machine, headers = remote
+    now = time.time()
+    first = inventory(now - 7200, packages={"nginx": "1.0", "curl": "8.0"}, users={"alice": "uid 1000, /bin/bash"})
+    assert send(c, machine, headers, first).json()["acknowledged"] == [first["id"]]
+    assert c.get("/api/brain/changes").json()["changes"] == []
+    second = inventory(now - 3600, packages={"nginx": "1.1", "curl": "8.0"}, users={"alice": "uid 1000, /bin/bash", "mallory": "uid 1001, /bin/sh"})
+    send(c, machine, headers, second)
+    changes = c.get("/api/brain/changes", params={"machine": machine}).json()["changes"]
+    assert {(r["category"], r["action"], r["item"], r["before"], r["after"]) for r in changes} == {
+        ("packages", "changed", "nginx", "1.0", "1.1"),
+        ("users", "added", "mallory", "", "uid 1001, /bin/sh"),
+    }
+    # The same picture again, and a replay of an older one, add nothing.
+    same = dict(second, id="inv-again", observed=now - 60)
+    send(c, machine, headers, same)
+    send(c, machine, headers, first)
+    assert len(c.get("/api/brain/changes").json()["changes"]) == 2
+    status = next(m for m in c.get("/api/brain").json()["machines"] if m["machine_id"] == machine)
+    assert status["counts"]["packages"] == 2 and status["changes_week"] == 2
+    assert status["inventory_observed"] == pytest.approx(now - 60)
+    found = c.get("/api/brain/%s/inventory" % machine, params={"q": "ngin"}).json()
+    assert [(i["item"], i["value"]) for i in found["items"]] == [("nginx", "1.1")]
+
+
+def test_activity_is_searchable_by_project_machine_and_text(remote):
+    c, store, machine, headers = remote
+    other, _ = machine_source(c)
+    c.post("/api/brain/%s/config" % other, json={"enabled": True})
+    other_headers = {"Authorization": "Bearer " + c.post("/api/brain/%s/token" % other).json()["token"]}
+    now = time.time()
+    send(c, machine, headers,
+         command(1, now - 300, "git commit -m 'checkout page'"),
+         command(2, now - 200, "pytest tests/test_cart.py"),
+         command(3, now - 100, "systemctl restart nginx", cwd="/etc/nginx", project=""))
+    send(c, other, other_headers, command(1, now - 50, "git pull", cwd="/srv/shop", project="shop"))
+    # Delivered twice: stored once.
+    send(c, machine, headers, command(2, now - 200, "pytest tests/test_cart.py"))
+    everything = c.get("/api/brain/activity").json()["commands"]
+    assert [r["command"] for r in everything] == [
+        "git pull", "systemctl restart nginx", "pytest tests/test_cart.py", "git commit -m 'checkout page'"]
+    assert len(c.get("/api/brain/activity", params={"machine": machine}).json()["commands"]) == 3
+    assert [r["command"] for r in c.get("/api/brain/activity", params={"q": "pytest"}).json()["commands"]] == ["pytest tests/test_cart.py"]
+    # % and _ in a search are text, not wildcards.
+    assert c.get("/api/brain/activity", params={"q": "%"}).json()["commands"] == []
+    projects = c.get("/api/brain/projects").json()["projects"]
+    shop = {p["machine_id"]: p for p in projects if p["label"] == "shop"}
+    assert shop[machine]["commands"] == 2 and shop[other]["commands"] == 1
+    assert any(p["label"] == "/etc/nginx" and not p["repository"] for p in projects)
+    assert len(c.get("/api/brain/activity", params={"project": "/etc/nginx"}).json()["commands"]) == 1
+    days = c.get("/api/brain/days", params={"machine": other}).json()["days"]
+    assert [(d["label"], d["commands"]) for d in days] == [("shop", 1)]
+
+
+def test_commands_are_refused_when_activity_is_turned_off_centrally(remote):
+    c, store, machine, headers = remote
+    c.post("/api/brain/%s/config" % machine, json={"activity": False})
+    answer = send(c, machine, headers, command(1, time.time(), "ls")).json()
+    assert answer["acknowledged"] == [] and answer["rejected"][0]["reason"] == "activity_disabled"
+    assert c.get("/api/brain/activity").json()["commands"] == []
+
+
+def test_only_the_local_machine_may_be_read_locally(remote):
+    c, store, machine, headers = remote
+    assert c.post("/api/brain/%s/config" % machine, json={"mode": "local"}).status_code == 400
+
+
+def test_deleting_a_machine_takes_its_memory_with_it(remote):
+    c, store, machine, headers = remote
+    send(c, machine, headers, command(1, time.time(), "ls"), inventory(time.time() - 10, packages={"a": "1"}))
+    from logsentinel.portal.machines import deletion_preview, erase_machine
+
+    assert deletion_preview(store, machine)["counts"]["brain_commands"] == 1
+    erase_machine(store, machine)
+    with store.connect() as db:
+        for table in ("brain_commands", "brain_snapshots", "brain_changes"):
+            assert db.execute("SELECT count(*) FROM %s" % table).fetchone()[0] == 0
+    assert store.meta("brain_token:" + machine) is None
+    assert store.get("brain_config", "brain:" + machine) is None
+
+
+def test_old_activity_expires_with_the_machine_retention(remote):
+    c, store, machine, headers = remote
+    c.post("/api/brain/%s/config" % machine, json={"retention_days": 2})
+    now = time.time()
+    send(c, machine, headers, command(1, now - 86400, "kept"))
+    with store.connect() as db:
+        db.execute("INSERT INTO brain_commands VALUES(?,?,?,?,?,?,?)", (machine, "old", now - 3 * 86400, "alice", "/", "", "gone"))
+    assert c.app.state.brain.data.prune() == 1
+    assert [r["command"] for r in c.get("/api/brain/activity").json()["commands"]] == ["kept"]
+
+
+def test_question_terms_drop_filler_words():
+    assert terms("¿En qué equipo trabajé en el proyecto shop con nginx?") == ["shop", "nginx"]
+    assert terms("where did I install docker-compose") == ["install", "docker-compose"]
+
+
+def test_a_question_sends_only_matching_records_and_can_be_previewed(remote, monkeypatch):
+    c, store, machine, headers = remote
+    now = time.time()
+    send(c, machine, headers,
+         inventory(now - 500, packages={"nginx": "1.1", "curl": "8.0"}),
+         command(1, now - 300, "vim deploy.yml", cwd="/home/alice/shop", project="shop"),
+         command(2, now - 200, "ssh backup.example.invalid", cwd="/home/alice", project=""))
+    body = {"message": "what did I do with nginx and the shop deploy?", "days": 7}
+    preview = c.post("/api/brain/context", json=body).json()
+    payload = preview["payload"]
+    assert [r["command"] for r in payload["commands"]] == ["vim deploy.yml"]
+    assert payload["installed_matches"] == [dict(machine="A", category="packages", item="nginx", value="1.1")]
+    assert payload["projects"][0]["machine"] == "A"
+    sent = {}
+
+    async def fake(self, payload, kind="analysis", **options):
+        sent.update(payload=payload, kind=kind, system=options["system"])
+        return {"answer": "You edited deploy.yml in shop on A."}
+
+    monkeypatch.setattr(ReviewClient, "call", fake)
+    answer = c.post("/api/brain/ask", json=dict(body, language="es"))
+    assert answer.status_code == 200, answer.text
+    assert answer.json()["answer"] == "You edited deploy.yml in shop on A."
+    assert sent["payload"] == payload and sent["kind"] == "brain"
+    assert sent["system"].endswith("Spanish.") and "untrusted" in sent["system"]
+
+
+def test_a_question_context_stays_within_its_budget(remote):
+    c, store, machine, headers = remote
+    now = time.time()
+    send(c, machine, headers, *[command(n, now - n, "make target-%d " % n + "x" * 400) for n in range(300)])
+    payload = c.app.state.brain.context("make target", budget=6000)
+    assert len(json.dumps(payload).encode()) <= 6200 and not payload["truncated"]
+    assert payload["commands"] and payload["commands"][0]["command"].startswith("make target-0 ")
+
+
+def test_a_journal_entry_becomes_a_redacted_record_with_the_journals_own_user(monkeypatch):
+    monkeypatch.setattr(brain_collect, "user_name", lambda uid: "alice" if uid == "1000" else "?")
+    record = brain_collect.activity_record({
+        "MESSAGE": "curl -H 'Authorization: Bearer abcdefghijklmnop123456' https://example.invalid/x --password=hunter2secret",
+        "LS_CWD": "/home/alice/shop", "LS_PROJECT": "shop", "_UID": "1000",
+        "__CURSOR": "s=1;i=2", "__REALTIME_TIMESTAMP": "1700000000000000",
+        "LS_USER": "root",  # a field the writer chose is not who wrote it
+    })
+    assert record["user"] == "alice" and record["observed"] == 1700000000.0
+    assert record["cwd"] == "/home/alice/shop" and record["project"] == "shop"
+    assert "abcdefghijklmnop123456" not in record["command"] and "hunter2secret" not in record["command"]
+    assert brain_collect.activity_record({"MESSAGE": "", "__CURSOR": "c", "__REALTIME_TIMESTAMP": "1"}) is None
+    assert brain_collect.activity_record({"MESSAGE": "ls", "__CURSOR": "c"}) is None
+
+
+def test_reading_activity_follows_the_cursor_and_survives_a_lost_one(monkeypatch):
+    calls = []
+
+    def entry(n):
+        return json.dumps({"MESSAGE": "cmd %d" % n, "_UID": "0", "__CURSOR": "c%d" % n, "__REALTIME_TIMESTAMP": str(n * 10**6)})
+
+    def fake(arguments, timeout=30):
+        calls.append(arguments)
+        if "--after-cursor" in arguments:
+            return None if arguments[-1] == "gone" else [entry(3), "not json", entry(4)]
+        return [entry(1), entry(2)]
+
+    monkeypatch.setattr(brain_collect, "run", fake)
+    records, cursor = brain_collect.read_activity("")
+    assert [r["command"] for r in records] == ["cmd 1", "cmd 2"] and cursor == "c2"
+    records, cursor = brain_collect.read_activity("c2")
+    assert [r["command"] for r in records] == ["cmd 3", "cmd 4"] and cursor == "c4"
+    records, cursor = brain_collect.read_activity("gone")
+    assert cursor == "c2" and "--since" in calls[-1]
+    monkeypatch.setattr(brain_collect, "run", lambda *a, **k: None)
+    with pytest.raises(OSError):
+        brain_collect.read_activity("")
+
+
+def test_an_inventory_names_the_readers_that_failed(monkeypatch):
+    monkeypatch.setattr(brain_collect, "packages", lambda: {"nginx": "1.0"})
+    monkeypatch.setattr(brain_collect, "services", lambda: None)
+    monkeypatch.setattr(brain_collect, "ports", lambda: {})
+    monkeypatch.setattr(brain_collect, "users", lambda: {"alice": "uid 1000, /bin/bash"})
+    found = brain_collect.inventory(1000.0)
+    assert found["errors"] == ["services"] and "services" not in found["data"]
+    assert found["data"]["packages"] == {"nginx": "1.0"} and found["data"]["ports"] == {}
+    assert brain_collect.inventory(2000.0)["digest"] == found["digest"]
+
+
+def test_the_central_reads_its_own_machine_when_set_to_local(client, monkeypatch):
+    c, store = client
+    machine = c.post("/api/objects/machine", json={"name": "central", "kind": "local"}).json()["id"]
+    assert c.post("/api/brain/%s/config" % machine, json={"enabled": True, "mode": "local"}).status_code == 200
+    now = time.time()
+    monkeypatch.setattr(brain_collect, "inventory", lambda moment: inventory(moment, packages={"nginx": "1.0"}))
+    seen = []
+
+    def activity(cursor):
+        seen.append(cursor)
+        return [command(len(seen), now, "ls")], "cursor-%d" % len(seen)
+
+    monkeypatch.setattr(brain_collect, "read_activity", activity)
+    brain = c.app.state.brain
+    brain.tick(now)
+    brain.tick(now + 1)  # not due yet
+    brain.tick(now + 61)
+    assert seen == ["", "cursor-1"]
+    status = next(m for m in c.get("/api/brain").json()["machines"] if m["machine_id"] == machine)
+    assert status["commands_total"] == 2 and status["counts"]["packages"] == 1 and status["error"] == ""
+
+    def broken(cursor):
+        raise OSError("Cannot read the journal")
+
+    monkeypatch.setattr(brain_collect, "read_activity", broken)
+    brain.tick(now + 200)
+    assert "Cannot read the journal" in store.meta("brain_error:" + machine)
+
+
+def test_the_hook_is_installed_once_and_removed_cleanly(tmp_path):
+    (tmp_path / "etc/profile.d").mkdir(parents=True)
+    bashrc = tmp_path / "etc/bash.bashrc"
+    bashrc.write_text("# system bashrc\nalias ll='ls -l'")
+    install_hook(tmp_path)
+    install_hook(tmp_path)
+    assert bashrc.read_text().count(MARK) == 1 and bashrc.read_text().startswith("# system bashrc\nalias ll='ls -l'\n")
+    assert (tmp_path / "etc/logsentinel-activity.sh").read_text() == brain_collect.ACTIVITY_HOOK
+    assert MARK in (tmp_path / "etc/profile.d/logsentinel-activity.sh").read_text()
+    assert not (tmp_path / "etc/zsh").exists()  # nothing invented for a shell that is not there
+    remove_hook(tmp_path)
+    assert bashrc.read_text() == "# system bashrc\nalias ll='ls -l'\n"
+    assert not (tmp_path / "etc/logsentinel-activity.sh").exists()
+    assert remove_hook(tmp_path) == ["Nothing to remove"]
+
+
+def test_recorded_commands_never_enter_the_log_capture(client):
+    """The hook writes to the journal the log sources also read; those entries
+    belong to the brain alone."""
+    from logsentinel.collectors.journald import JournaldCollector
+    from logsentinel.config import JournaldSourceConfig
+
+    c, store = client
+    machine, source = machine_source(c)
+    token = c.post("/api/sources/%s/token" % source).json()["token"]
+    typed = json.dumps({"MESSAGE": "mysql -psecretword", "SYSLOG_IDENTIFIER": "logsentinel-activity", "__CURSOR": "c1", "__REALTIME_TIMESTAMP": "1700000000000000"})
+    logged = json.dumps({"MESSAGE": "Started nginx", "SYSLOG_IDENTIFIER": "systemd", "__CURSOR": "c2", "__REALTIME_TIMESTAMP": "1700000001000000"})
+    parse = JournaldCollector(JournaldSourceConfig())._parse_json_line
+    assert parse(typed) is None and parse(logged).message == "Started nginx"
+    # An older sender still forwards them: acknowledged so it moves on, not stored.
+    answer = c.post(
+        "/ingest/" + source,
+        json={"format": "journal", "events": [{"id": "a", "raw": typed}, {"id": "b", "raw": logged}]},
+        headers={"Authorization": "Bearer " + token},
+    )
+    assert answer.status_code == 200, answer.text
+    assert answer.json()["acknowledged"] == ["a", "b"] and answer.json()["accepted"] == 1
+    assert [e["message"] for e in store.events(source_id=source)] == ["Started nginx"]
+    only = c.post(
+        "/ingest/" + source,
+        json={"format": "journal", "events": [{"id": "c", "raw": typed}]},
+        headers={"Authorization": "Bearer " + token},
+    )
+    assert only.status_code == 200 and only.json()["accepted"] == 0
+    assert len(store.events(source_id=source)) == 1
+
+
+@pytest.mark.asyncio
+async def test_the_remote_sender_delivers_through_its_spool_and_survives_a_lost_answer(tmp_path, monkeypatch):
+    import httpx
+    from logsentinel.portal.app import create_app
+    from logsentinel.portal.brain_data import BrainConfig
+    from logsentinel.portal.brain_forward import forward_brain
+    from logsentinel.portal.models import Machine
+    from logsentinel.portal.store import Store
+
+    app = create_app(tmp_path / "central", background=False)
+    store, brain = app.state.store, app.state.brain
+    machine = store.put("machine", Machine(name="Remote").model_dump())
+    brain.data.configure(machine, BrainConfig(enabled=True))
+    store.set_meta("brain_token:" + machine, hashlib.sha256(b"synthetic").hexdigest())
+    now = time.time()
+    # A real host has thousands of packages: the inventory must fit the spool and the request.
+    big = {"package-%05d" % n: "1.%d-synthetic" % n for n in range(6000)}
+    monkeypatch.setattr(brain_collect, "inventory", lambda moment: inventory(moment, packages=big))
+    reads = []
+
+    def activity(cursor):
+        reads.append(cursor)
+        return ([command("r%d" % len(reads), now - 5, "make test")], "cursor-%d" % len(reads))
+
+    monkeypatch.setattr(brain_collect, "read_activity", activity)
+    original = httpx.AsyncClient
+    transport = httpx.ASGITransport(app=app)
+
+    class LostAnswer(httpx.AsyncBaseTransport):
+        async def handle_async_request(self, request):
+            await transport.handle_async_request(request)
+            raise httpx.ReadTimeout("answer lost after commit")
+
+    def use(chosen):
+        monkeypatch.setattr(httpx, "AsyncClient", lambda **kw: original(transport=chosen, **{k: v for k, v in kw.items() if k != "transport"}))
+
+    spool = tmp_path / "spool"
+    use(LostAnswer())
+    with pytest.raises(RuntimeError, match="retained"):
+        await forward_brain("http://localhost", machine, "synthetic", spool, once=True)
+    assert len(Store(spool).events(status="pending")) == 2  # kept: the sender heard nothing
+    assert brain.data.status(machine)["commands_total"] == 1  # though the central stored it
+    use(transport)
+    await forward_brain("http://localhost", machine, "synthetic", spool, once=True)
+    assert not Store(spool).events(status="pending")
+    status = brain.data.status(machine)
+    # Redelivery stored nothing twice; the second run added its own command only.
+    assert status["commands_total"] == 2 and status["counts"]["packages"] == 6000
+    assert reads == ["", "cursor-1"]
+    assert brain.data.changes(machine) == []  # one inventory a day, not one per run
+    with pytest.raises(ValueError, match="another receiver"):
+        await forward_brain("http://localhost", "other", "synthetic", spool, once=True)
+    with pytest.raises(RuntimeError, match="retained"):
+        await forward_brain("http://localhost", machine, "wrong-token", tmp_path / "second", once=True)
+
+
+def test_a_question_reaches_the_model_redacted_and_is_billed_as_its_own_kind(remote, monkeypatch):
+    import httpx
+
+    c, store, machine, headers = remote
+    cfg = store.settings()
+    cfg.llm.provider, cfg.llm.base_url, cfg.llm.model = "openai", "http://localhost:9/v1", "synthetic"
+    store.set_meta("settings", cfg.model_dump_json())
+    send(c, machine, headers, command(1, time.time() - 60, "deploy --token=abcdefghijklmnop1234567890 shop"))
+    bodies = []
+
+    def handler(request):
+        bodies.append(request.content.decode())
+        return httpx.Response(200, json={
+            "choices": [{"message": {"content": json.dumps({"answer": "You deployed shop on A."})}}],
+            "usage": {"prompt_tokens": 50, "completion_tokens": 9},
+        })
+
+    original = httpx.AsyncClient
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kw: original(**dict(kw, transport=httpx.MockTransport(handler))))
+    answer = c.post("/api/brain/ask", json={"message": "when did I deploy shop?"})
+    assert answer.status_code == 200, answer.text
+    assert answer.json()["answer"] == "You deployed shop on A."
+    sent = bodies[-1]
+    assert "deploy --token=" in sent and "abcdefghijklmnop1234567890" not in sent
+    assert "untrusted" in sent
+    assert [u["kind"] for u in store.rows("usage", 1)] == ["brain"]

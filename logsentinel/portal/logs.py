@@ -40,6 +40,36 @@ def configure(level=logging.INFO, stream=None):
     return root
 
 
+class FailedRequestsOnly(logging.Filter):
+    """Keep uvicorn's access lines for refused or failed requests only.
+
+    Every sender request used to leave a "200 OK" line on stdout. Under systemd
+    that is the journal the portal itself reads, so each delivery produced new
+    log lines to store, review and pay the model for: on one deployment three
+    fifths of the local journal was the portal describing its own traffic. A
+    401 on reception or a 5xx is still evidence and still written."""
+
+    def filter(self, record):
+        args = record.args
+        try:
+            return int(args[4]) >= 400  # type: ignore[index]
+        except (TypeError, ValueError, IndexError, KeyError):
+            return True
+
+
+def uvicorn_log_config():
+    """uvicorn's default logging with successful access lines left out."""
+    import copy
+    from uvicorn.config import LOGGING_CONFIG
+
+    config = copy.deepcopy(LOGGING_CONFIG)
+    config.setdefault("filters", {})["failed_requests_only"] = {
+        "()": "logsentinel.portal.logs.FailedRequestsOnly"
+    }
+    config["handlers"]["access"]["filters"] = ["failed_requests_only"]
+    return config
+
+
 def once_per(key, seconds=REPEAT_SECONDS):
     """True the first time a condition is seen and then once per interval."""
     now = time.monotonic()

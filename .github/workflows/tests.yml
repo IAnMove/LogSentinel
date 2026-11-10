@@ -61,4 +61,6 @@ jobs:
       - run: python scripts/machines_resources_smoke.py
       - run: python scripts/guidance_smoke.py
       - run: python scripts/themes_smoke.py
+      - run: python scripts/brain_smoke.py
+      - run: python scripts/live_smoke.py
       - run: node scripts/omarchy_smoke.mjs
