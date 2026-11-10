@@ -23,10 +23,11 @@ async function brainView(root) {
         Object.entries({ machine, days, ...extra }).filter(([, v]) => v !== ""),
       ),
     );
-  const [overview, projects, changes] = await Promise.all([
+  const [overview, projects, changes, diary] = await Promise.all([
     api("/api/brain"),
     api("/api/brain/projects" + query({})),
     api("/api/brain/changes" + query({})),
+    api("/api/brain/notes" + query({ project: brainFilter.project, q: brainFilter.query })),
   ]);
   if (!root.isConnected) return;
   const machines = overview.machines.filter((m) => !machine || m.machine_id === machine);
@@ -196,6 +197,35 @@ async function brainView(root) {
     ),
   );
   root.append(where);
+
+  // --- agent diary -----------------------------------------------------------
+  const notes = panel(bilingual("Diario de agentes", "Agent diary"));
+  notes.append(
+    el(
+      "p",
+      bilingual(
+        "Una nota por sesión de Claude, Codex u otro agente: qué se pidió y cómo acabó. Se actualiza en cada turno, así que una sesión cortada conserva la última. Sigue los mismos filtros que las órdenes.",
+        "One note per session of Claude, Codex or another agent: what was asked and how it ended. It is updated at every turn, so a session cut short keeps its last one. It follows the same filters as the commands.",
+      ),
+    ),
+    table(
+      [
+        bilingual("Cuándo", "When"),
+        bilingual("Equipo", "Machine"),
+        bilingual("Agente", "Agent"),
+        bilingual("Proyecto o directorio", "Project or directory"),
+        bilingual("Nota", "Note"),
+      ],
+      diary.notes.map((n) => [
+        stamp(n.observed),
+        machineName(n.machine_id),
+        n.agent,
+        n.project || n.cwd,
+        n.text,
+      ]),
+    ),
+  );
+  root.append(notes);
 
   // --- activity --------------------------------------------------------------
   const activity = panel(bilingual("Órdenes ejecutadas", "Commands run"));

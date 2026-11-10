@@ -70,6 +70,7 @@ async function confirmMachineDeletion(machine) {
     telemetry_rollups: bilingual("Resúmenes de métricas", "Metric summaries"),
     brain_commands: bilingual("Órdenes recordadas", "Remembered commands"),
     brain_changes: bilingual("Cambios de inventario", "Inventory changes"),
+    brain_notes: bilingual("Notas del diario", "Diary notes"),
     destinations: bilingual(
       "Notificadores exclusivos",
       "Scoped notification channels",

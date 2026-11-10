@@ -55,6 +55,18 @@ class CommandItem(Model):
     command: str = Field(min_length=1, max_length=2000)
 
 
+class NoteItem(Model):
+    id: str = Field(min_length=1, max_length=120, pattern=r"^[A-Za-z0-9_.:-]+$")
+    kind: Literal["note"]
+    entry: str = Field(default="", max_length=120)
+    observed: float = Field(ge=0, le=10**12)
+    user: str = Field(default="", max_length=64)
+    cwd: str = Field(default="", max_length=500)
+    project: str = Field(default="", max_length=120)
+    agent: str = Field(min_length=1, max_length=40, pattern=r"^[A-Za-z0-9_.-]+$")
+    text: str = Field(min_length=1, max_length=1200)
+
+
 def like(text):
     """A LIKE pattern matching the text literally, wherever it appears."""
     escaped = text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
@@ -94,6 +106,8 @@ class BrainStore:
                 CREATE INDEX IF NOT EXISTS brain_command_time ON brain_commands(machine_id,observed);
                 CREATE INDEX IF NOT EXISTS brain_command_project ON brain_commands(project,observed);
                 CREATE INDEX IF NOT EXISTS brain_command_recent ON brain_commands(observed);
+                CREATE TABLE IF NOT EXISTS brain_notes(machine_id TEXT,id TEXT,observed REAL,user TEXT,cwd TEXT,project TEXT,agent TEXT,text TEXT,PRIMARY KEY(machine_id,id));
+                CREATE INDEX IF NOT EXISTS brain_note_time ON brain_notes(observed);
             """
             )
 
@@ -174,6 +188,38 @@ class BrainStore:
                 "INSERT OR IGNORE INTO brain_commands VALUES(?,?,?,?,?,?,?)",
                 [(machine, i.id, i.observed, i.user, i.cwd, i.project, i.command) for i in items],
             ).rowcount
+
+    def receive_notes(self, machine, items):
+        """Diary notes; a later note of the same session replaces the earlier."""
+        with self.store.connect() as db:
+            db.executemany(
+                "INSERT INTO brain_notes VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(machine_id,id) DO UPDATE SET "
+                "observed=excluded.observed,user=excluded.user,cwd=excluded.cwd,project=excluded.project,agent=excluded.agent,text=excluded.text "
+                "WHERE excluded.observed>=brain_notes.observed",
+                [(machine, i.id, i.observed, i.user, i.cwd, i.project, i.agent, i.text) for i in items],
+            )
+
+    def notes(self, machine="", project="", query="", days=30, limit=200):
+        since = time.time() - days * 86400
+        where = ["observed>=?"]
+        values: list = [since]
+        if machine:
+            where.append("machine_id=?")
+            values.append(machine)
+        if project:
+            where.append("(project=? OR (project='' AND cwd=?))")
+            values += [project, project]
+        if query:
+            where.append("(text LIKE ? ESCAPE '\\' OR cwd LIKE ? ESCAPE '\\' OR project LIKE ? ESCAPE '\\' OR agent LIKE ? ESCAPE '\\')")
+            values += [like(query)] * 4
+        with self.store.connect() as db:
+            rows = db.execute(
+                "SELECT machine_id,id,observed,user,cwd,project,agent,text FROM brain_notes WHERE "
+                + " AND ".join(where)
+                + " ORDER BY observed DESC LIMIT ?",
+                (*values, limit),
+            ).fetchall()
+        return [dict(row) for row in rows]
 
     # --- reading -------------------------------------------------------------
 
@@ -295,7 +341,7 @@ class BrainStore:
         with self.store.connect() as db:
             for machine in self.store.objects("machine"):
                 cutoff = now - self.config(machine["id"]).retention_days * 86400
-                for table in ("brain_commands", "brain_changes"):
+                for table in ("brain_commands", "brain_changes", "brain_notes"):
                     removed += db.execute(
                         f"DELETE FROM {table} WHERE machine_id=? AND observed<?",
                         (machine["id"], cutoff),

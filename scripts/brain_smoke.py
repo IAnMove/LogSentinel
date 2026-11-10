@@ -15,7 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import uvicorn
 from playwright.sync_api import sync_playwright
 from logsentinel.portal.app import create_app
-from logsentinel.portal.brain_data import BrainConfig, CommandItem, InventoryItem
+from logsentinel.portal.brain_data import BrainConfig, CommandItem, InventoryItem, NoteItem
 from logsentinel.portal.models import Machine
 
 
@@ -37,11 +37,14 @@ with tempfile.TemporaryDirectory(prefix="sentinel-brain-") as directory:
     brain.data.receive_inventory(laptop, inventory(now - 7200, packages={"nginx": "1.0", "curl": "8.0"}))
     brain.data.receive_inventory(laptop, inventory(now - 3600, packages={"nginx": "1.1", "curl": "8.0", "git": "2.4"}))
     brain.data.receive_commands(laptop, [
-        CommandItem(id="a1", kind="command", observed=now - 900, user="alice", cwd="/home/alice/shop", project="shop", command="git commit -m checkout"),
+        CommandItem(id="a1", kind="command", observed=now - 900, user="alice", cwd="/srv/alice/shop", project="shop", command="git commit -m checkout"),
         CommandItem(id="a2", kind="command", observed=now - 800, user="alice", cwd="/etc/nginx", project="", command='echo "<img src=x onerror=alert(1)>"'),
     ])
     brain.data.receive_commands(server_machine, [
         CommandItem(id="b1", kind="command", observed=now - 300, user="alice", cwd="/srv/shop", project="shop", command="make deploy"),
+    ])
+    brain.data.receive_notes(laptop, [
+        NoteItem(id="n1", kind="note", observed=now - 700, user="alice", cwd="/srv/alice/shop", project="shop", agent="claude", text="Pedido: fix checkout · Resultado: fixed and tested"),
     ])
     server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=0, log_level="error"))
     thread = threading.Thread(target=server.run, daemon=True)
@@ -77,6 +80,9 @@ with tempfile.TemporaryDirectory(prefix="sentinel-brain-") as directory:
             assert where.get_by_role("button", name="shop", exact=True).count() == 2
             assert where.get_by_role("cell", name="Laptop", exact=True).count() == 2  # shop and /etc/nginx
             assert where.get_by_role("cell", name="Build server", exact=True).count() == 1
+            diary = page.locator("section.panel").filter(has=page.get_by_role("heading", name="Agent diary", exact=True))
+            diary.get_by_role("cell", name="claude", exact=True).wait_for()
+            diary.get_by_text("Pedido: fix checkout · Resultado: fixed and tested", exact=True).wait_for()
             # A command is shown as text, never as markup.
             page.get_by_text('echo "<img src=x onerror=alert(1)>"', exact=True).wait_for()
             assert page.locator("#content img").count() == 0

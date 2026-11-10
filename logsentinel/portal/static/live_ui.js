@@ -161,10 +161,11 @@ async function machineDetailView(root) {
   }
   const machine = (S.machine || []).find((m) => m.id === scope);
   if (!machine) return;
-  const [problems, brain, projects] = await Promise.all([
+  const [problems, brain, projects, diary] = await Promise.all([
     api("/api/problems?machine_id=" + encodeURIComponent(scope) + "&limit=100"),
     api("/api/brain"),
     api("/api/brain/projects?days=30&machine=" + encodeURIComponent(scope)),
+    api("/api/brain/notes?days=30&limit=10&machine=" + encodeURIComponent(scope)),
   ]);
   if (!root.isConnected) return;
   const memory = brain.machines.find((m) => m.machine_id === scope);
@@ -253,6 +254,14 @@ async function machineDetailView(root) {
         projects.projects.slice(0, 10).map((p) => [p.label, String(p.commands), stamp(p.last)]),
       ),
     );
+    if (diary.notes.length)
+      work.append(
+        el("h3", bilingual("Diario de agentes", "Agent diary")),
+        table(
+          [bilingual("Cuándo", "When"), bilingual("Agente", "Agent"), bilingual("Proyecto", "Project"), bilingual("Nota", "Note")],
+          diary.notes.map((n) => [stamp(n.observed), n.agent, n.project || n.cwd, n.text]),
+        ),
+      );
   } else {
     work.append(
       el(

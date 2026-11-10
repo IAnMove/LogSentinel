@@ -902,6 +902,37 @@ def brain_forward_command(
     asyncio.run(forward_brain(receiver, machine_id, token, spool, inventory_interval, activity, once=once))
 
 
+@app.command(name="brain-note")
+def brain_note_command(
+    note: Optional[str] = typer.Argument(None, help="Two or three lines on what was done; read from stdin when omitted"),
+    agent: str = typer.Option("person", "--agent", help="Who writes it: claude, codex, grok, or a name. Only a label"),
+    directory: Optional[str] = typer.Option(None, "--dir", help="Where the work happened; defaults to the current directory"),
+    session: str = typer.Option("", "--session", help="Notes with the same session replace each other"),
+    from_hook: bool = typer.Option(False, "--from-hook", help="Read a Claude Code hook event from stdin and summarise its transcript"),
+) -> None:
+    """Leave a short diary note of an agent session (or your own) for the brain."""
+    import json
+    import subprocess
+    import sys
+    from logsentinel.portal.brain_collect import transcript_note, write_note
+    if from_hook:
+        # A hook must never break or delay the agent that runs it.
+        try:
+            event = json.loads(sys.stdin.read() or "{}")
+            text = transcript_note(event.get("transcript_path", ""))
+            if text:
+                write_note(text, agent, event.get("cwd") or directory or "", event.get("session_id", ""))
+        except Exception:
+            pass
+        return
+    if note is None:
+        note = sys.stdin.read()
+    try:
+        write_note(note, agent, directory or "", session)
+    except (OSError, ValueError, subprocess.SubprocessError) as exc:
+        raise typer.BadParameter(str(exc)) from None
+
+
 @app.command(name="brain-hook")
 def brain_hook_command(
     install: bool = typer.Option(False, "--install", help="Write the hook for every interactive shell on this host (needs root)"),

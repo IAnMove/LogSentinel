@@ -16,7 +16,7 @@ from pydantic import Field, ValidationError
 from logsentinel.redact import redact
 
 from .brain import SYSTEM
-from .brain_data import CATEGORIES, BrainConfig, CommandItem, InventoryItem
+from .brain_data import CATEGORIES, BrainConfig, CommandItem, InventoryItem, NoteItem
 from .models import Model
 from .store import dumps
 
@@ -77,6 +77,14 @@ def register_brain(app, brain, analyzer):
         if not 1 <= limit <= 1000 or len(q) > 200 or len(project) > 500:
             raise HTTPException(400, "Use a limit of 1–1000 and a shorter search")
         return {"commands": data.activity(machine, project, q, days, limit, before)}
+
+    @app.get("/api/brain/notes")
+    def notes(machine: str = "", project: str = "", q: str = "", days: int = 30, limit: int = 200):
+        window(days)
+        machine_exists(machine)
+        if not 1 <= limit <= 1000 or len(q) > 200 or len(project) > 500:
+            raise HTTPException(400, "Use a limit of 1–1000 and a shorter search")
+        return {"notes": data.notes(machine, project, q, days, limit)}
 
     @app.get("/api/brain/changes")
     def changes(machine: str = "", days: int = 30):
@@ -197,7 +205,7 @@ def register_brain_ingest(app, brain):
         if usage["used_bytes"] >= usage["quota_bytes"] or usage["disk_free_bytes"] < usage["reserve_bytes"]:
             raise HTTPException(507, "Storage full; retain and retry these records")
         now = time.time()
-        acknowledged, rejected, commands = [], [], []
+        acknowledged, rejected, commands, notes = [], [], [], []
         for item in items:
             if item.observed > now + 300:
                 rejected.append({"id": item.id, "reason": "future"})
@@ -206,6 +214,11 @@ def register_brain_ingest(app, brain):
             elif isinstance(item, InventoryItem):
                 data.receive_inventory(id, item)
                 acknowledged.append(item.id)
+            elif isinstance(item, NoteItem):
+                # Written on purpose by an agent or a person: kept whenever the
+                # brain is on, whether or not typed commands are recorded.
+                notes.append(item)
+                acknowledged.append(item.id)
             elif config.activity:
                 commands.append(item)
                 acknowledged.append(item.id)
@@ -213,6 +226,8 @@ def register_brain_ingest(app, brain):
                 rejected.append({"id": item.id, "reason": "activity_disabled"})
         if commands:
             data.receive_commands(id, commands)
+        if notes:
+            data.receive_notes(id, notes)
         return {"status": "durable", "acknowledged": acknowledged, "rejected": rejected}
 
     @app.post("/ingest-brain/{id}")
@@ -224,8 +239,9 @@ def register_brain_ingest(app, brain):
         if not isinstance(entries, list) or not 1 <= len(entries) <= MAX_ITEMS:
             raise HTTPException(400, "Send 1–500 items")
         try:
+            kinds: dict[str, type[Model]] = {"inventory": InventoryItem, "note": NoteItem}
             items = [
-                (InventoryItem if isinstance(e, dict) and e.get("kind") == "inventory" else CommandItem).model_validate(e)
+                kinds.get(str(e.get("kind")) if isinstance(e, dict) else "", CommandItem).model_validate(e)
                 for e in entries
             ]
         except ValidationError:

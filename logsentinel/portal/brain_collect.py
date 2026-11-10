@@ -20,6 +20,7 @@ import json
 import os
 import platform
 import pwd
+import re
 import subprocess
 import time
 from pathlib import Path
@@ -28,6 +29,8 @@ from logsentinel.collectors.journald import PRIVATE_IDENTIFIER as IDENTIFIER
 from logsentinel.redact import redact
 
 MAX_COMMAND = 2000
+MAX_NOTE = 1200
+AGENT = re.compile(r"[^A-Za-z0-9_.-]")
 MAX_PATH = 500
 # Bounds on one inventory: a host with more than this is cut, and says so.
 MAX_ITEMS = {"packages": 20000, "services": 3000, "ports": 2000, "users": 2000}
@@ -222,6 +225,93 @@ def text(value):
     return value if isinstance(value, str) else ""
 
 
+def find_project(directory):
+    """Name of the git repository a directory is in, or "" outside one."""
+    path = Path(directory)
+    try:
+        for parent in (path, *path.parents):
+            if (parent / ".git").exists():
+                return parent.name
+    except OSError:
+        pass
+    return ""
+
+
+def write_note(note, agent, directory="", session=""):
+    """Leave a diary note in the journal, where the brain's reader finds it.
+
+    Written at once and locally, so it survives whatever happens to the
+    program that wrote it; delivery to the central is the sender's business."""
+    note = " · ".join(line.strip() for line in str(note).splitlines() if line.strip())
+    if not note:
+        raise ValueError("The note is empty")
+    directory = str(directory or os.getcwd())
+    fields = dict(
+        MESSAGE=note[:MAX_NOTE],
+        SYSLOG_IDENTIFIER=IDENTIFIER,
+        PRIORITY="6",
+        LS_KIND="note",
+        LS_AGENT=AGENT.sub("", str(agent))[:40] or "agent",
+        LS_CWD=directory[:MAX_PATH],
+        LS_PROJECT=find_project(directory)[:120],
+        LS_SESSION=AGENT.sub("", str(session))[:80],
+    )
+    body = "".join(k + "=" + v.replace("\n", " ") + "\n" for k, v in fields.items())
+    done = subprocess.run(
+        ["logger", "--journald"], input=body, text=True, capture_output=True, timeout=10
+    )
+    if done.returncode:
+        raise OSError("logger could not write to the journal: " + done.stderr.strip()[:200])
+    return fields
+
+
+def transcript_note(path, limit=400):
+    """Two lines from an agent session's transcript: what was asked, how it ended.
+
+    No model is called: the first thing the person typed and the agent's last
+    answer already say it, and this must cost nothing and never fail a hook."""
+    asked = answered = ""
+    try:
+        with open(path, errors="replace") as handle:
+            for line in handle:
+                try:
+                    entry = json.loads(line)
+                except ValueError:
+                    continue
+                if not isinstance(entry, dict) or entry.get("isSidechain") or entry.get("isMeta"):
+                    continue
+                message = entry.get("message")
+                if not isinstance(message, dict):
+                    continue
+                content = message.get("content")
+                if isinstance(content, list):
+                    content = " ".join(
+                        part.get("text", "")
+                        for part in content
+                        if isinstance(part, dict) and part.get("type") == "text"
+                    )
+                if not isinstance(content, str):
+                    continue
+                content = " ".join(content.split())
+                if not content:
+                    continue
+                if entry.get("type") == "user" and not asked and not content.startswith("<"):
+                    asked = content
+                elif entry.get("type") == "assistant":
+                    answered = content
+    except OSError:
+        return ""
+    if not asked and not answered:
+        return ""
+
+    def cut(value):
+        return value if len(value) <= limit else value[: limit - 1].rstrip() + "…"
+
+    return "\n".join(
+        part for part in (asked and "Pedido: " + cut(asked), answered and "Resultado: " + cut(answered)) if part
+    )
+
+
 def activity_record(entry):
     """A journal entry written by the hook, as a redacted activity record."""
     command = text(entry.get("MESSAGE")).strip()
@@ -232,6 +322,23 @@ def activity_record(entry):
         return None
     if not command or not cursor:
         return None
+    if text(entry.get("LS_KIND")) == "note":
+        agent = AGENT.sub("", text(entry.get("LS_AGENT")))[:40] or "agent"
+        session = AGENT.sub("", text(entry.get("LS_SESSION")))[:80]
+        entry_id = hashlib.sha256(cursor.encode()).hexdigest()[:24]
+        return dict(
+            # One note per session: each later note of the same session takes
+            # the place of the last, so a session cut short still has one.
+            id="note-" + (hashlib.sha256((agent + ":" + session).encode()).hexdigest()[:24] if session else entry_id),
+            entry=entry_id,
+            kind="note",
+            observed=observed,
+            user=user_name(entry.get("_UID"))[:64],
+            cwd=text(entry.get("LS_CWD"))[:MAX_PATH],
+            project=text(entry.get("LS_PROJECT"))[:120],
+            agent=agent,
+            text=redact(command)[:MAX_NOTE],
+        )
     return dict(
         id="cmd-" + hashlib.sha256(cursor.encode()).hexdigest()[:24],
         kind="command",

@@ -55,7 +55,9 @@ async def forward_brain(
                 if records:
                     store.ingest(
                         source,
-                        [{"origin": r["id"], "message": dumps(r)} for r in records],
+                        # A session's notes share one id so the latest replaces
+                        # the rest at the central; here each is its own entry.
+                        [{"origin": r.get("entry") or r["id"], "message": dumps(r)} for r in records],
                     )
 
             def capture_blocking():

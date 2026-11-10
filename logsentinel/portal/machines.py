@@ -37,6 +37,7 @@ def deletion_preview(store, machine_id):
                 "telemetry_rollups",
                 "brain_commands",
                 "brain_changes",
+                "brain_notes",
             )
         }
     sources = {
@@ -114,6 +115,7 @@ def erase_machine(store, machine_id):
             "brain_snapshots",
             "brain_changes",
             "brain_commands",
+            "brain_notes",
         ):
             db.execute(f"DELETE FROM {table} WHERE machine_id=?", (machine_id,))
         db.execute(

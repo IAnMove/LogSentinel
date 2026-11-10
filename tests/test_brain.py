@@ -27,7 +27,7 @@ def inventory(observed, **data):
     )
 
 
-def command(n, observed, text, cwd="/home/alice/shop", project="shop", user="alice"):
+def command(n, observed, text, cwd="/srv/alice/shop", project="shop", user="alice"):
     return dict(id="cmd-%s" % n, kind="command", observed=observed, user=user, cwd=cwd, project=project, command=text)
 
 
@@ -181,8 +181,8 @@ def test_a_question_sends_only_matching_records_and_can_be_previewed(remote, mon
     now = time.time()
     send(c, machine, headers,
          inventory(now - 500, packages={"nginx": "1.1", "curl": "8.0"}),
-         command(1, now - 300, "vim deploy.yml", cwd="/home/alice/shop", project="shop"),
-         command(2, now - 200, "ssh backup.example.invalid", cwd="/home/alice", project=""))
+         command(1, now - 300, "vim deploy.yml", cwd="/srv/alice/shop", project="shop"),
+         command(2, now - 200, "ssh backup.example.invalid", cwd="/srv/alice", project=""))
     body = {"message": "what did I do with nginx and the shop deploy?", "days": 7}
     preview = c.post("/api/brain/context", json=body).json()
     payload = preview["payload"]
@@ -216,12 +216,12 @@ def test_a_journal_entry_becomes_a_redacted_record_with_the_journals_own_user(mo
     monkeypatch.setattr(brain_collect, "user_name", lambda uid: "alice" if uid == "1000" else "?")
     record = brain_collect.activity_record({
         "MESSAGE": "curl -H 'Authorization: Bearer abcdefghijklmnop123456' https://example.invalid/x --password=hunter2secret",
-        "LS_CWD": "/home/alice/shop", "LS_PROJECT": "shop", "_UID": "1000",
+        "LS_CWD": "/srv/alice/shop", "LS_PROJECT": "shop", "_UID": "1000",
         "__CURSOR": "s=1;i=2", "__REALTIME_TIMESTAMP": "1700000000000000",
         "LS_USER": "root",  # a field the writer chose is not who wrote it
     })
     assert record["user"] == "alice" and record["observed"] == 1700000000.0
-    assert record["cwd"] == "/home/alice/shop" and record["project"] == "shop"
+    assert record["cwd"] == "/srv/alice/shop" and record["project"] == "shop"
     assert "abcdefghijklmnop123456" not in record["command"] and "hunter2secret" not in record["command"]
     assert brain_collect.activity_record({"MESSAGE": "", "__CURSOR": "c", "__REALTIME_TIMESTAMP": "1"}) is None
     assert brain_collect.activity_record({"MESSAGE": "ls", "__CURSOR": "c"}) is None
@@ -420,3 +420,115 @@ def test_a_question_reaches_the_model_redacted_and_is_billed_as_its_own_kind(rem
     assert "deploy --token=" in sent and "abcdefghijklmnop1234567890" not in sent
     assert "untrusted" in sent
     assert [u["kind"] for u in store.rows("usage", 1)] == ["brain"]
+
+
+def note(n, observed, text, agent="claude", project="shop", cwd="/srv/alice/shop", entry=""):
+    return dict(id="note-%s" % n, entry=entry, kind="note", observed=observed, user="alice", cwd=cwd, project=project, agent=agent, text=text)
+
+
+def test_diary_notes_are_kept_searched_and_one_per_session(remote):
+    c, store, machine, headers = remote
+    now = time.time()
+    c.post("/api/brain/%s/config" % machine, json={"activity": False})  # notes do not depend on typed commands
+    answer = send(c, machine, headers,
+                  note("s1", now - 600, "Pedido: fix checkout · Resultado: started"),
+                  note("s2", now - 500, "Refactored the cart tests", agent="codex"))
+    assert answer.json()["acknowledged"] == ["note-s1", "note-s2"]
+    # The same session writes again at each turn: the latest stands, an older replay does not.
+    send(c, machine, headers, note("s1", now - 100, "Pedido: fix checkout · Resultado: fixed and tested"))
+    send(c, machine, headers, note("s1", now - 900, "stale"))
+    notes = c.get("/api/brain/notes").json()["notes"]
+    assert [(n["agent"], n["text"]) for n in notes] == [
+        ("claude", "Pedido: fix checkout · Resultado: fixed and tested"),
+        ("codex", "Refactored the cart tests"),
+    ]
+    assert [n["agent"] for n in c.get("/api/brain/notes", params={"q": "codex"}).json()["notes"]] == ["codex"]
+    assert len(c.get("/api/brain/notes", params={"project": "shop", "machine": machine}).json()["notes"]) == 2
+    payload = c.post("/api/brain/context", json={"message": "what happened with checkout?"}).json()["payload"]
+    assert [n["note"] for n in payload["agent_notes"]] == ["Pedido: fix checkout · Resultado: fixed and tested"]
+    assert payload["agent_notes"][0]["machine"] == "A" and payload["agent_notes"][0]["agent"] == "claude"
+    from logsentinel.portal.machines import erase_machine
+
+    erase_machine(store, machine)
+    with store.connect() as db:
+        assert db.execute("SELECT count(*) FROM brain_notes").fetchone()[0] == 0
+
+
+def test_a_note_in_the_journal_becomes_one_record_per_session(monkeypatch):
+    monkeypatch.setattr(brain_collect, "user_name", lambda uid: "alice")
+
+    def entry(cursor, session, text="did things --password=hunter2secret"):
+        return {"MESSAGE": text, "LS_KIND": "note", "LS_AGENT": "claude", "LS_SESSION": session,
+                "LS_CWD": "/srv/work/shop", "LS_PROJECT": "shop", "_UID": "1000",
+                "__CURSOR": cursor, "__REALTIME_TIMESTAMP": "1700000000000000"}
+
+    first, second, other, loose = (brain_collect.activity_record(e) for e in (
+        entry("c1", "abc"), entry("c2", "abc"), entry("c3", "xyz"), entry("c4", "")))
+    assert first["kind"] == "note" and first["agent"] == "claude" and "hunter2secret" not in first["text"]
+    assert first["id"] == second["id"] != other["id"] and first["entry"] != second["entry"]
+    assert loose["id"] == "note-" + loose["entry"]  # no session: every note stands alone
+
+
+def test_writing_a_note_uses_the_journal_with_project_and_session(tmp_path, monkeypatch):
+    (tmp_path / "shop/.git").mkdir(parents=True)
+    work = tmp_path / "shop/src"
+    work.mkdir()
+    sent = {}
+
+    def fake(arguments, **options):
+        sent.update(arguments=arguments, body=options["input"])
+
+        class Done:
+            returncode, stderr = 0, ""
+
+        return Done()
+
+    monkeypatch.setattr(brain_collect.subprocess, "run", fake)
+    brain_collect.write_note("first line\n\n second line ", "claude!", work, "sess 1")
+    fields = dict(line.split("=", 1) for line in sent["body"].splitlines())
+    assert sent["arguments"] == ["logger", "--journald"]
+    assert fields["MESSAGE"] == "first line · second line" and fields["LS_KIND"] == "note"
+    assert fields["LS_AGENT"] == "claude" and fields["LS_SESSION"] == "sess1"
+    assert fields["LS_PROJECT"] == "shop" and fields["LS_CWD"] == str(work)
+    assert fields["SYSLOG_IDENTIFIER"] == "logsentinel-activity"
+    with pytest.raises(ValueError):
+        brain_collect.write_note("  \n ", "claude")
+
+
+def test_a_transcript_is_summarised_without_a_model(tmp_path):
+    path = tmp_path / "session.jsonl"
+    lines = [
+        {"type": "user", "message": {"role": "user", "content": "<system-reminder>ignored</system-reminder>"}},
+        {"type": "user", "message": {"role": "user", "content": "Fix the checkout bug\nin the cart"}},
+        {"type": "assistant", "message": {"role": "assistant", "content": [{"type": "tool_use", "name": "Bash"}, {"type": "text", "text": "Looking."}]}},
+        {"type": "user", "message": {"role": "user", "content": [{"type": "tool_result", "content": "output"}]}},
+        {"type": "assistant", "isSidechain": True, "message": {"role": "assistant", "content": "subagent chatter"}},
+        {"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": "Fixed: the total ignored discounts. " + "x" * 600}]}},
+    ]
+    path.write_text("not json\n" + "\n".join(json.dumps(l) for l in lines))
+    text = brain_collect.transcript_note(path)
+    asked, answered = text.split("\n")
+    assert asked == "Pedido: Fix the checkout bug in the cart"
+    assert answered.startswith("Resultado: Fixed: the total ignored discounts.") and answered.endswith("…") and len(answered) < 420
+    assert brain_collect.transcript_note(tmp_path / "missing.jsonl") == ""
+    (tmp_path / "empty.jsonl").write_text("")
+    assert brain_collect.transcript_note(tmp_path / "empty.jsonl") == ""
+
+
+def test_the_hook_command_never_fails_the_agent(tmp_path, monkeypatch):
+    from typer.testing import CliRunner
+    from logsentinel.cli import app
+
+    written = []
+    monkeypatch.setattr(brain_collect, "write_note", lambda *a: written.append(a))
+    transcript = tmp_path / "t.jsonl"
+    transcript.write_text(json.dumps({"type": "user", "message": {"content": "do it"}}))
+    event = json.dumps({"transcript_path": str(transcript), "cwd": "/srv/shop", "session_id": "s-1"})
+    runner = CliRunner()
+    assert runner.invoke(app, ["brain-note", "--agent", "claude", "--from-hook"], input=event).exit_code == 0
+    assert written == [("Pedido: do it", "claude", "/srv/shop", "s-1")]
+    for broken in ("", "not json", "[]", json.dumps({"transcript_path": "/nonexistent"})):
+        assert runner.invoke(app, ["brain-note", "--from-hook"], input=broken).exit_code == 0
+    assert len(written) == 1
+    assert runner.invoke(app, ["brain-note", "--agent", "codex", "done the thing"]).exit_code == 0
+    assert written[-1][:2] == ("done the thing", "codex")
