@@ -201,6 +201,9 @@ class Outbox:
         )
         problem = "Problema" if spanish else "Problem"
         text = f"[{payload.get('severity','INFO')}] {payload.get('machine','LogSentinel')}\n{payload.get('title',title)}\n{payload.get('summary',summary)}\n{problem}: {payload.get('problem_id','test')}"
+        if payload.get("event_type") == "report":
+            # A report is its own text: no severity tag, no problem reference.
+            text = f"{payload.get('title','')}\n{payload.get('summary','')}"
         if payload.get("verification_status") in UNVERIFIED:
             text += (
                 "\nSin verificar: el modelo no pudo comprobar este hallazgo con los originales."

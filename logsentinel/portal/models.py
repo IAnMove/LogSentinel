@@ -114,6 +114,10 @@ class Settings(Model):
     health_alerts: bool = True
     health_grace_seconds: int = Field(default=30, ge=5, le=3600)
     storage_warning_percent: int = Field(default=80, ge=50, le=99)
+    # Open problems not seen for this many days are resolved; 0 keeps them open.
+    auto_resolve_days: int = Field(default=14, ge=0, le=365)
+    daily_report: bool = False
+    daily_report_hour: int = Field(default=8, ge=0, le=23)
     # Global switch for the per-machine offer above: off, and no sender is
     # told about a target build whatever its machine says.
     remote_upgrade: bool = False

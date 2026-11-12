@@ -28,6 +28,7 @@ function statusLabel(key) {
     ok: "Correcto",
     active: "Activo",
     disabled: "Desactivado",
+    ignored: "Ignorado",
     degraded: "Requiere atención",
     stale: "Sin datos recientes",
     starting: "Iniciando",

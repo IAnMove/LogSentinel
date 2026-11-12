@@ -1347,9 +1347,12 @@ async function problemList(root, short = false) {
     : await api(
         "/api/problems?machine_id=" +
           encodeURIComponent(scope) +
+          "&status=" +
+          problemStatus +
           "&offset=" +
           offset,
       );
+  if (!short) await triagePanel(root);
   if (!short)
     root.append(
       actions(
@@ -1383,6 +1386,7 @@ async function problemList(root, short = false) {
         actions(
           button(t("Ver evidencia"), () => problemDetail(p.id)),
           button(t("Ver más detalles"), () => openProblemPage(p.id)),
+          ...(short ? [] : triageActions(p)),
         ),
       ]),
     ),

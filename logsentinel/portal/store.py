@@ -128,6 +128,8 @@ class Store:
             CREATE INDEX IF NOT EXISTS jobs_ready ON jobs(machine_id,status,created);
             CREATE TABLE IF NOT EXISTS problems(id TEXT PRIMARY KEY,machine_id TEXT,fingerprint TEXT,title TEXT,severity TEXT,status TEXT,first_seen REAL,last_seen REAL,count INTEGER,data TEXT,UNIQUE(machine_id,fingerprint));
             CREATE TABLE IF NOT EXISTS appearances(problem_id TEXT,event_id TEXT,PRIMARY KEY(problem_id,event_id));
+            CREATE TABLE IF NOT EXISTS problem_keys(machine_id TEXT,key TEXT,problem_id TEXT,PRIMARY KEY(machine_id,key));
+            CREATE INDEX IF NOT EXISTS problem_keys_problem ON problem_keys(problem_id);
             CREATE INDEX IF NOT EXISTS appearances_event ON appearances(event_id,problem_id);
             CREATE TABLE IF NOT EXISTS revisions(id TEXT PRIMARY KEY,problem_id TEXT,created REAL,data TEXT);
             CREATE TABLE IF NOT EXISTS usage(id TEXT PRIMARY KEY,job_id TEXT,machine_id TEXT,source_ids TEXT,kind TEXT,created REAL,input_tokens INTEGER,output_tokens INTEGER,duration REAL,status TEXT,detail TEXT);

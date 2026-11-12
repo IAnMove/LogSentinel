@@ -9,6 +9,7 @@ import time
 from fastapi import HTTPException, Request
 from fastapi.responses import PlainTextResponse
 
+from .. import report, triage
 from ..models import Rule
 from ..research import InvestigationRequest
 from ..web_access import WEB_SERVICE
@@ -28,19 +29,70 @@ def register_problems(app, ctx):
     store, monitor, researcher = ctx.store, ctx.monitor, ctx.researcher
 
     @app.get("/api/problems")
-    def problems(machine_id: str = "", offset: int = 0, limit: int = 100):
+    def problems(machine_id: str = "", offset: int = 0, limit: int = 100, status: str = ""):
+        if status not in ("", "open", "ignored", "resolved"):
+            raise HTTPException(400, "Unknown status")
         with store.connect() as db:
-            query = "SELECT * FROM problems"
+            query = "SELECT * FROM problems WHERE 1=1"
             args: list = []
             if machine_id:
-                query += " WHERE machine_id=?"
+                query += " AND machine_id=?"
                 args.append(machine_id)
+            if status:
+                query += " AND status=?"
+                args.append(status)
             query += " ORDER BY last_seen DESC LIMIT ? OFFSET ?"
             args.extend([min(max(limit, 1), 100), max(0, offset)])
             return sanitize(
                 [dict(r) for r in db.execute(query, args)],
                 protected_secrets(store),
             )
+
+    @app.get("/api/problems/counts")
+    def problem_counts(machine_id: str = ""):
+        cfg = store.settings()
+        return dict(triage.counts(store, machine_id), auto_resolve_days=cfg.auto_resolve_days)
+
+    @app.post("/api/problems/bulk")
+    async def bulk(request: Request):
+        """Resolve, ignore or reopen several problems, or every open one of a scope."""
+        body = await request.json()
+        action, ids = body.get("action"), body.get("ids")
+        if action not in triage.ACTIONS:
+            raise HTTPException(400, "Use action resolve, ignore or reopen")
+        if ids is None and body.get("all_quiet_days") is not None:
+            days = body["all_quiet_days"]
+            if not isinstance(days, int) or not 0 <= days <= 3650:
+                raise HTTPException(400, "Use 0–3650 quiet days")
+            machine = body.get("machine_id", "")
+            with store.connect() as db:
+                ids = [
+                    r[0]
+                    for r in db.execute(
+                        "SELECT id FROM problems WHERE status='open' AND last_seen<? AND (?='' OR machine_id=?) LIMIT 1000",
+                        (time.time() - days * 86400, machine, machine),
+                    )
+                ]
+        if not isinstance(ids, list) or len(ids) > 1000:
+            raise HTTPException(400, "Send up to 1000 problem ids")
+        return {"changed": triage.set_status(store, ids, action)}
+
+    @app.post("/api/problems/{id}/ignore")
+    async def ignore(id: str, request: Request):
+        if not store.problem(id):
+            raise HTTPException(404)
+        body = await request.json()
+        return {"changed": triage.set_status(store, [id], "ignore" if body.get("ignored", True) else "reopen")}
+
+    @app.get("/api/report/daily")
+    def daily_report():
+        text, anything = report.build(store, ctx.brain, ctx.health_monitor)
+        cfg = store.settings()
+        return dict(text=text, anything=anything, enabled=cfg.daily_report, hour=cfg.daily_report_hour, last_sent=store.meta("daily_report_sent") or "")
+
+    @app.post("/api/report/daily/send")
+    async def send_daily_report():
+        return {"results": await report.send(store, ctx.brain, ctx.outbox, ctx.health_monitor)}
 
     @app.get("/api/problems/{id}")
     def problem(id: str):

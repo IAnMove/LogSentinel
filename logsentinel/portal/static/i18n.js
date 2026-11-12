@@ -8,6 +8,7 @@ const translations = {
   "Eventos de evidencia": "Evidence events",
   "Salud del observador": "Observer health",
   Cerebro: "Brain",
+  Ignorado: "Ignored",
   "En vivo": "Live",
   "Ficha del equipo": "Machine page",
   "Plazo sin señal del emisor remoto (segundos, 0 desactiva)":

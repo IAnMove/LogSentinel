@@ -63,4 +63,5 @@ jobs:
       - run: python scripts/themes_smoke.py
       - run: python scripts/brain_smoke.py
       - run: python scripts/live_smoke.py
+      - run: python scripts/triage_smoke.py
       - run: node scripts/omarchy_smoke.mjs

@@ -11,6 +11,8 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from . import report as daily_report
+from . import triage
 from .brain_api import register_brain
 from .disk_info import register_disk_info
 from .enroll import register_enrollment
@@ -51,6 +53,9 @@ def create_app(directory, background=True):
         while True:
             try:
                 await asyncio.to_thread(brain.tick)
+                await asyncio.to_thread(triage.tick, store)
+                if daily_report.due(store):
+                    await daily_report.send(store, brain, outbox, health_monitor, scheduled=True)
             except asyncio.CancelledError:
                 raise
             except Exception as exc:

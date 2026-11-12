@@ -68,6 +68,8 @@ def safe_error(exc, secrets=()):
     return redact(str(exc) or type(exc).__name__, secrets)[:500]
 
 
+from .triage import key_hashes, matching_problem, remember  # noqa: E402
+
 class ReviewClient:
     def __init__(self, store):
         self.store = store
@@ -491,7 +493,20 @@ class Analyzer:
                 "SELECT * FROM problems WHERE machine_id=? AND fingerprint=?",
                 (machine, fp),
             ).fetchone()
+            hashes = key_hashes(keys) if fingerprint is None and not detector else []
+            if not old and hashes:
+                # The same fault seen with a slightly different set of lines is
+                # the same problem, not a new one to read and be notified of.
+                old = matching_problem(db, machine, hashes)
+                if old:
+                    fp = old["fingerprint"]
             id = old["id"] if old else uid()
+            if old and old["status"] == "ignored":
+                # Ignored means "I know, and it does not matter": it keeps its
+                # count and evidence, and stays quiet however often it recurs.
+                status = "ignored"
+                notify = False
+                notification_reason = "ignored_by_operator"
             if (
                 old
                 and old["status"] == "resolved"
@@ -541,6 +556,7 @@ class Analyzer:
                 "INSERT INTO revisions VALUES(?,?,?,?)",
                 (uid(), id, now, dumps(finding)),
             )
+            remember(db, machine, hashes, id)
             if rejection_source:
                 db.execute(
                     "INSERT OR REPLACE INTO notification_subjects VALUES(?,?,?)",

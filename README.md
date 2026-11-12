@@ -50,6 +50,7 @@ Los servidores LLM fuera de loopback requieren activar la autorización de enví
 - Volumen original/comprimido, cobertura y tokens por máquina; atribución estimada por fuente cuando se comparten llamadas. El uso no reportado se muestra como desconocido.
 - Registros de acceso de Apache y nginx (formato común y combinado): cada petición se guarda con su hora, cliente, ruta y estado, y seis detectores buscan errores 5xx, intentos masivos de login, secretos servidos, sondeos, escaneo de rutas y cargas de ataque. Ver `OPERACION.md`.
 - Backup coherente y restauración en un directorio nuevo.
+- **Triaje.** Un hallazgo cuyas líneas coinciden en al menos la mitad con las de un problema existente se une a él en lugar de crear otro. **Ignorar** deja un problema contando sus apariciones sin volver a avisar ni figurar entre los abiertos; **Resolver** lo cierra y se reabre si vuelve. Los abiertos que llevan 14 días sin repetirse se resuelven solos (ajustable, 0 lo desactiva). **Resumen diario** opcional: un mensaje al día a los destinos generales con problemas, comprobaciones fallando, en qué se trabajó, cambios en lo instalado y notas de agentes, compuesto sin modelo.
 - **Ficha del equipo** y **En vivo**: todo lo de una máquina en una pantalla (fuentes y su estado, recursos, problemas abiertos, actividad) y los logs según llegan, de un equipo o de todos. Ver logs aquí no usa tokens.
 - **Cerebro**: inventario diario de cada equipo con sus cambios, y registro opcional de las órdenes de shell para saber en qué equipo y proyecto se trabajó. Ver [Cerebro](#cerebro).
 - Asistente de inicio, selector español/inglés persistente y ayuda LLM disponible desde cualquier pantalla. La ayuda de configuración no recibe logs ni credenciales; el asistente de logs usa una muestra reciente de la máquina seleccionada.
@@ -148,7 +149,7 @@ Los recorridos de interfaz usan un navegador real y un modelo simulado, sin avis
 ```bash
 .venv/bin/python -m pip install -c constraints-tested-py312.txt playwright
 .venv/bin/python -m playwright install chromium
-for s in portal setup problem metrics providers capacity review_state chat machines_resources guidance themes brain live; do
+for s in portal setup problem metrics providers capacity review_state chat machines_resources guidance themes brain live triage; do
   .venv/bin/python scripts/${s}_smoke.py
 done
 node scripts/omarchy_smoke.mjs
