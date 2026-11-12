@@ -82,11 +82,10 @@ Memoria de cada equipo, separada de la revisión de logs:
 En el equipo central basta con activarlo en **Cerebro**. En otro equipo, genera allí su token y arranca el emisor con el mismo receptor que usa su emisor de logs:
 
 ```bash
-LOGSENTINEL_BRAIN_TOKEN=... logsentinel brain-forward --receiver https://CENTRAL:8767 --machine-id ID
-sudo logsentinel brain-hook --install    # opcional: registrar las órdenes; --remove lo quita
+sudo LOGSENTINEL_BRAIN_TOKEN=... logsentinel brain-install --receiver https://CENTRAL:8767 --machine-id ID --hook
 ```
 
-La cuenta del emisor necesita el grupo `systemd-journal` para leer las órdenes. Registrar lo que se teclea en un equipo que usan otras personas requiere avisarles y, en una empresa, revisarlo con quien lleve protección de datos. Por defecto se conserva un año por equipo; se ajusta en la misma vista.
+`brain-install` crea la cuenta sin login `ls-brain`, una cola propia, guarda el token solo para root y deja el servicio `logsentinel-brain` activo y confinado como el emisor de logs; reutiliza el certificado del central que ya tenga el emisor de logs del equipo. `--hook` añade el registro de órdenes (se puede poner o quitar después con `logsentinel brain-hook`), y `--remove` lo retira todo. Para probar sin instalar nada: `logsentinel brain-forward … --once`. Salud avisa si un equipo tiene el cerebro activado y no llega ningún inventario. Registrar lo que se teclea en un equipo que usan otras personas requiere avisarles y, en una empresa, revisarlo con quien lleve protección de datos. Por defecto se conserva un año por equipo; se ajusta en la misma vista.
 
 ## Enviar desde otro equipo
 

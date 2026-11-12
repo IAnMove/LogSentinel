@@ -902,6 +902,37 @@ def brain_forward_command(
     asyncio.run(forward_brain(receiver, machine_id, token, spool, inventory_interval, activity, once=once))
 
 
+@app.command(name="brain-install")
+def brain_install_command(
+    receiver: Optional[str] = typer.Option(None, "--receiver", help="Reception address this machine reaches, e.g. https://central.lan:8767"),
+    machine_id: Optional[str] = typer.Option(None, "--machine-id"),
+    token_file: Optional[str] = typer.Option(None, "--token-file", help="File holding the brain token; otherwise LOGSENTINEL_BRAIN_TOKEN"),
+    ca_file: Optional[str] = typer.Option(None, "--ca-file", help="Certificate authority of the central; defaults to the one the log sender here already uses"),
+    activity: bool = typer.Option(True, "--activity/--no-activity", help="Also send recorded shell commands and diary notes"),
+    hook: bool = typer.Option(False, "--hook", help="Also install the shell hook that records interactive commands"),
+    remove: bool = typer.Option(False, "--remove", help="Stop and remove the brain sender and the hook"),
+    purge: bool = typer.Option(False, "--purge", help="With --remove: also delete the spool and the account"),
+) -> None:
+    """Install the brain sender as a service on this machine (run as root)."""
+    from logsentinel.portal import brain_install
+    try:
+        if remove:
+            lines = brain_install.remove(purge=purge)
+        else:
+            if not receiver or not machine_id:
+                raise typer.BadParameter("Give --receiver and --machine-id")
+            token = (
+                Path(token_file).expanduser().read_text().strip()
+                if token_file
+                else os.environ.get("LOGSENTINEL_BRAIN_TOKEN", "")
+            )
+            lines = brain_install.install(receiver, machine_id, token, ca_file, activity, hook)
+    except (OSError, ValueError) as exc:
+        raise typer.BadParameter(str(exc)) from None
+    for line in lines:
+        console.print(line, markup=False)
+
+
 @app.command(name="brain-note")
 def brain_note_command(
     note: Optional[str] = typer.Argument(None, help="Two or three lines on what was done; read from stdin when omitted"),

@@ -532,3 +532,94 @@ def test_the_hook_command_never_fails_the_agent(tmp_path, monkeypatch):
     assert len(written) == 1
     assert runner.invoke(app, ["brain-note", "--agent", "codex", "done the thing"]).exit_code == 0
     assert written[-1][:2] == ("done the thing", "codex")
+
+
+def test_the_installer_sets_up_a_confined_service_and_removes_it(tmp_path):
+    from logsentinel.portal import brain_install
+
+    ran = []
+    accounts = set()
+
+    def run(arguments):
+        ran.append(arguments)
+        if arguments[0] == "id" and arguments[1] not in accounts:
+            raise OSError("no such user")
+        if arguments[0] == "useradd":
+            accounts.add(arguments[-1])
+        return ""
+
+    sender = tmp_path / "var/lib/logsentinel-client/logs"
+    sender.mkdir(parents=True)
+    (sender / "receiver-ca.pem").write_text("synthetic authority")
+    (tmp_path / "etc").mkdir()
+    (tmp_path / "etc/bash.bashrc").write_text("# bashrc\n")
+    runtime = tmp_path / "opt/logsentinel-client/runtime-abc/bin/python"
+    token = "t" * 43
+    done = brain_install.install(
+        "https://127.0.0.1:18767", "0123abcd", token, hook=True, root=tmp_path, run=run, executable=runtime
+    )
+    unit = (tmp_path / "etc/systemd/system/logsentinel-brain.service").read_text()
+    assert "User=ls-brain" in unit and "SupplementaryGroups=systemd-journal" in unit
+    assert "ProtectSystem=strict" in unit and "CapabilityBoundingSet=\n" in unit
+    assert "brain-forward --receiver https://127.0.0.1:18767 --machine-id 0123abcd" in unit
+    # A client runtime moves with every upgrade: the unit finds the newest when it starts.
+    assert "ls -1dt " + str(tmp_path / "opt/logsentinel-client") + "/runtime-*/" in unit
+    assert token not in unit  # the token is not in a world-readable file
+    env = tmp_path / "etc/logsentinel-clients/brain.env"
+    assert env.read_text() == "LOGSENTINEL_BRAIN_TOKEN=" + token + "\n" and env.stat().st_mode & 0o777 == 0o600
+    spool = tmp_path / "var/lib/logsentinel-client/brain"
+    assert (spool / "receiver-ca.pem").read_text() == "synthetic authority" and spool.stat().st_mode & 0o777 == 0o700
+    assert ["useradd", "--system", "--no-create-home", "--shell", "/usr/sbin/nologin", "ls-brain"] in ran
+    assert ran[-2:] == [["systemctl", "enable", "logsentinel-brain.service"], ["systemctl", "restart", "logsentinel-brain.service"]]
+    assert (tmp_path / "etc/logsentinel-activity.sh").exists() and any("ls-brain" in line for line in done)
+    # Again: the account is not created twice and the token can be replaced.
+    ran.clear()
+    brain_install.install("https://127.0.0.1:18767", "0123abcd", "u" * 43, root=tmp_path, run=run, executable=runtime, activity=False)
+    assert not any(a[0] == "useradd" for a in ran) and "u" * 43 in env.read_text()
+    assert "--no-activity" in (tmp_path / "etc/systemd/system/logsentinel-brain.service").read_text()
+    # Outside a client runtime the program next to the interpreter is named as it is.
+    assert brain_install.launcher(tmp_path, tmp_path / "srv/venv/bin/python") == str(tmp_path / "srv/venv/bin/logsentinel")
+    brain_install.remove(tmp_path, run, purge=True)
+    assert not env.exists() and not spool.exists() and not (tmp_path / "etc/logsentinel-activity.sh").exists()
+    assert (tmp_path / "etc/bash.bashrc").read_text() == "# bashrc\n"
+    assert brain_install.remove(tmp_path, lambda a: (_ for _ in ()).throw(OSError("gone"))) == ["Nothing to remove"]
+
+
+@pytest.mark.parametrize("receiver,machine,token", [
+    ("http://central:8767", "abc", "t" * 43),
+    ("https://central:8767; rm -rf /", "abc", "t" * 43),
+    ("https://central:8767", "abc def", "t" * 43),
+    ("https://central:8767", "abc", "short"),
+])
+def test_the_installer_refuses_what_would_not_be_safe_in_a_unit(tmp_path, receiver, machine, token):
+    from logsentinel.portal import brain_install
+
+    with pytest.raises(ValueError):
+        brain_install.install(receiver, machine, token, root=tmp_path, run=lambda a: "")
+    assert not (tmp_path / "etc").exists()
+
+
+def test_a_brain_enabled_with_nothing_reporting_is_noticed(remote, monkeypatch):
+    from logsentinel.portal.health import NEVER_CONNECTED_SECONDS
+
+    c, store, machine, headers = remote
+    health = c.app.state.health
+    clock = [time.time()]
+    monkeypatch.setattr(time, "time", lambda: clock[0])
+
+    def bad():
+        return next(k for k in health.conditions() if k["key"] == "brain:" + machine)["bad"]
+
+    assert not bad()
+    clock[0] += NEVER_CONNECTED_SECONDS + 1
+    assert bad()  # enabled an hour ago, never a report
+    send(c, machine, headers, inventory(clock[0] - 5, packages={"a": "1"}))
+    assert not bad()
+    clock[0] += 86400 * 2
+    assert not bad()  # one missed inventory is not silence yet
+    clock[0] += 86400
+    assert bad()
+    from logsentinel.portal.brain_data import BrainConfig
+
+    c.app.state.brain.data.configure(machine, BrainConfig(enabled=False))  # the session aged with the clock
+    assert not any(k["key"] == "brain:" + machine for k in health.conditions())

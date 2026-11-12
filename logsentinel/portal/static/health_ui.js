@@ -74,6 +74,10 @@ async function healthView(root) {
             "Silencio tras ofrecer una actualización",
             "Silence after an upgrade offer",
           ),
+          "Machine memory reports stopped": bilingual(
+            "Informes del cerebro",
+            "Machine memory reports",
+          ),
           "Sender has never connected": bilingual(
             "Emisor nunca conectado",
             "Sender never connected",

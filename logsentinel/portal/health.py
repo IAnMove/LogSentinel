@@ -23,6 +23,8 @@ ANALYSIS_OFF_SECONDS = 24 * 3600
 # A condition that stays bad is announced again this often: one message weeks
 # ago is not supervision.
 REMINDER_SECONDS = 24 * 3600
+# An inventory is due every interval; this many missed in a row is silence.
+BRAIN_SILENCE_FACTOR = 2.5
 
 
 def version_key(text):
@@ -190,6 +192,38 @@ class HealthMonitor:
                     ),
                     "MEDIUM",
                 )
+        for machine in machines:
+            id = machine["id"]
+            brain = self.store.get("brain_config", "brain:" + id) or {}
+            key = "brain:" + id
+            if not brain.get("enabled") or brain.get("mode", "remote") != "remote":
+                self.store.set_meta("health_since:" + key, str(now))
+                continue
+            since = float(self.store.meta("health_since:" + key) or now)
+            self.store.set_meta("health_since:" + key, str(since))
+            try:
+                seen = json.loads(self.store.meta("brain_seen:" + id) or "{}")
+            except ValueError:
+                seen = {}
+            limit = BRAIN_SILENCE_FACTOR * int(brain.get("inventory_interval_seconds", 86400))
+            last = seen.get("received")
+            # Enabled here but nothing installed there looks exactly like a
+            # machine with nothing to report, unless somebody says so.
+            add(
+                key,
+                id,
+                (not last and now - since > NEVER_CONNECTED_SECONDS)
+                or (bool(last) and now - max(last, since) > limit),
+                "Machine memory reports stopped",
+                dict(
+                    last_inventory=last,
+                    enabled_since=since,
+                    timeout_seconds=limit,
+                    meaning="The brain is enabled for this machine but no inventory arrives. Install or restart its brain sender (logsentinel brain-install), or turn the brain off for it",
+                ),
+                "MEDIUM",
+                liveness=False,
+            )
         # Pausing the analysis is a legitimate choice; forgetting it paused is
         # how weeks of logs go unread with every other check green.
         configured = bool(self.store.meta("setup_completed"))
@@ -408,6 +442,7 @@ class HealthMonitor:
                 "Remote upgrade failed on a sender host": "La actualización remota falló en el equipo de un emisor",
                 "Sender silent after an upgrade offer": "Un emisor dejó de dar señal tras ofrecerle una actualización",
                 "Sender has never connected": "Un emisor no se ha conectado nunca",
+                "Machine memory reports stopped": "El cerebro de un equipo ha dejado de informar",
                 "Automatic analysis has been off for over a day": "El análisis automático lleva más de un día apagado",
             }.get(check["title"], check["title"])
             if es
